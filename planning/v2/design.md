@@ -288,6 +288,11 @@ interface AgentNodeData extends BaseNodeData {
   temperature?: number
   maxTokens?: number
   tools?: string[]  // Tool IDs enabled for this agent
+  // Multimodal settings (optional - derived from model capabilities)
+  acceptsImages?: boolean
+  acceptsAudio?: boolean
+  acceptsVideo?: boolean
+  acceptsFiles?: boolean
 }
 
 interface RouterNodeData extends BaseNodeData {
@@ -342,6 +347,51 @@ interface EdgeData {
 }
 
 type NodeStatus = 'idle' | 'active' | 'completed' | 'error'
+
+// ============================================================================
+// Multimodal Support
+// ============================================================================
+
+/** Supported input modalities (from OpenRouter SDK) */
+type InputModality = 'text' | 'image' | 'file' | 'audio' | 'video'
+
+/** Supported output modalities (from OpenRouter SDK) */
+type OutputModality = 'text' | 'image' | 'embeddings'
+
+/** Model capabilities derived from OpenRouter API */
+interface ModelCapabilities {
+  id: string
+  name: string
+  inputModalities: InputModality[]
+  outputModalities: OutputModality[]
+  contextLength: number
+  supportedParameters: string[]
+}
+
+/** Attachment for multimodal input */
+interface Attachment {
+  id: string
+  type: InputModality  // 'image' | 'file' | 'audio' | 'video'
+  name: string
+  mimeType: string
+  // One of these must be provided:
+  url?: string  // Remote URL
+  content?: string  // Base64 encoded content
+  size?: number  // File size in bytes
+}
+
+/** Message content can be text or multimodal */
+type MessageContent = 
+  | string  // Simple text
+  | MessageContentPart[]  // Multimodal array
+
+interface MessageContentPart {
+  type: 'text' | 'image_url' | 'file' | 'audio'
+  text?: string  // For type: 'text'
+  imageUrl?: { url: string; detail?: 'auto' | 'low' | 'high' }  // For type: 'image_url'
+  file?: { url: string; mimeType: string }  // For type: 'file'
+  audio?: { url: string; format?: string }  // For type: 'audio'
+}
 ```
 
 ## Adapters
@@ -352,9 +402,13 @@ Allows swapping the execution engine (e.g., Local vs. Remote).
 
 ```typescript
 interface ExecutionAdapter {
-  execute(workflow: WorkflowData, input: string, callbacks: ExecutionCallbacks): Promise<ExecutionResult>
+  execute(workflow: WorkflowData, input: ExecutionInput, callbacks: ExecutionCallbacks): Promise<ExecutionResult>
   stop(): void
   isRunning(): boolean
+  
+  // Model capability queries
+  getModelCapabilities(modelId: string): Promise<ModelCapabilities | null>
+  supportsModality(modelId: string, modality: InputModality): Promise<boolean>
 }
 
 interface ExecutionCallbacks {
@@ -401,14 +455,21 @@ interface ExecutionOptions {
 // Execution context passed to node executors
 interface ExecutionContext {
   node: WorkflowNode
-  input: string  // Current input (from user or previous node)
-  originalInput: string  // Original user input
+  input: string  // Current text input (from user or previous node)
+  originalInput: string  // Original user text input
+  attachments: Attachment[]  // Multimodal attachments for this execution
   history: ChatMessage[]  // Conversation history
   outputs: Record<string, string>  // Outputs from executed nodes
   nodeChain: string[]  // Ordered list of executed node IDs
   editor: WorkflowEditor
   client: OpenRouter
   signal: AbortSignal  // For cancellation
+}
+
+// Execution input with multimodal support
+interface ExecutionInput {
+  text: string
+  attachments?: Attachment[]
 }
 ```
 

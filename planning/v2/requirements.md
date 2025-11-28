@@ -44,6 +44,7 @@ Goal: Deliver a lightweight, npm-installable kit (core API + Vue components) tha
 - **Inline Parameter Editing**: Edit node properties directly on the canvas or in a panel.
 - **History**: Undo/redo stack.
 - **Validation Overlays**: Visual feedback for broken links or invalid configs.
+- **Multimodal Support**: Support for multiple input modes (e.g., text, voice, vision) for node properties and workflow execution.
 
 ### 6. Execution Contract
 - **Deterministic Workflow Model**: Defined execution order (BFS/DAG traversal).
@@ -52,6 +53,12 @@ Goal: Deliver a lightweight, npm-installable kit (core API + Vue components) tha
   - **Native SDK Usage**: The reference executor MUST use `@openrouter/sdk`.
   - **Tool Passthrough**: Developers can pass their own tools to the executor in the standard SDK format.
   - **Model Passthrough**: Models are passed/configured using the SDK's schema.
+- **Multimodal Support**:
+  - **Input Modalities**: Support for text, image, file, audio, and video inputs (model-dependent).
+  - **Model Capability Detection**: Query model's `inputModalities` array to determine accepted attachments.
+  - **Attachment Handling**: Support both URL and base64-encoded content for all modality types.
+  - **Graceful Degradation**: If model doesn't support a modality, warn user or skip attachment.
+  - **UI Integration**: File picker / drag-drop in ChatPanel for attaching files.
 - **Error Handling**:
   - **Graceful Failures**: Individual node failures should not crash the entire workflow.
   - **Retry Logic**: Configurable retry with exponential backoff for transient API errors.

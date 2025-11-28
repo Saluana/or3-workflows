@@ -23,12 +23,19 @@
 - [ ] Create `WorkflowData`, `WorkflowNode`, `WorkflowEdge` interfaces
 - [ ] Define node-specific data interfaces:
   - [ ] `StartNodeData`
-  - [ ] `AgentNodeData`
+  - [ ] `AgentNodeData` (with multimodal flags: `acceptsImages`, `acceptsAudio`, etc.)
   - [ ] `RouterNodeData` (with `RouteDefinition`, `RouteCondition`)
   - [ ] `ParallelNodeData` (with `BranchDefinition`)
   - [ ] `ToolNodeData`
 - [ ] Define `PortDefinition` interface
 - [ ] Define `Extension` and `NodeExtension` interfaces
+- [ ] **Define Multimodal Types**:
+  - [ ] `InputModality` type (`'text' | 'image' | 'file' | 'audio' | 'video'`)
+  - [ ] `OutputModality` type (`'text' | 'image' | 'embeddings'`)
+  - [ ] `Attachment` interface (id, type, name, mimeType, url/content)
+  - [ ] `MessageContentPart` interface for multimodal messages
+  - [ ] `ModelCapabilities` interface (inputModalities, outputModalities, etc.)
+  - [ ] `ExecutionInput` interface (text + attachments)
 - [ ] Create Zod schemas for runtime validation
 - [ ] Add schema version constant (`SCHEMA_VERSION = '2.0.0'`)
 
@@ -159,6 +166,13 @@
   - [ ] Streaming content display
   - [ ] Process flow indicator
   - [ ] Input with send button
+  - [ ] **Multimodal Attachment Support**:
+    - [ ] File picker button (images, PDFs, audio, etc.)
+    - [ ] Drag-and-drop file upload
+    - [ ] Attachment preview chips (thumbnail for images, icon for files)
+    - [ ] Remove attachment button
+    - [ ] Show supported modalities based on workflow's first agent model
+    - [ ] Disable/warn for unsupported file types
 - [ ] Create `<EdgeLabelEditor>` component:
   - [ ] Inline popover for editing edge labels
 - [ ] Create `<Controls>` component:
@@ -189,10 +203,21 @@
   - [ ] Dependency checking (wait for parents)
   - [ ] Cycle/iteration safety limit
 - [ ] Implement node executors:
-  - [ ] `executeStartNode` - Pass through input
-  - [ ] `executeAgentNode` - LLM call with streaming
+  - [ ] `executeStartNode` - Pass through input (including attachments)
+  - [ ] `executeAgentNode` - LLM call with streaming and multimodal support
   - [ ] `executeRouterNode` - Classification and route selection
   - [ ] `executeParallelNode` - Concurrent branch execution with merge
+- [ ] **Implement Multimodal Support**:
+  - [ ] `buildMessageContent(text, attachments)` - Convert attachments to SDK format
+  - [ ] Handle `image_url` type (URL or base64 data URI)
+  - [ ] Handle `file` type for PDFs and documents
+  - [ ] Handle `audio` type for audio inputs
+  - [ ] Validate attachments against model's `inputModalities`
+  - [ ] Skip unsupported attachments with warning callback
+- [ ] **Implement Model Capability Queries**:
+  - [ ] `getModelCapabilities(modelId)` - Fetch model info from OpenRouter
+  - [ ] `supportsModality(modelId, modality)` - Check if model accepts modality
+  - [ ] Cache model capabilities to avoid repeated API calls
 - [ ] Implement streaming support:
   - [ ] Call `onToken` callback for each chunk
   - [ ] Accumulate output

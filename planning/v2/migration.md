@@ -92,20 +92,28 @@ demo/
    - Multi-turn conversation history
    - Cancellation support
    - Retry with exponential backoff
+   - Basic image attachment support (v1 has this in executor.ts)
 
-4. **Persistence**
+4. **Multimodal Support (NEW in v2)**
+   - File picker in ChatPanel
+   - Drag-and-drop attachments
+   - Support for images, PDFs, audio, video (model-dependent)
+   - Model capability detection
+   - Attachment preview/removal
+
+5. **Persistence**
    - Save/load workflows
    - Export/import JSON
    - Autosave (30s interval)
    - localStorage backend
 
-5. **Validation**
+6. **Validation**
    - No start node check
    - Disconnected node check
    - Cycle detection
    - Warning for empty prompts
 
-6. **UI/UX**
+7. **UI/UX**
    - Dark theme
    - Mobile responsive
    - Keyboard shortcuts
