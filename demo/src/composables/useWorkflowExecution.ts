@@ -54,14 +54,13 @@ interface ExecutionContext {
   nodeChain: string[]
 }
 
-/** Result from a parallel branch execution */
+/** Result from a successful parallel branch execution */
 interface BranchResult {
   nodeId: string
   branchId?: string
   branchLabel: string
   output: string
   nextNodes: string[]
-  error?: string
 }
 
 export function useWorkflowExecution() {
@@ -322,9 +321,10 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
         isolatedNodeMap.set(child.nodeId, modifiedNode)
       }
       
-      // Create isolated context for this branch
+      // Create isolated context for this branch (deep copy mutable arrays)
       const branchContext: ExecutionContext = {
         ...context,
+        history: [...context.history],
         outputs: { ...context.outputs },
         nodeChain: [...context.nodeChain]
       }
@@ -367,7 +367,9 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
         const branchConfig = branches.find(b => b.id === childEdge?.handleId)
         const branchLabel = branchConfig?.label || childEdge?.nodeId || `Branch ${index + 1}`
         errors.push(`${branchLabel}: ${result.reason?.message || 'Unknown error'}`)
-        onNodeStatus(childEdge?.nodeId || '', 'error')
+        if (childEdge?.nodeId) {
+          onNodeStatus(childEdge.nodeId, 'error')
+        }
       }
     })
 
