@@ -366,6 +366,12 @@ const processSteps = computed(() => {
   border-top: 1px solid var(--color-border);
 }
 
+@media (max-width: 768px) {
+  .input-container {
+    padding-bottom: calc(var(--spacing-md) + env(safe-area-inset-bottom, 0px));
+  }
+}
+
 .input-wrapper {
   display: flex;
   gap: var(--spacing-sm);

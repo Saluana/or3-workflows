@@ -70,6 +70,9 @@
   --transition-fast: 150ms ease;
   --transition-normal: 250ms ease;
   --transition-slow: 350ms ease;
+
+  /* Mobile layout */
+  --mobile-nav-height: 72px;
   
   /* Z-index layers */
   --z-base: 0;
