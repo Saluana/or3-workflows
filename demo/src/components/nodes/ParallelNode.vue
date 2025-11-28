@@ -5,6 +5,13 @@ import { GitMerge, Loader2, CheckCircle2, XCircle } from 'lucide-vue-next'
 import BaseNode from './BaseNode.vue'
 import type { NodeStatus } from '@/types/workflow'
 
+export interface ParallelBranch {
+  id: string
+  label: string
+  model?: string  // Optional per-branch model override
+  prompt?: string // Optional per-branch prompt
+}
+
 // Vue Flow passes node data through these props
 const props = defineProps<{
   id: string
@@ -12,13 +19,41 @@ const props = defineProps<{
     label: string
     status?: NodeStatus
     prompt?: string  // System prompt for merging/summarizing parallel outputs
-    model?: string   // Model to use for merging
+    model?: string   // Default model for all branches and merging
+    branches?: ParallelBranch[]  // Configurable branches
   }
   selected?: boolean
 }>()
 
 const label = computed(() => props.data.label)
 const status = computed(() => props.data.status || 'idle')
+
+/** Minimum number of branches required */
+const MIN_BRANCHES = 1
+
+/** Default branches used when none are configured */
+const DEFAULT_BRANCHES = [
+  { id: 'branch-1', label: 'Branch 1' },
+  { id: 'branch-2', label: 'Branch 2' },
+  { id: 'branch-3', label: 'Branch 3' }
+]
+
+// Branches with minimum enforcement
+const branches = computed(() => {
+  const configuredBranches = props.data.branches || DEFAULT_BRANCHES
+  // Ensure at least MIN_BRANCHES branches exist
+  if (configuredBranches.length < MIN_BRANCHES) {
+    return DEFAULT_BRANCHES.slice(0, MIN_BRANCHES)
+  }
+  return configuredBranches
+})
+
+// Calculate handle positions based on number of branches
+const handlePositions = computed(() => {
+  const count = branches.value.length
+  if (count === 1) return [50]
+  return branches.value.map((_, i) => ((i + 1) / (count + 1)) * 100)
+})
 
 const StatusIcon = computed(() => {
   switch (status.value) {
@@ -50,28 +85,18 @@ const StatusIcon = computed(() => {
       </div>
       
       <div class="parallel-badge">
-        <span>Parallel</span>
+        <span>Parallel · {{ branches.length }} branches</span>
       </div>
     </div>
     
-    <!-- Multiple output handles for parallel branches -->
+    <!-- Dynamic output handles based on branches -->
     <Handle 
+      v-for="(branch, index) in branches"
+      :key="branch.id"
       type="source" 
       :position="Position.Bottom" 
-      id="out-1"
-      :style="{ left: '25%' }"
-    />
-    <Handle 
-      type="source" 
-      :position="Position.Bottom" 
-      id="out-2"
-      :style="{ left: '50%' }"
-    />
-    <Handle 
-      type="source" 
-      :position="Position.Bottom" 
-      id="out-3"
-      :style="{ left: '75%' }"
+      :id="branch.id"
+      :style="{ left: `${handlePositions[index]}%` }"
     />
   </BaseNode>
 </template>

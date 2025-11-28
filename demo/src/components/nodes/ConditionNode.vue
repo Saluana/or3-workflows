@@ -11,12 +11,41 @@ const props = defineProps<{
   data: {
     label: string
     status?: NodeStatus
+    routes?: Array<{ id: string; label: string }>
+    model?: string
+    prompt?: string
   }
   selected?: boolean
 }>()
 
 const label = computed(() => props.data.label)
 const status = computed(() => props.data.status || 'idle')
+
+/** Minimum number of routes required */
+const MIN_ROUTES = 1
+
+/** Default routes used when none are configured */
+const DEFAULT_ROUTES = [
+  { id: 'route-1', label: 'Route 1' },
+  { id: 'route-2', label: 'Route 2' }
+]
+
+// Routes with minimum enforcement
+const routes = computed(() => {
+  const configuredRoutes = props.data.routes || DEFAULT_ROUTES
+  // Ensure at least MIN_ROUTES routes exist
+  if (configuredRoutes.length < MIN_ROUTES) {
+    return DEFAULT_ROUTES.slice(0, MIN_ROUTES)
+  }
+  return configuredRoutes
+})
+
+// Calculate handle positions based on number of routes
+const handlePositions = computed(() => {
+  const count = routes.value.length
+  if (count === 1) return [50]
+  return routes.value.map((_, i) => ((i + 1) / (count + 1)) * 100)
+})
 
 const StatusIcon = computed(() => {
   switch (status.value) {
@@ -48,22 +77,18 @@ const StatusIcon = computed(() => {
       </div>
       
       <div class="condition-badge">
-        <span>Router</span>
+        <span>Router · {{ routes.length }} routes</span>
       </div>
     </div>
     
-    <!-- Multiple output handles for branching -->
+    <!-- Dynamic output handles based on routes -->
     <Handle 
+      v-for="(route, index) in routes"
+      :key="route.id"
       type="source" 
       :position="Position.Bottom" 
-      id="default"
-      :style="{ left: '30%' }"
-    />
-    <Handle 
-      type="source" 
-      :position="Position.Bottom" 
-      id="branch"
-      :style="{ left: '70%' }"
+      :id="route.id"
+      :style="{ left: `${handlePositions[index]}%` }"
     />
   </BaseNode>
 </template>

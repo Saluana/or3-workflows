@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
-import { X, Bot, Cpu, Wrench, ChevronDown, Trash2, GitMerge, GitBranch } from 'lucide-vue-next'
+import { X, Bot, Cpu, Wrench, ChevronDown, Trash2, GitMerge, GitBranch, Plus, Minus, ChevronRight, Layers } from 'lucide-vue-next'
 import type { Node } from '@vue-flow/core'
 
 const props = defineProps<{
@@ -39,13 +39,29 @@ const availableTools = [
   { id: 'database_query', name: 'Database Query', description: 'Query a database' },
 ]
 
+// Types for routes and branches
+interface Route {
+  id: string
+  label: string
+}
+
+interface Branch {
+  id: string
+  label: string
+  model?: string
+  prompt?: string
+}
+
 // Local state for editing
 const localLabel = ref('')
 const localModel = ref('')
 const localPrompt = ref('')
 const localTools = ref<string[]>([])
+const localRoutes = ref<Route[]>([])
+const localBranches = ref<Branch[]>([])
 const showModelDropdown = ref(false)
-const activeTab = ref<'prompt' | 'model' | 'tools'>('prompt')
+const activeTab = ref<'prompt' | 'model' | 'tools' | 'routes' | 'branches'>('prompt')
+const expandedBranch = ref<string | null>(null)
 
 // Sync local state with selected node
 watch(() => props.node, (node) => {
@@ -54,6 +70,23 @@ watch(() => props.node, (node) => {
     localModel.value = node.data.model || 'openai/gpt-4o-mini'
     localPrompt.value = node.data.prompt || ''
     localTools.value = node.data.tools || []
+    
+    // Load routes for router nodes
+    if (node.type === 'condition') {
+      localRoutes.value = node.data.routes || [
+        { id: 'route-1', label: 'Route 1' },
+        { id: 'route-2', label: 'Route 2' }
+      ]
+    }
+    
+    // Load branches for parallel nodes
+    if (node.type === 'parallel') {
+      localBranches.value = node.data.branches || [
+        { id: 'branch-1', label: 'Branch 1' },
+        { id: 'branch-2', label: 'Branch 2' },
+        { id: 'branch-3', label: 'Branch 3' }
+      ]
+    }
   }
 }, { immediate: true })
 
@@ -85,12 +118,90 @@ function toggleTool(toolId: string) {
 function saveChanges() {
   if (!props.node) return
   
-  emit('update', props.node.id, {
+  const data: Record<string, unknown> = {
     label: localLabel.value,
     model: localModel.value,
     prompt: localPrompt.value,
     tools: [...localTools.value],
+  }
+  
+  // Include routes for router nodes
+  if (isRouterNode.value) {
+    data.routes = [...localRoutes.value]
+  }
+  
+  // Include branches for parallel nodes
+  if (isParallelNode.value) {
+    data.branches = [...localBranches.value]
+  }
+  
+  emit('update', props.node.id, data)
+}
+
+// Route management - use sequential IDs for stability
+function addRoute() {
+  // Find the highest existing route number to avoid conflicts
+  const existingNumbers = localRoutes.value
+    .map(r => parseInt(r.id.replace('route-', '')) || 0)
+    .filter(n => !isNaN(n))
+  const nextNumber = existingNumbers.length > 0 ? Math.max(...existingNumbers) + 1 : localRoutes.value.length + 1
+  
+  const newId = `route-${nextNumber}`
+  localRoutes.value.push({ id: newId, label: `Route ${localRoutes.value.length + 1}` })
+  saveChanges()
+}
+
+function removeRoute(index: number) {
+  if (localRoutes.value.length <= 1) return // Keep at least 1 route
+  localRoutes.value.splice(index, 1)
+  saveChanges()
+}
+
+function updateRouteLabel(index: number, label: string) {
+  localRoutes.value[index].label = label
+  debouncedSave()
+}
+
+// Branch management - use sequential IDs for stability
+function addBranch() {
+  // Find the highest existing branch number to avoid conflicts
+  const existingNumbers = localBranches.value
+    .map(b => parseInt(b.id.replace('branch-', '')) || 0)
+    .filter(n => !isNaN(n))
+  const nextNumber = existingNumbers.length > 0 ? Math.max(...existingNumbers) + 1 : localBranches.value.length + 1
+  
+  const newId = `branch-${nextNumber}`
+  localBranches.value.push({ 
+    id: newId, 
+    label: `Branch ${localBranches.value.length + 1}`,
+    model: localModel.value // Default to the node's model
   })
+  saveChanges()
+}
+
+function removeBranch(index: number) {
+  if (localBranches.value.length <= 1) return // Keep at least 1 branch
+  localBranches.value.splice(index, 1)
+  saveChanges()
+}
+
+function updateBranchLabel(index: number, label: string) {
+  localBranches.value[index].label = label
+  debouncedSave()
+}
+
+function updateBranchModel(index: number, model: string) {
+  localBranches.value[index].model = model
+  saveChanges()
+}
+
+function updateBranchPrompt(index: number, prompt: string) {
+  localBranches.value[index].prompt = prompt
+  debouncedSave()
+}
+
+function toggleBranchExpand(branchId: string) {
+  expandedBranch.value = expandedBranch.value === branchId ? null : branchId
 }
 
 // Debounced save for text inputs
@@ -185,6 +296,30 @@ const canDelete = computed(() => props.node?.id !== 'start')
         <Wrench :size="14" />
         Tools
         <span v-if="localTools.length" class="tool-count">{{ localTools.length }}</span>
+      </button>
+      <button 
+        v-if="isRouterNode"
+        class="tab" 
+        role="tab"
+        :aria-selected="activeTab === 'routes'"
+        :class="{ active: activeTab === 'routes' }"
+        @click="activeTab = 'routes'"
+      >
+        <GitBranch :size="14" />
+        Routes
+        <span class="tool-count">{{ localRoutes.length }}</span>
+      </button>
+      <button 
+        v-if="isParallelNode"
+        class="tab" 
+        role="tab"
+        :aria-selected="activeTab === 'branches'"
+        :class="{ active: activeTab === 'branches' }"
+        @click="activeTab = 'branches'"
+      >
+        <Layers :size="14" />
+        Branches
+        <span class="tool-count">{{ localBranches.length }}</span>
       </button>
     </div>
     
@@ -290,6 +425,121 @@ const canDelete = computed(() => props.node?.id !== 'start')
                 <X :size="12" />
               </button>
             </span>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Routes Tab (Router nodes) -->
+      <div v-if="activeTab === 'routes'" class="routes-tab">
+        <div class="routes-header">
+          <label class="field-label">Routes ({{ localRoutes.length }})</label>
+          <button class="btn btn-sm btn-ghost" @click="addRoute">
+            <Plus :size="14" />
+            Add Route
+          </button>
+        </div>
+        <p class="field-hint">
+          Each route creates an output handle. Connect agents to each route.
+        </p>
+        
+        <div class="routes-list">
+          <div 
+            v-for="(route, index) in localRoutes" 
+            :key="route.id"
+            class="route-item"
+          >
+            <span class="route-number">{{ index + 1 }}</span>
+            <input
+              type="text"
+              :value="route.label"
+              class="route-input"
+              placeholder="Route name"
+              @input="updateRouteLabel(index, ($event.target as HTMLInputElement).value)"
+            />
+            <button 
+              class="btn btn-ghost btn-icon"
+              :disabled="localRoutes.length <= 1"
+              @click="removeRoute(index)"
+            >
+              <Minus :size="14" />
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Branches Tab (Parallel nodes) -->
+      <div v-if="activeTab === 'branches'" class="branches-tab">
+        <div class="branches-header">
+          <label class="field-label">Branches ({{ localBranches.length }})</label>
+          <button class="btn btn-sm btn-ghost" @click="addBranch">
+            <Plus :size="14" />
+            Add Branch
+          </button>
+        </div>
+        <p class="field-hint">
+          Each branch runs in parallel. You can set a different model for each branch.
+        </p>
+        
+        <div class="branches-list">
+          <div 
+            v-for="(branch, index) in localBranches" 
+            :key="branch.id"
+            class="branch-item"
+          >
+            <div class="branch-header" @click="toggleBranchExpand(branch.id)">
+              <ChevronRight 
+                :size="14" 
+                class="expand-icon"
+                :class="{ expanded: expandedBranch === branch.id }"
+              />
+              <span class="branch-number">{{ index + 1 }}</span>
+              <input
+                type="text"
+                :value="branch.label"
+                class="branch-input"
+                placeholder="Branch name"
+                @click.stop
+                @input="updateBranchLabel(index, ($event.target as HTMLInputElement).value)"
+              />
+              <button 
+                class="btn btn-ghost btn-icon"
+                :disabled="localBranches.length <= 1"
+                @click.stop="removeBranch(index)"
+              >
+                <Minus :size="14" />
+              </button>
+            </div>
+            
+            <div v-if="expandedBranch === branch.id" class="branch-details">
+              <div class="branch-field">
+                <label class="field-label">Model for this branch</label>
+                <select 
+                  :value="branch.model || localModel"
+                  class="branch-model-select"
+                  @change="updateBranchModel(index, ($event.target as HTMLSelectElement).value)"
+                >
+                  <option value="">Use default ({{ selectedModelInfo?.name || 'GPT-4o Mini' }})</option>
+                  <option 
+                    v-for="model in availableModels" 
+                    :key="model.id" 
+                    :value="model.id"
+                  >
+                    {{ model.name }} ({{ model.provider }})
+                  </option>
+                </select>
+              </div>
+              
+              <div class="branch-field">
+                <label class="field-label">Branch-specific prompt (optional)</label>
+                <textarea
+                  :value="branch.prompt || ''"
+                  class="branch-prompt-textarea"
+                  placeholder="Override the connected agent's prompt for this branch..."
+                  @input="updateBranchPrompt(index, ($event.target as HTMLTextAreaElement).value)"
+                />
+                <p class="field-hint">If set, this overrides the prompt of the connected agent for this branch only.</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -676,5 +926,179 @@ const canDelete = computed(() => props.node?.id !== 'start')
   padding: var(--spacing-lg);
   text-align: center;
   color: var(--color-text-muted);
+}
+
+/* Routes Tab */
+.routes-tab,
+.branches-tab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.routes-header,
+.branches-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.routes-header .btn,
+.branches-header .btn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: 12px;
+}
+
+.routes-list,
+.branches-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.route-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.route-number,
+.branch-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: var(--color-warning-muted);
+  color: var(--color-warning);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.route-input,
+.branch-input {
+  flex: 1;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: 13px;
+}
+
+.route-input:focus,
+.branch-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.btn-icon {
+  padding: var(--spacing-xs);
+}
+
+.btn-icon:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Branches Tab */
+.branch-item {
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.branch-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  cursor: pointer;
+}
+
+.branch-header:hover {
+  background: var(--color-bg-elevated);
+}
+
+.expand-icon {
+  color: var(--color-text-muted);
+  transition: transform var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.expand-icon.expanded {
+  transform: rotate(90deg);
+}
+
+.branch-number {
+  background: var(--color-info-muted);
+  color: var(--color-info);
+}
+
+.branch-details {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-bg-primary);
+  border-top: 1px solid var(--color-border);
+}
+
+.branch-details .field-label {
+  margin-bottom: var(--spacing-xs);
+}
+
+.branch-model-select {
+  width: 100%;
+  padding: var(--spacing-sm);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.branch-model-select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.branch-field {
+  margin-bottom: var(--spacing-md);
+}
+
+.branch-field:last-child {
+  margin-bottom: 0;
+}
+
+.branch-prompt-textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: var(--spacing-sm);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-family: var(--font-sans);
+  resize: vertical;
+}
+
+.branch-prompt-textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.branch-details .field-hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: var(--spacing-xs);
 }
 </style>

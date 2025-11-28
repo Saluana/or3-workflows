@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, markRaw } from 'vue'
+import { ref, watch, markRaw, onMounted, onUnmounted } from 'vue'
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -12,6 +12,8 @@ import ParallelNode from './nodes/ParallelNode.vue'
 import NodePalette from './NodePalette.vue'
 import EdgeLabelEditor from './EdgeLabelEditor.vue'
 
+import { useUndoRedo } from '@/composables/useUndoRedo'
+import { useWorkflowStorage } from '@/composables/useWorkflowStorage'
 import type { NodeStatus } from '@/types/workflow'
 
 // Define custom node types
@@ -32,10 +34,17 @@ const emit = defineEmits<{
   (e: 'edgesChange', edges: Edge[]): void
   (e: 'nodeClick', node: Node): void
   (e: 'nodeDelete', nodeId: string): void
+  (e: 'change'): void
 }>()
 
 // Use Vue Flow composable for viewport access
-const { screenToFlowCoordinate } = useVueFlow()
+const { screenToFlowCoordinate, fitView, zoomIn, zoomOut } = useVueFlow()
+
+// Undo/Redo
+const { canUndo, canRedo, pushState, initialize: initHistory, undo, redo } = useUndoRedo()
+
+// Storage
+const { autosave, loadAutosave } = useWorkflowStorage()
 
 // Initial workflow nodes
 const initialNodes: Node[] = [
@@ -253,15 +262,106 @@ function deleteNode(nodeId: string) {
   // Don't allow deleting the start node
   if (nodeId === 'start') return
   
+  recordChange()
   nodes.value = nodes.value.filter(n => n.id !== nodeId)
   edges.value = edges.value.filter(e => e.source !== nodeId && e.target !== nodeId)
   
   emit('nodeDelete', nodeId)
 }
 
-// Handle keyboard delete
+// Delete an edge
+function deleteEdge(edgeId: string) {
+  recordChange()
+  edges.value = edges.value.filter(e => e.id !== edgeId)
+  closeEdgeEditor()
+}
+
+// Duplicate a node
+function duplicateNode(nodeId: string) {
+  const node = nodes.value.find(n => n.id === nodeId)
+  if (!node || node.type === 'start') return
+  
+  recordChange()
+  const newNode: Node = {
+    id: generateNodeId(node.type || 'node'),
+    type: node.type,
+    position: {
+      x: node.position.x + 50,
+      y: node.position.y + 50,
+    },
+    data: JSON.parse(JSON.stringify(node.data)),
+  }
+  newNode.data.label = `${node.data.label} (copy)`
+  
+  nodes.value = [...nodes.value, newNode]
+}
+
+// Record change for undo/redo
+function recordChange() {
+  pushState(nodes.value, edges.value)
+  emit('change')
+}
+
+// Handle undo
+function handleUndo() {
+  const state = undo()
+  if (state) {
+    nodes.value = state.nodes
+    edges.value = state.edges
+  }
+}
+
+// Handle redo
+function handleRedo() {
+  const state = redo()
+  if (state) {
+    nodes.value = state.nodes
+    edges.value = state.edges
+  }
+}
+
+// Handle keyboard shortcuts
 function onKeyDown(event: KeyboardEvent) {
+  // Undo: Cmd/Ctrl + Z
+  if ((event.metaKey || event.ctrlKey) && event.key === 'z' && !event.shiftKey) {
+    event.preventDefault()
+    handleUndo()
+    return
+  }
+  
+  // Redo: Cmd/Ctrl + Shift + Z or Cmd/Ctrl + Y
+  if ((event.metaKey || event.ctrlKey) && (event.key === 'y' || (event.key === 'z' && event.shiftKey))) {
+    event.preventDefault()
+    handleRedo()
+    return
+  }
+  
+  // Duplicate: Cmd/Ctrl + D
+  if ((event.metaKey || event.ctrlKey) && event.key === 'd') {
+    event.preventDefault()
+    const selectedNodes = nodes.value.filter(n => n.selected)
+    for (const node of selectedNodes) {
+      duplicateNode(node.id)
+    }
+    return
+  }
+  
+  // Delete
   if (event.key === 'Delete' || event.key === 'Backspace') {
+    // Check if we're in an input field
+    if ((event.target as HTMLElement).tagName === 'INPUT' || 
+        (event.target as HTMLElement).tagName === 'TEXTAREA') {
+      return
+    }
+    
+    // Delete selected edges
+    const selectedEdgeIds = edges.value.filter(e => e.selected).map(e => e.id)
+    if (selectedEdgeIds.length > 0) {
+      recordChange()
+      edges.value = edges.value.filter(e => !selectedEdgeIds.includes(e.id))
+    }
+    
+    // Delete selected nodes
     const selectedNodes = nodes.value.filter(n => n.selected)
     for (const node of selectedNodes) {
       deleteNode(node.id)
@@ -269,12 +369,56 @@ function onKeyDown(event: KeyboardEvent) {
   }
 }
 
+// Load workflow from external source
+function loadWorkflow(newNodes: Node[], newEdges: Edge[]) {
+  nodes.value = newNodes
+  edges.value = newEdges
+  initHistory(newNodes, newEdges)
+  setTimeout(() => fitView(), 100)
+}
+
+// Initialize history and autosave
+onMounted(() => {
+  // Try to load autosave
+  const saved = loadAutosave()
+  if (saved && saved.nodes.length > 0) {
+    nodes.value = saved.nodes
+    edges.value = saved.edges
+  }
+  
+  initHistory(nodes.value, edges.value)
+  
+  // Autosave periodically
+  const autosaveInterval = setInterval(() => {
+    autosave(nodes.value, edges.value)
+  }, 30000) // Every 30 seconds
+  
+  onUnmounted(() => {
+    clearInterval(autosaveInterval)
+  })
+})
+
+// Watch for changes and record
+watch([nodes, edges], () => {
+  emit('change')
+}, { deep: true })
+
 // Expose nodes for parent to read workflow definition
 defineExpose({
   getNodes: () => nodes.value,
   getEdges: () => edges.value,
   updateNodeData,
   deleteNode,
+  deleteEdge,
+  duplicateNode,
+  loadWorkflow,
+  handleUndo,
+  handleRedo,
+  canUndo,
+  canRedo,
+  fitView: () => fitView(),
+  zoomIn: () => zoomIn(),
+  zoomOut: () => zoomOut(),
 })
 </script>
 
@@ -324,6 +468,7 @@ defineExpose({
       :edge="selectedEdge"
       @close="closeEdgeEditor"
       @update="updateEdgeLabel"
+      @delete="deleteEdge"
     />
   </div>
 </template>
