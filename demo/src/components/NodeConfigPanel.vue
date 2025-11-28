@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-import { X, Bot, Cpu, Wrench, ChevronDown, Trash2, GitMerge } from 'lucide-vue-next'
+import { ref, computed, watch, onUnmounted } from 'vue'
+import { X, Bot, Cpu, Wrench, ChevronDown, Trash2, GitMerge, GitBranch } from 'lucide-vue-next'
 import type { Node } from '@vue-flow/core'
 
 const props = defineProps<{
@@ -49,7 +49,7 @@ const activeTab = ref<'prompt' | 'model' | 'tools'>('prompt')
 
 // Sync local state with selected node
 watch(() => props.node, (node) => {
-  if (node && (node.type === 'agent' || node.type === 'parallel')) {
+  if (node && (node.type === 'agent' || node.type === 'parallel' || node.type === 'condition')) {
     localLabel.value = node.data.label || ''
     localModel.value = node.data.model || 'openai/gpt-4o-mini'
     localPrompt.value = node.data.prompt || ''
@@ -63,7 +63,8 @@ const selectedModelInfo = computed(() => {
 
 const isAgentNode = computed(() => props.node?.type === 'agent')
 const isParallelNode = computed(() => props.node?.type === 'parallel')
-const isConfigurableNode = computed(() => isAgentNode.value || isParallelNode.value)
+const isRouterNode = computed(() => props.node?.type === 'condition')
+const isConfigurableNode = computed(() => isAgentNode.value || isParallelNode.value || isRouterNode.value)
 
 function selectModel(modelId: string) {
   localModel.value = modelId
@@ -99,6 +100,11 @@ function debouncedSave() {
   saveTimeout = setTimeout(saveChanges, 300)
 }
 
+// Cleanup timeout on unmount
+onUnmounted(() => {
+  if (saveTimeout) clearTimeout(saveTimeout)
+})
+
 // Delete node
 function handleDelete() {
   if (!props.node) return
@@ -117,6 +123,7 @@ const canDelete = computed(() => props.node?.id !== 'start')
     <div class="panel-header">
       <div class="header-title">
         <GitMerge v-if="isParallelNode" :size="18" class="icon-parallel" />
+        <GitBranch v-else-if="isRouterNode" :size="18" class="icon-router" />
         <Bot v-else :size="18" />
         <input 
           v-model="localLabel"
@@ -130,28 +137,37 @@ const canDelete = computed(() => props.node?.id !== 'start')
           v-if="canDelete"
           class="btn btn-ghost delete-btn" 
           title="Delete node"
+          aria-label="Delete node"
           @click="handleDelete"
         >
           <Trash2 :size="16" />
         </button>
-        <button class="btn btn-ghost close-btn" @click="emit('close')">
+        <button 
+          class="btn btn-ghost close-btn" 
+          aria-label="Close panel"
+          @click="emit('close')"
+        >
           <X :size="18" />
         </button>
       </div>
     </div>
     
     <!-- Tabs -->
-    <div class="tabs">
+    <div class="tabs" role="tablist" aria-label="Node configuration tabs">
       <button 
         class="tab" 
+        role="tab"
+        :aria-selected="activeTab === 'prompt'"
         :class="{ active: activeTab === 'prompt' }"
         @click="activeTab = 'prompt'"
       >
         <Bot :size="14" />
-        {{ isParallelNode ? 'Merge Prompt' : 'Prompt' }}
+        {{ isRouterNode ? 'Instructions' : (isParallelNode ? 'Merge Prompt' : 'Prompt') }}
       </button>
       <button 
         class="tab" 
+        role="tab"
+        :aria-selected="activeTab === 'model'"
         :class="{ active: activeTab === 'model' }"
         @click="activeTab = 'model'"
       >
@@ -161,6 +177,8 @@ const canDelete = computed(() => props.node?.id !== 'start')
       <button 
         v-if="isAgentNode"
         class="tab" 
+        role="tab"
+        :aria-selected="activeTab === 'tools'"
         :class="{ active: activeTab === 'tools' }"
         @click="activeTab = 'tools'"
       >
@@ -174,19 +192,25 @@ const canDelete = computed(() => props.node?.id !== 'start')
     <div class="tab-content">
       <!-- Prompt Tab -->
       <div v-if="activeTab === 'prompt'" class="prompt-tab">
-        <label class="field-label">{{ isParallelNode ? 'Merge/Summary Prompt' : 'System Prompt' }}</label>
+        <label class="field-label">
+          {{ isRouterNode ? 'Routing Instructions' : (isParallelNode ? 'Merge/Summary Prompt' : 'System Prompt') }}
+        </label>
         <textarea
           v-model="localPrompt"
           class="prompt-textarea"
-          :placeholder="isParallelNode 
-            ? 'Enter a prompt for merging parallel outputs...\n\nExample:\nYou are a synthesis assistant. Combine the following outputs from multiple agents into a coherent, unified response. Highlight key points from each and resolve any contradictions.'
-            : 'Enter the system prompt for this agent...\n\nExample:\nYou are a helpful technical support specialist. You help users troubleshoot issues with their software and hardware. Be patient, thorough, and always verify the problem is resolved before ending the conversation.'"
+          :placeholder="isRouterNode
+            ? 'Add custom routing instructions...\n\nExample:\nRoute to Technical if the user mentions bugs, errors, code, or technical issues.\nRoute to Sales if the user asks about pricing, plans, or purchasing.\nDefault to Technical for unclear requests.'
+            : (isParallelNode 
+              ? 'Enter a prompt for merging parallel outputs...\n\nExample:\nYou are a synthesis assistant. Combine the following outputs from multiple agents into a coherent, unified response. Highlight key points from each and resolve any contradictions.'
+              : 'Enter the system prompt for this agent...\n\nExample:\nYou are a helpful technical support specialist. You help users troubleshoot issues with their software and hardware. Be patient, thorough, and always verify the problem is resolved before ending the conversation.')"
           @input="debouncedSave"
         />
         <p class="field-hint">
-          {{ isParallelNode 
-            ? 'This prompt is used to merge/summarize the outputs from all parallel branches.' 
-            : 'This prompt defines the agent\'s behavior and personality.' }}
+          {{ isRouterNode 
+            ? 'These instructions help the router decide which branch to take. The router uses edge labels and connected node names to make decisions.' 
+            : (isParallelNode 
+              ? 'This prompt is used to merge/summarize the outputs from all parallel branches.' 
+              : 'This prompt defines the agent\'s behavior and personality.') }}
         </p>
       </div>
       
@@ -317,6 +341,10 @@ const canDelete = computed(() => props.node?.id !== 'start')
 
 .header-title .icon-parallel {
   color: var(--color-info);
+}
+
+.header-title .icon-router {
+  color: var(--color-warning);
 }
 
 .header-actions {

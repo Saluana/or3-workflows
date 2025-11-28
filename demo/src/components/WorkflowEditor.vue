@@ -10,6 +10,7 @@ import StartNode from './nodes/StartNode.vue'
 import ConditionNode from './nodes/ConditionNode.vue'
 import ParallelNode from './nodes/ParallelNode.vue'
 import NodePalette from './NodePalette.vue'
+import EdgeLabelEditor from './EdgeLabelEditor.vue'
 
 import type { NodeStatus } from '@/types/workflow'
 
@@ -34,7 +35,7 @@ const emit = defineEmits<{
 }>()
 
 // Use Vue Flow composable for viewport access
-const { screenToFlowCoordinate, onNodesChange, onEdgesChange } = useVueFlow()
+const { screenToFlowCoordinate } = useVueFlow()
 
 // Initial workflow nodes
 const initialNodes: Node[] = [
@@ -141,9 +142,37 @@ watch(() => props.nodeStatuses, (statuses) => {
   }))
 }, { deep: true })
 
+// Edge editing state
+const selectedEdge = ref<Edge | null>(null)
+const showEdgeEditor = ref(false)
+
 // Handle node click
 function onNodeClick(event: { node: Node }) {
+  selectedEdge.value = null
+  showEdgeEditor.value = false
   emit('nodeClick', event.node)
+}
+
+// Handle edge click
+function onEdgeClick(event: { edge: Edge }) {
+  selectedEdge.value = event.edge
+  showEdgeEditor.value = true
+}
+
+// Update edge label
+function updateEdgeLabel(edgeId: string, label: string) {
+  edges.value = edges.value.map(edge => {
+    if (edge.id === edgeId) {
+      return { ...edge, label }
+    }
+    return edge
+  })
+}
+
+// Close edge editor
+function closeEdgeEditor() {
+  selectedEdge.value = null
+  showEdgeEditor.value = false
 }
 
 // Handle new connections
@@ -187,7 +216,13 @@ function onDrop(event: DragEvent) {
   
   if (!nodeType || !nodeDataStr) return
   
-  const nodeData = JSON.parse(nodeDataStr)
+  let nodeData: Record<string, unknown>
+  try {
+    nodeData = JSON.parse(nodeDataStr)
+  } catch {
+    console.error('Failed to parse node data')
+    return
+  }
   
   // Get drop position in flow coordinates
   const position = screenToFlowCoordinate({
@@ -266,7 +301,9 @@ defineExpose({
       fit-view-on-init
       class="vue-flow-canvas"
       @node-click="onNodeClick"
+      @edge-click="onEdgeClick"
       @connect="onConnect"
+      @pane-click="closeEdgeEditor"
     >
       <Background 
         :gap="20" 
@@ -280,6 +317,14 @@ defineExpose({
         <div v-if="label" class="edge-label">{{ label }}</div>
       </template>
     </VueFlow>
+    
+    <!-- Edge Label Editor -->
+    <EdgeLabelEditor
+      v-if="showEdgeEditor"
+      :edge="selectedEdge"
+      @close="closeEdgeEditor"
+      @update="updateEdgeLabel"
+    />
   </div>
 </template>
 

@@ -21,7 +21,12 @@ export interface ConditionNodeData extends BaseNodeData {
   conditions?: string[]
 }
 
-export type WorkflowNode = Node<AgentNodeData | StartNodeData | ConditionNodeData>
+export interface ParallelNodeData extends BaseNodeData {
+  model?: string
+  prompt?: string  // Merge/synthesis prompt
+}
+
+export type WorkflowNode = Node<AgentNodeData | StartNodeData | ConditionNodeData | ParallelNodeData>
 export type WorkflowEdge = Edge
 
 export interface ChatMessage {

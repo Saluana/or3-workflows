@@ -3,6 +3,19 @@ import { OpenRouter } from '@openrouter/sdk'
 import type { Node, Edge } from '@vue-flow/core'
 import type { ChatMessage, NodeStatus } from '@/types/workflow'
 
+// Types for OpenRouter SDK
+interface ChatMessageParam {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+interface StreamChunk {
+  choices: Array<{
+    delta?: { content?: string }
+    message?: { content?: string | unknown[] }
+  }>
+}
+
 interface ExecutionContext {
   input: string
   history: Array<{ role: string; content: string }>
@@ -16,6 +29,9 @@ export function useWorkflowExecution() {
   const nodeStatuses = ref<Record<string, NodeStatus>>({})
   const error = ref<string | null>(null)
   const apiKey = ref('')
+  
+  // AbortController for cancelling requests
+  let abortController: AbortController | null = null
 
   // Build graph structure from nodes and edges
   function buildGraph(nodes: Node[], edges: Edge[]) {
@@ -50,22 +66,29 @@ export function useWorkflowExecution() {
     const model = node.data.model || 'openai/gpt-4o-mini'
     const systemPrompt = node.data.prompt || `You are a helpful assistant named ${node.data.label}.`
     
-    // Build messages
-    const messages: Array<{ role: string; content: string }> = [
+    // Build messages with proper types
+    const chatMessages: ChatMessageParam[] = [
       { role: 'system', content: systemPrompt },
-      ...context.history,
+      ...context.history.map(h => ({ 
+        role: h.role as 'user' | 'assistant', 
+        content: h.content 
+      })),
       { role: 'user', content: context.input }
     ]
 
     // Stream the response
     const stream = await client.chat.send({
       model,
-      messages: messages as any,
+      messages: chatMessages,
       stream: true,
-    })
+    }) as AsyncIterable<StreamChunk>
 
     let output = ''
     for await (const chunk of stream) {
+      // Check if aborted
+      if (abortController?.signal.aborted) {
+        throw new Error('Workflow cancelled')
+      }
       const content = chunk.choices[0]?.delta?.content
       if (content) {
         output += content
@@ -79,38 +102,59 @@ export function useWorkflowExecution() {
   // Execute a router node - uses LLM to classify and pick a branch
   async function executeRouter(
     client: OpenRouter,
-    _node: Node,
+    node: Node,
     childEdges: Array<{ nodeId: string; handleId?: string }>,
     context: ExecutionContext,
-    nodeMap: Map<string, Node>
+    nodeMap: Map<string, Node>,
+    edges: Edge[]
   ): Promise<string[]> {
-    // Get the labels of child nodes for routing
+    // Get the labels of child nodes and edge labels for routing
     const routeOptions = childEdges.map((child, index) => {
       const childNode = nodeMap.get(child.nodeId)
+      // Find the edge to get its label
+      const edge = edges.find(e => e.source === node.id && e.target === child.nodeId)
+      const edgeLabel = edge?.label as string | undefined
+      
       return {
         index,
         nodeId: child.nodeId,
-        label: childNode?.data.label || `Option ${index + 1}`,
+        // Prefer edge label, then child node label
+        label: edgeLabel || childNode?.data.label || `Option ${index + 1}`,
+        description: childNode?.data.label || '',
         handleId: child.handleId
       }
     })
 
+    // Get router configuration from node data
+    const routerModel = node.data.model || 'openai/gpt-4o-mini'
+    const customInstructions = node.data.prompt || ''
+
     // Build a classification prompt
+    const routeDescriptions = routeOptions.map((opt, i) => {
+      const desc = opt.description && opt.description !== opt.label 
+        ? ` - ${opt.description}` 
+        : ''
+      return `${i + 1}. ${opt.label}${desc}`
+    }).join('\n')
+
     const classificationPrompt = `You are a routing assistant. Based on the user's message, determine which route to take.
 
 Available routes:
-${routeOptions.map((opt, i) => `${i + 1}. ${opt.label}`).join('\n')}
+${routeDescriptions}
+${customInstructions ? `\nRouting instructions:\n${customInstructions}` : ''}
 
 User message: "${context.input}"
 
 Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do not explain.`
 
+    const routerMessages: ChatMessageParam[] = [
+      { role: 'system', content: 'You are a routing classifier. Respond only with a number.' },
+      { role: 'user', content: classificationPrompt }
+    ]
+
     const response = await client.chat.send({
-      model: 'openai/gpt-4o-mini', // Fast model for routing
-      messages: [
-        { role: 'system', content: 'You are a routing classifier. Respond only with a number.' },
-        { role: 'user', content: classificationPrompt }
-      ] as any,
+      model: routerModel,
+      messages: routerMessages,
     })
 
     const messageContent = response.choices[0]?.message?.content
@@ -133,6 +177,7 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
     context: ExecutionContext,
     nodeMap: Map<string, Node>,
     graph: ReturnType<typeof buildGraph>,
+    edges: Edge[],
     onNodeStatus: (nodeId: string, status: NodeStatus) => void,
     onChunk?: (content: string) => void
   ): Promise<{ outputs: Record<string, string>; nextNodes: string[] }> {
@@ -144,6 +189,7 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
         context,
         nodeMap,
         graph,
+        edges,
         onNodeStatus,
         onChunk
       )
@@ -175,6 +221,7 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
     context: ExecutionContext,
     nodeMap: Map<string, Node>,
     graph: ReturnType<typeof buildGraph>,
+    edges: Edge[],
     onNodeStatus: (nodeId: string, status: NodeStatus) => void,
     onChunk?: (content: string) => void
   ): Promise<{ output: string; nextNodes: string[] }> {
@@ -206,7 +253,7 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
 
         case 'condition':
           // Router node - classify and pick a branch
-          nextNodes = await executeRouter(client, node, childEdges, context, nodeMap)
+          nextNodes = await executeRouter(client, node, childEdges, context, nodeMap, edges)
           output = `Routed to: ${nextNodes.join(', ')}`
           break
 
@@ -218,6 +265,7 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
             context,
             nodeMap,
             graph,
+            edges,
             onNodeStatus,
             onChunk
           )
@@ -233,16 +281,16 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
           
           if (mergePrompt) {
             // Use LLM to merge/summarize the parallel outputs
-            const mergeMessages = [
+            const mergeMessages: ChatMessageParam[] = [
               { role: 'system', content: mergePrompt },
               { role: 'user', content: `Here are the outputs from parallel agents:\n\n${formattedOutputs}\n\nPlease merge/summarize these outputs according to your instructions.` }
             ]
             
             const stream = await client.chat.send({
               model: mergeModel,
-              messages: mergeMessages as any,
+              messages: mergeMessages,
               stream: true,
-            })
+            }) as AsyncIterable<StreamChunk>
             
             let mergedOutput = ''
             for await (const chunk of stream) {
@@ -285,6 +333,12 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
       return
     }
 
+    // Cancel any existing execution
+    if (abortController) {
+      abortController.abort()
+    }
+    abortController = new AbortController()
+    
     isRunning.value = true
     error.value = null
     streamingContent.value = ''
@@ -325,8 +379,11 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
       // BFS execution through the graph
       const queue: string[] = [startNode.id]
       const executed = new Set<string>()
+      const maxIterations = nodes.length * 3 // Safety limit
+      let iterations = 0
 
-      while (queue.length > 0) {
+      while (queue.length > 0 && iterations < maxIterations) {
+        iterations++
         const currentId = queue.shift()!
         
         // Skip if already executed
@@ -351,10 +408,11 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
           context,
           graph.nodeMap,
           graph,
-          (nodeId, status) => {
+          edges,
+          (nodeId: string, status: NodeStatus) => {
             nodeStatuses.value[nodeId] = status
           },
-          (chunk) => {
+          (chunk: string) => {
             streamingContent.value += chunk
           }
         )
@@ -368,6 +426,10 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
             queue.push(nextId)
           }
         }
+      }
+
+      if (iterations >= maxIterations) {
+        throw new Error('Workflow execution exceeded maximum iterations - check for cycles or disconnected nodes')
       }
 
       // Add final assistant message
@@ -400,6 +462,22 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
     error.value = null
   }
 
+  function cancelExecution() {
+    if (abortController) {
+      abortController.abort()
+      abortController = null
+    }
+    isRunning.value = false
+    streamingContent.value = ''
+    
+    // Mark active nodes as idle
+    for (const [nodeId, status] of Object.entries(nodeStatuses.value)) {
+      if (status === 'active') {
+        nodeStatuses.value[nodeId] = 'idle'
+      }
+    }
+  }
+
   return {
     messages,
     isRunning,
@@ -408,6 +486,7 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
     error,
     apiKey,
     executeWorkflow,
-    clearMessages
+    clearMessages,
+    cancelExecution
   }
 }
