@@ -40,6 +40,9 @@ const emit = defineEmits<{
 // Use Vue Flow composable for viewport access
 const { screenToFlowCoordinate, fitView, zoomIn, zoomOut } = useVueFlow()
 
+const FIT_VIEW_OPTIONS = { padding: 0.2 }
+const fitViewWithPadding = () => fitView(FIT_VIEW_OPTIONS)
+
 // Undo/Redo
 const { canUndo, canRedo, pushState, initialize: initHistory, undo, redo } = useUndoRedo()
 
@@ -374,7 +377,7 @@ function loadWorkflow(newNodes: Node[], newEdges: Edge[]) {
   nodes.value = newNodes
   edges.value = newEdges
   initHistory(newNodes, newEdges)
-  setTimeout(() => fitView(), 100)
+  setTimeout(() => fitViewWithPadding(), 100)
 }
 
 // Initialize history and autosave
@@ -387,6 +390,8 @@ onMounted(() => {
   }
   
   initHistory(nodes.value, edges.value)
+
+  requestAnimationFrame(() => fitViewWithPadding())
   
   // Autosave periodically
   const autosaveInterval = setInterval(() => {
@@ -416,7 +421,7 @@ defineExpose({
   handleRedo,
   canUndo,
   canRedo,
-  fitView: () => fitView(),
+  fitView: () => fitViewWithPadding(),
   zoomIn: () => zoomIn(),
   zoomOut: () => zoomOut(),
 })
@@ -524,5 +529,12 @@ defineExpose({
   font-size: 11px;
   color: var(--color-text-secondary);
   border: 1px solid var(--color-border);
+}
+
+@media (max-width: 768px) {
+  :deep(.vue-flow__controls) {
+    bottom: calc(var(--mobile-nav-height) + var(--spacing-sm));
+    left: var(--spacing-sm);
+  }
 }
 </style>

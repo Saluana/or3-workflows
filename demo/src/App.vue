@@ -785,7 +785,7 @@ function handleFitView() {
     position: absolute;
     top: 56px;
     right: 0;
-    bottom: 0;
+    bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px));
     width: 100%;
     max-width: 100%;
     z-index: var(--z-dropdown);
@@ -819,6 +819,7 @@ function handleFitView() {
   
   .chat-sidebar {
     top: 48px;
+    bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px));
   }
   
   .modal-content {
@@ -932,7 +933,7 @@ function handleFitView() {
 /* Mobile Chat Toggle */
 .mobile-chat-toggle {
   position: fixed;
-  bottom: var(--spacing-lg);
+  bottom: calc(var(--mobile-nav-height) + var(--spacing-sm));
   right: var(--spacing-lg);
   width: 56px;
   height: 56px;
@@ -1161,6 +1162,7 @@ function handleFitView() {
   border-top: 1px solid var(--color-border);
   padding: var(--spacing-xs) 0;
   padding-bottom: calc(var(--spacing-xs) + env(safe-area-inset-bottom, 0px));
+  min-height: var(--mobile-nav-height);
   z-index: var(--z-dropdown);
 }
 
@@ -1287,11 +1289,11 @@ function handleFitView() {
 /* Adjust main content for mobile nav */
 @media (max-width: 768px) {
   .app-main {
-    padding-bottom: 60px; /* Space for mobile nav */
+    padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px));
   }
-  
+
   .error-toast {
-    bottom: calc(60px + var(--spacing-lg));
+    bottom: calc(var(--mobile-nav-height) + var(--spacing-lg));
   }
 }
 </style>
