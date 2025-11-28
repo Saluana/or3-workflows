@@ -8,104 +8,104 @@
 ## Phase 1: Project Setup & Core Architecture
 
 ### 1.1 Initialize Package Structure
-- [ ] Create `packages/` directory structure:
-  - [ ] `packages/workflow-core/` - Headless core library
-  - [ ] `packages/workflow-vue/` - Vue 3 components
-- [ ] Configure monorepo tooling (workspace in `package.json` or pnpm workspaces)
-- [ ] Configure Vite/Rollup for library mode (ESM/CJS builds)
-- [ ] Set up TypeScript configuration for both packages with proper paths
-- [ ] Install core dependencies:
-  - [ ] `@openrouter/sdk` in workflow-core
-  - [ ] `zod` in workflow-core for schema validation
-  - [ ] `@vue-flow/core`, `@vue-flow/background`, `@vue-flow/controls` in workflow-vue
+- [x] Create `packages/` directory structure:
+  - [x] `packages/workflow-core/` - Headless core library
+  - [x] `packages/workflow-vue/` - Vue 3 components
+- [x] Configure monorepo tooling (workspace in `package.json` or pnpm workspaces)
+- [x] Configure Vite/Rollup for library mode (ESM/CJS builds)
+- [x] Set up TypeScript configuration for both packages with proper paths
+- [x] Install core dependencies:
+  - [x] `@openrouter/sdk` in workflow-core
+  - [x] `zod` in workflow-core for schema validation
+  - [x] `@vue-flow/core`, `@vue-flow/background`, `@vue-flow/controls` in workflow-vue
 
 ### 1.2 Define Core Types & Schema
-- [ ] Create `WorkflowData`, `WorkflowNode`, `WorkflowEdge` interfaces
-- [ ] Define node-specific data interfaces:
-  - [ ] `StartNodeData`
-  - [ ] `AgentNodeData` (with multimodal flags: `acceptsImages`, `acceptsAudio`, etc.)
-  - [ ] `RouterNodeData` (with `RouteDefinition`, `RouteCondition`)
-  - [ ] `ParallelNodeData` (with `BranchDefinition`)
-  - [ ] `ToolNodeData`
-- [ ] Define `PortDefinition` interface
-- [ ] Define `Extension` and `NodeExtension` interfaces
-- [ ] **Define Multimodal Types**:
-  - [ ] `InputModality` type (`'text' | 'image' | 'file' | 'audio' | 'video'`)
-  - [ ] `OutputModality` type (`'text' | 'image' | 'embeddings'`)
-  - [ ] `Attachment` interface (id, type, name, mimeType, url/content)
-  - [ ] `MessageContentPart` interface for multimodal messages
-  - [ ] `ModelCapabilities` interface (inputModalities, outputModalities, etc.)
-  - [ ] `ExecutionInput` interface (text + attachments)
-- [ ] Create Zod schemas for runtime validation
-- [ ] Add schema version constant (`SCHEMA_VERSION = '2.0.0'`)
+- [x] Create `WorkflowData`, `WorkflowNode`, `WorkflowEdge` interfaces
+- [x] Define node-specific data interfaces:
+  - [x] `StartNodeData`
+  - [x] `AgentNodeData` (with multimodal flags: `acceptsImages`, `acceptsAudio`, etc.)
+  - [x] `RouterNodeData` (with `RouteDefinition`, `RouteCondition`)
+  - [x] `ParallelNodeData` (with `BranchDefinition`)
+  - [x] `ToolNodeData`
+- [x] Define `PortDefinition` interface
+- [x] Define `Extension` and `NodeExtension` interfaces
+- [x] **Define Multimodal Types**:
+  - [x] `InputModality` type (`'text' | 'image' | 'file' | 'audio' | 'video'`)
+  - [x] `OutputModality` type (`'text' | 'image' | 'embeddings'`)
+  - [x] `Attachment` interface (id, type, name, mimeType, url/content)
+  - [x] `MessageContentPart` interface for multimodal messages
+  - [x] `ModelCapabilities` interface (inputModalities, outputModalities, etc.)
+  - [x] `ExecutionInput` interface (text + attachments)
+- [x] Create Zod schemas for runtime validation
+- [x] Add schema version constant (`SCHEMA_VERSION = '2.0.0'`)
 
 ### 1.3 Implement `WorkflowEditor` Class
-- [ ] Create the main class shell with constructor accepting `EditorOptions`
-- [ ] Implement internal state management:
-  - [ ] `nodes: WorkflowNode[]`
-  - [ ] `edges: WorkflowEdge[]`
-  - [ ] `selection: { nodes: string[], edges: string[] }`
-- [ ] Implement Event Emitter system:
-  - [ ] `on(event, callback)` - Subscribe to events
-  - [ ] `off(event, callback)` - Unsubscribe
-  - [ ] `emit(event, ...args)` - Emit events
-  - [ ] Define all `EditorEvent` types
-- [ ] Implement Extension registry:
-  - [ ] `registerExtension(extension)`
-  - [ ] `getExtension(name)`
-  - [ ] Call lifecycle hooks (`onCreate`, `onDestroy`)
-- [ ] Implement query methods:
-  - [ ] `getJSON()`, `getNodes()`, `getEdges()`, `getSelected()`
-  - [ ] `canUndo()`, `canRedo()`
-- [ ] Implement `destroy()` cleanup
+- [x] Create the main class shell with constructor accepting `EditorOptions`
+- [x] Implement internal state management:
+  - [x] `nodes: WorkflowNode[]`
+  - [x] `edges: WorkflowEdge[]`
+  - [x] `selection: { nodes: string[], edges: string[] }`
+- [x] Implement Event Emitter system:
+  - [x] `on(event, callback)` - Subscribe to events
+  - [x] `off(event, callback)` - Unsubscribe
+  - [x] `emit(event, ...args)` - Emit events
+  - [x] Define all `EditorEvent` types
+- [x] Implement Extension registry:
+  - [x] `registerExtension(extension)`
+  - [x] `getExtension(name)`
+  - [x] Call lifecycle hooks (`onCreate`, `onDestroy`)
+- [x] Implement query methods:
+  - [x] `getJSON()`, `getNodes()`, `getEdges()`, `getSelected()`
+  - [x] `canUndo()`, `canRedo()`
+- [x] Implement `destroy()` cleanup
 
 ### 1.4 Implement History System
-- [ ] Create `HistoryManager` class
-- [ ] Implement snapshot-based undo/redo:
-  - [ ] `push(state)` - Add state to history
-  - [ ] `undo()` - Return previous state
-  - [ ] `redo()` - Return next state
-  - [ ] `clear()` - Reset history
-- [ ] Add configurable `maxHistory` (default: 50)
-- [ ] Integrate with `WorkflowEditor`
+- [x] Create `HistoryManager` class
+- [x] Implement snapshot-based undo/redo:
+  - [x] `push(state)` - Add state to history
+  - [x] `undo()` - Return previous state
+  - [x] `redo()` - Return next state
+  - [x] `clear()` - Reset history
+- [x] Add configurable `maxHistory` (default: 50)
+- [x] Integrate with `WorkflowEditor`
 
 ### 1.5 Implement Command System
-- [ ] Create `CommandManager` class
-- [ ] Implement core node commands:
-  - [ ] `createNode(type, data?, position?)`
-  - [ ] `deleteNode(id)`
-  - [ ] `updateNodeData(id, data)`
-  - [ ] `duplicateNode(id)`
-  - [ ] `setNodePosition(id, position)`
-- [ ] Implement edge commands:
-  - [ ] `createEdge(source, target, sourceHandle?, targetHandle?)`
-  - [ ] `deleteEdge(id)`
-  - [ ] `updateEdgeData(id, data)`
-- [ ] Implement selection commands:
-  - [ ] `selectNode(id, additive?)`
-  - [ ] `selectEdge(id, additive?)`
-  - [ ] `selectAll()`, `deselectAll()`
-- [ ] Implement history commands:
-  - [ ] `undo()`, `redo()`
-- [ ] Implement viewport commands:
-  - [ ] `zoomTo(level)`, `zoomIn()`, `zoomOut()`
-  - [ ] `fitView(options?)`, `setViewport(viewport)`
-- [ ] Implement chainable API (`editor.chain()...run()`)
-- [ ] Ensure all mutating commands push to history
+- [x] Create `CommandManager` class
+- [x] Implement core node commands:
+  - [x] `createNode(type, data?, position?)`
+  - [x] `deleteNode(id)`
+  - [x] `updateNodeData(id, data)`
+  - [x] `duplicateNode(id)`
+  - [x] `setNodePosition(id, position)`
+- [x] Implement edge commands:
+  - [x] `createEdge(source, target, sourceHandle?, targetHandle?)`
+  - [x] `deleteEdge(id)`
+  - [x] `updateEdgeData(id, data)`
+- [x] Implement selection commands:
+  - [x] `selectNode(id, additive?)`
+  - [x] `selectEdge(id, additive?)`
+  - [x] `selectAll()`, `deselectAll()`
+- [x] Implement history commands:
+  - [x] `undo()`, `redo()`
+- [x] Implement viewport commands:
+  - [x] `zoomTo(level)`, `zoomIn()`, `zoomOut()`
+  - [x] `fitView(options?)`, `setViewport(viewport)`
+- [x] Implement chainable API (`editor.chain()...run()`)
+- [x] Ensure all mutating commands push to history
 
 ### 1.6 Implement Validation System
-- [ ] Create `validateWorkflow(nodes, edges)` function
-- [ ] Implement validation rules:
-  - [ ] `NO_START_NODE` - Must have exactly one start node
-  - [ ] `MULTIPLE_START_NODES` - Only one start allowed
-  - [ ] `DISCONNECTED_NODE` - All nodes must be reachable from start
-  - [ ] `CYCLE_DETECTED` - DAG validation (no cycles)
-  - [ ] `MISSING_MODEL` - Agent nodes need a model
-- [ ] Implement warning rules:
-  - [ ] `EMPTY_PROMPT` - Agent without prompt
-  - [ ] `DEAD_END_NODE` - Node with no outputs
-  - [ ] `MISSING_EDGE_LABEL` - Router edge without label
-- [ ] Return `ValidationResult` with errors and warnings
+- [x] Create `validateWorkflow(nodes, edges)` function
+- [x] Implement validation rules:
+  - [x] `NO_START_NODE` - Must have exactly one start node
+  - [x] `MULTIPLE_START_NODES` - Only one start allowed
+  - [x] `DISCONNECTED_NODE` - All nodes must be reachable from start
+  - [x] `CYCLE_DETECTED` - DAG validation (no cycles)
+  - [x] `MISSING_MODEL` - Agent nodes need a model
+- [x] Implement warning rules:
+  - [x] `EMPTY_PROMPT` - Agent without prompt
+  - [x] `DEAD_END_NODE` - Node with no outputs
+  - [x] `MISSING_EDGE_LABEL` - Router edge without label
+- [x] Return `ValidationResult` with errors and warnings
 
 ---
 
