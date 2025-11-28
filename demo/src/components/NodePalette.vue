@@ -173,4 +173,41 @@ function onDragStart(event: DragEvent, nodeType: string, defaultData: Record<str
   color: var(--color-text-muted);
   line-height: 1.4;
 }
+
+/* Mobile: horizontal layout */
+@media (max-width: 768px) {
+  .node-palette {
+    gap: var(--spacing-xs);
+  }
+  
+  .palette-nodes {
+    flex-direction: row;
+    gap: var(--spacing-sm);
+    overflow-x: auto;
+    padding-bottom: var(--spacing-xs);
+  }
+  
+  .palette-node {
+    flex-shrink: 0;
+    min-width: 120px;
+    padding: var(--spacing-xs) var(--spacing-sm);
+  }
+  
+  .node-icon {
+    width: 28px;
+    height: 28px;
+  }
+  
+  .node-name {
+    font-size: 12px;
+  }
+  
+  .node-desc {
+    display: none;
+  }
+  
+  .palette-hint {
+    display: none;
+  }
+}
 </style>

@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useStorage } from '@vueuse/core'
 import { 
   Key, X, Github, Workflow, AlertCircle, MessageSquare, 
   PanelRightClose, PanelRight, Settings2, Save, FolderOpen,
   Download, Upload, Undo2, Redo2, AlertTriangle, CheckCircle2,
-  Maximize2
+  Maximize2, Menu, LayoutGrid
 } from 'lucide-vue-next'
 import type { Node } from '@vue-flow/core'
 import WorkflowEditor from './components/WorkflowEditor.vue'
@@ -38,7 +38,36 @@ const showChatPanel = ref(true)
 const showConfigPanel = ref(false)
 const selectedNode = ref<Node | null>(null)
 
+// Mobile state
+const isMobile = ref(false)
+const mobileView = ref<'editor' | 'chat'>('editor')
+const showMobileMenu = ref(false)
+
 const hasApiKey = computed(() => !!apiKey.value)
+
+// Check if mobile on mount and resize
+function checkMobile() {
+  isMobile.value = window.innerWidth <= 768
+  // On mobile, hide chat panel by default and show editor
+  if (isMobile.value) {
+    showChatPanel.value = mobileView.value === 'chat'
+  }
+}
+
+onMounted(() => {
+  checkMobile()
+  window.addEventListener('resize', checkMobile)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', checkMobile)
+})
+
+function toggleMobileView(view: 'editor' | 'chat') {
+  mobileView.value = view
+  showChatPanel.value = view === 'chat'
+  showMobileMenu.value = false
+}
 
 function saveApiKey() {
   if (!tempApiKey.value.trim()) return
@@ -338,6 +367,80 @@ function handleFitView() {
             @send="handleSendMessage"
           />
         </aside>
+      </Transition>
+      
+      <!-- Mobile Bottom Navigation -->
+      <nav v-if="isMobile" class="mobile-nav">
+        <button 
+          class="mobile-nav-btn" 
+          :class="{ active: mobileView === 'editor' }"
+          @click="toggleMobileView('editor')"
+        >
+          <LayoutGrid :size="20" />
+          <span>Editor</span>
+        </button>
+        <button 
+          class="mobile-nav-btn" 
+          :class="{ active: mobileView === 'chat' }"
+          @click="toggleMobileView('chat')"
+        >
+          <MessageSquare :size="20" />
+          <span>Chat</span>
+          <span v-if="messages.length > 0" class="nav-badge">{{ messages.length }}</span>
+        </button>
+        <button 
+          class="mobile-nav-btn"
+          @click="showMobileMenu = !showMobileMenu"
+        >
+          <Menu :size="20" />
+          <span>More</span>
+        </button>
+      </nav>
+      
+      <!-- Mobile Menu Overlay -->
+      <Transition name="slide-up">
+        <div v-if="showMobileMenu" class="mobile-menu-overlay" @click.self="showMobileMenu = false">
+          <div class="mobile-menu">
+            <div class="mobile-menu-header">
+              <span>Actions</span>
+              <button class="btn btn-ghost" @click="showMobileMenu = false">
+                <X :size="20" />
+              </button>
+            </div>
+            <div class="mobile-menu-items">
+              <button class="mobile-menu-item" @click="handleUndo(); showMobileMenu = false">
+                <Undo2 :size="18" />
+                <span>Undo</span>
+              </button>
+              <button class="mobile-menu-item" @click="handleRedo(); showMobileMenu = false">
+                <Redo2 :size="18" />
+                <span>Redo</span>
+              </button>
+              <button class="mobile-menu-item" @click="handleFitView(); showMobileMenu = false">
+                <Maximize2 :size="18" />
+                <span>Fit View</span>
+              </button>
+              <div class="mobile-menu-divider" />
+              <button class="mobile-menu-item" @click="showSaveModal = true; showMobileMenu = false">
+                <Save :size="18" />
+                <span>Save Workflow</span>
+              </button>
+              <button class="mobile-menu-item" @click="showLoadModal = true; showMobileMenu = false">
+                <FolderOpen :size="18" />
+                <span>Load Workflow</span>
+              </button>
+              <button class="mobile-menu-item" @click="handleExport(); showMobileMenu = false">
+                <Download :size="18" />
+                <span>Export JSON</span>
+              </button>
+              <div class="mobile-menu-divider" />
+              <button class="mobile-menu-item" @click="showApiKeyModal = true; showMobileMenu = false">
+                <Key :size="18" />
+                <span>{{ hasApiKey ? 'Change API Key' : 'Set API Key' }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
       </Transition>
     </main>
     
@@ -684,9 +787,48 @@ function handleFitView() {
     right: 0;
     bottom: 0;
     width: 100%;
-    max-width: 380px;
+    max-width: 100%;
     z-index: var(--z-dropdown);
     box-shadow: var(--shadow-lg);
+  }
+}
+
+/* Mobile-specific styles */
+@media (max-width: 480px) {
+  .app-header {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    height: 48px;
+  }
+  
+  .app-title {
+    font-size: 14px;
+  }
+  
+  .app-subtitle {
+    display: none;
+  }
+  
+  .header-right .btn span {
+    display: none;
+  }
+  
+  .config-sidebar {
+    top: 48px;
+    max-width: 100%;
+  }
+  
+  .chat-sidebar {
+    top: 48px;
+  }
+  
+  .modal-content {
+    padding: var(--spacing-md);
+    margin: var(--spacing-sm);
+    max-width: calc(100% - var(--spacing-md));
+  }
+  
+  .modal-header h2 {
+    font-size: 16px;
   }
 }
 
@@ -1006,5 +1148,150 @@ function handleFitView() {
 
 .text-error {
   color: var(--color-error);
+}
+
+/* Mobile Bottom Navigation */
+.mobile-nav {
+  display: flex;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--color-bg-secondary);
+  border-top: 1px solid var(--color-border);
+  padding: var(--spacing-xs) 0;
+  padding-bottom: calc(var(--spacing-xs) + env(safe-area-inset-bottom, 0px));
+  z-index: var(--z-dropdown);
+}
+
+.mobile-nav-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  position: relative;
+  transition: color var(--transition-fast);
+}
+
+.mobile-nav-btn.active {
+  color: var(--color-accent);
+}
+
+.mobile-nav-btn:active {
+  opacity: 0.7;
+}
+
+.nav-badge {
+  position: absolute;
+  top: 0;
+  right: 50%;
+  transform: translateX(calc(50% + 10px));
+  min-width: 16px;
+  height: 16px;
+  background: var(--color-accent);
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+}
+
+/* Mobile Menu Overlay */
+.mobile-menu-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: flex-end;
+}
+
+.mobile-menu {
+  width: 100%;
+  background: var(--color-bg-secondary);
+  border-top-left-radius: var(--radius-xl);
+  border-top-right-radius: var(--radius-xl);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.mobile-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-bottom: 1px solid var(--color-border);
+  font-weight: 600;
+}
+
+.mobile-menu-items {
+  padding: var(--spacing-sm) 0;
+}
+
+.mobile-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  width: 100%;
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: none;
+  border: none;
+  color: var(--color-text-primary);
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.mobile-menu-item:active {
+  background: var(--color-surface);
+}
+
+.mobile-menu-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: var(--spacing-xs) var(--spacing-lg);
+}
+
+/* Slide up transition for mobile menu */
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: opacity var(--transition-normal);
+}
+
+.slide-up-enter-active .mobile-menu,
+.slide-up-leave-active .mobile-menu {
+  transition: transform var(--transition-normal);
+}
+
+.slide-up-enter-from,
+.slide-up-leave-to {
+  opacity: 0;
+}
+
+.slide-up-enter-from .mobile-menu,
+.slide-up-leave-to .mobile-menu {
+  transform: translateY(100%);
+}
+
+/* Adjust main content for mobile nav */
+@media (max-width: 768px) {
+  .app-main {
+    padding-bottom: 60px; /* Space for mobile nav */
+  }
+  
+  .error-toast {
+    bottom: calc(60px + var(--spacing-lg));
+  }
 }
 </style>

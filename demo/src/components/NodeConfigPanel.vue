@@ -570,6 +570,14 @@ const canDelete = computed(() => props.node?.id !== 'start')
   overflow: hidden;
 }
 
+/* Mobile: full width panel */
+@media (max-width: 768px) {
+  .config-panel {
+    border-left: none;
+    border-right: none;
+  }
+}
+
 .config-panel-empty {
   justify-content: flex-start;
 }

@@ -164,6 +164,13 @@ const processSteps = computed(() => {
   border-left: 1px solid var(--color-border);
 }
 
+/* Mobile: full width, no border */
+@media (max-width: 768px) {
+  .chat-panel {
+    border-left: none;
+  }
+}
+
 /* Header */
 .panel-header {
   padding: var(--spacing-md);

@@ -495,6 +495,23 @@ defineExpose({
   max-width: 220px;
 }
 
+/* Mobile palette adjustments */
+@media (max-width: 768px) {
+  .palette-container {
+    top: var(--spacing-sm);
+    left: var(--spacing-sm);
+    right: var(--spacing-sm);
+    max-width: none;
+    padding: var(--spacing-sm);
+  }
+}
+
+@media (max-width: 480px) {
+  .palette-container {
+    padding: var(--spacing-xs) var(--spacing-sm);
+  }
+}
+
 .vue-flow-canvas {
   width: 100%;
   height: 100%;
