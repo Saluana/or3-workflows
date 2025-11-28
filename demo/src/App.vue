@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useStorage } from '@vueuse/core'
-import { Key, X, Github, Workflow, AlertCircle, MessageSquare, PanelRightClose, PanelRight } from 'lucide-vue-next'
+import { Key, X, Github, Workflow, AlertCircle, MessageSquare, PanelRightClose, PanelRight, Settings2 } from 'lucide-vue-next'
+import type { Node } from '@vue-flow/core'
 import WorkflowEditor from './components/WorkflowEditor.vue'
 import ChatPanel from './components/ChatPanel.vue'
+import NodeConfigPanel from './components/NodeConfigPanel.vue'
 import { useWorkflowExecution } from './composables/useWorkflowExecution'
 
 // Persist API key in localStorage
@@ -26,6 +28,8 @@ const showApiKeyModal = ref(!storedApiKey.value)
 const tempApiKey = ref('')
 const workflowEditor = ref<InstanceType<typeof WorkflowEditor> | null>(null)
 const showChatPanel = ref(true)
+const showConfigPanel = ref(false)
+const selectedNode = ref<Node | null>(null)
 
 const hasApiKey = computed(() => !!apiKey.value)
 
@@ -50,6 +54,29 @@ function handleSendMessage(message: string) {
   const edges = workflowEditor.value.getEdges()
   
   executeWorkflow(message, nodes, edges)
+}
+
+function handleNodeSelect(node: Node | null) {
+  selectedNode.value = node
+  if (node) {
+    showConfigPanel.value = true
+  }
+}
+
+function handleNodeUpdate(nodeId: string, data: Record<string, unknown>) {
+  if (!workflowEditor.value) return
+  workflowEditor.value.updateNodeData(nodeId, data)
+}
+
+function handleNodeDelete(nodeId: string) {
+  if (!workflowEditor.value) return
+  workflowEditor.value.deleteNode(nodeId)
+  closeConfigPanel()
+}
+
+function closeConfigPanel() {
+  showConfigPanel.value = false
+  selectedNode.value = null
 }
 </script>
 
@@ -100,11 +127,24 @@ function handleSendMessage(message: string) {
     
     <!-- Main Content -->
     <main class="app-main">
+      <!-- Node Config Panel (Left) -->
+      <Transition name="slide-left">
+        <aside v-if="showConfigPanel" class="config-sidebar">
+          <NodeConfigPanel
+            :node="selectedNode"
+            @close="closeConfigPanel"
+            @update="handleNodeUpdate"
+            @delete="handleNodeDelete"
+          />
+        </aside>
+      </Transition>
+      
       <!-- Workflow Editor -->
       <div class="editor-container">
         <WorkflowEditor 
           ref="workflowEditor"
           :node-statuses="nodeStatuses"
+          @node-click="handleNodeSelect"
         />
         
         <!-- Error Toast -->
@@ -119,7 +159,7 @@ function handleSendMessage(message: string) {
         </Transition>
       </div>
       
-      <!-- Chat Panel -->
+      <!-- Chat Panel (Right) -->
       <Transition name="slide">
         <aside v-if="showChatPanel" class="chat-sidebar">
           <ChatPanel
@@ -277,10 +317,29 @@ function handleSendMessage(message: string) {
   overflow: hidden;
 }
 
+.config-sidebar {
+  width: 340px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
 .chat-sidebar {
   width: 380px;
   flex-shrink: 0;
   overflow: hidden;
+}
+
+@media (max-width: 1200px) {
+  .config-sidebar {
+    position: absolute;
+    top: 56px;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    max-width: 340px;
+    z-index: var(--z-dropdown);
+    box-shadow: var(--shadow-lg);
+  }
 }
 
 @media (max-width: 768px) {
@@ -435,6 +494,17 @@ function handleSendMessage(message: string) {
 .slide-enter-from,
 .slide-leave-to {
   transform: translateX(100%);
+  opacity: 0;
+}
+
+.slide-left-enter-active,
+.slide-left-leave-active {
+  transition: transform var(--transition-normal), opacity var(--transition-normal);
+}
+
+.slide-left-enter-from,
+.slide-left-leave-to {
+  transform: translateX(-100%);
   opacity: 0;
 }
 

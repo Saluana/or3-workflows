@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, markRaw } from 'vue'
+import { ref, watch, markRaw } from 'vue'
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -8,6 +8,8 @@ import type { Node, Edge } from '@vue-flow/core'
 import AgentNode from './nodes/AgentNode.vue'
 import StartNode from './nodes/StartNode.vue'
 import ConditionNode from './nodes/ConditionNode.vue'
+import ParallelNode from './nodes/ParallelNode.vue'
+import NodePalette from './NodePalette.vue'
 
 import type { NodeStatus } from '@/types/workflow'
 
@@ -16,6 +18,7 @@ const nodeTypes = {
   agent: markRaw(AgentNode),
   start: markRaw(StartNode),
   condition: markRaw(ConditionNode),
+  parallel: markRaw(ParallelNode),
 }
 
 // Props for external control
@@ -26,7 +29,12 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'nodesChange', nodes: Node[]): void
   (e: 'edgesChange', edges: Edge[]): void
+  (e: 'nodeClick', node: Node): void
+  (e: 'nodeDelete', nodeId: string): void
 }>()
+
+// Use Vue Flow composable for viewport access
+const { screenToFlowCoordinate, onNodesChange, onEdgesChange } = useVueFlow()
 
 // Initial workflow nodes
 const initialNodes: Node[] = [
@@ -133,15 +141,121 @@ watch(() => props.nodeStatuses, (statuses) => {
   }))
 }, { deep: true })
 
+// Handle node click
+function onNodeClick(event: { node: Node }) {
+  emit('nodeClick', event.node)
+}
+
+// Handle new connections
+function onConnect(params: { source: string; target: string; sourceHandle?: string; targetHandle?: string }) {
+  const newEdge: Edge = {
+    id: `e-${params.source}-${params.target}-${Date.now()}`,
+    source: params.source,
+    target: params.target,
+    sourceHandle: params.sourceHandle,
+    targetHandle: params.targetHandle,
+  }
+  edges.value = [...edges.value, newEdge]
+}
+
+// Update node data from config panel
+function updateNodeData(nodeId: string, data: Record<string, unknown>) {
+  nodes.value = nodes.value.map(node => {
+    if (node.id === nodeId) {
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          ...data,
+        }
+      }
+    }
+    return node
+  })
+}
+
+// Generate unique node ID
+let nodeIdCounter = 1
+function generateNodeId(type: string): string {
+  return `${type}-${Date.now()}-${nodeIdCounter++}`
+}
+
+// Handle drop from palette
+function onDrop(event: DragEvent) {
+  const nodeType = event.dataTransfer?.getData('application/vueflow')
+  const nodeDataStr = event.dataTransfer?.getData('application/json')
+  
+  if (!nodeType || !nodeDataStr) return
+  
+  const nodeData = JSON.parse(nodeDataStr)
+  
+  // Get drop position in flow coordinates
+  const position = screenToFlowCoordinate({
+    x: event.clientX,
+    y: event.clientY,
+  })
+  
+  // Create new node
+  const newNode: Node = {
+    id: generateNodeId(nodeType),
+    type: nodeType,
+    position,
+    data: nodeData,
+  }
+  
+  nodes.value = [...nodes.value, newNode]
+}
+
+function onDragOver(event: DragEvent) {
+  event.preventDefault()
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'move'
+  }
+}
+
+// Delete a node and its connected edges
+function deleteNode(nodeId: string) {
+  // Don't allow deleting the start node
+  if (nodeId === 'start') return
+  
+  nodes.value = nodes.value.filter(n => n.id !== nodeId)
+  edges.value = edges.value.filter(e => e.source !== nodeId && e.target !== nodeId)
+  
+  emit('nodeDelete', nodeId)
+}
+
+// Handle keyboard delete
+function onKeyDown(event: KeyboardEvent) {
+  if (event.key === 'Delete' || event.key === 'Backspace') {
+    const selectedNodes = nodes.value.filter(n => n.selected)
+    for (const node of selectedNodes) {
+      deleteNode(node.id)
+    }
+  }
+}
+
 // Expose nodes for parent to read workflow definition
 defineExpose({
   getNodes: () => nodes.value,
   getEdges: () => edges.value,
+  updateNodeData,
+  deleteNode,
 })
 </script>
 
 <template>
-  <div class="workflow-editor">
+  <div 
+    class="workflow-editor"
+    @drop="onDrop"
+    @dragover="onDragOver"
+    @keydown="onKeyDown"
+    tabindex="0"
+  >
+    <!-- Node Palette -->
+    <div class="palette-container">
+      <NodePalette />
+    </div>
+    
     <VueFlow
       v-model:nodes="nodes"
       v-model:edges="edges"
@@ -151,6 +265,8 @@ defineExpose({
       :max-zoom="2"
       fit-view-on-init
       class="vue-flow-canvas"
+      @node-click="onNodeClick"
+      @connect="onConnect"
     >
       <Background 
         :gap="20" 
@@ -172,6 +288,21 @@ defineExpose({
   width: 100%;
   height: 100%;
   position: relative;
+  outline: none;
+}
+
+.palette-container {
+  position: absolute;
+  top: var(--spacing-md);
+  left: var(--spacing-md);
+  z-index: 10;
+  background: var(--color-surface);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-md);
+  box-shadow: var(--shadow-lg);
+  max-width: 220px;
 }
 
 .vue-flow-canvas {
