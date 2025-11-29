@@ -188,57 +188,57 @@
 ## Phase 3: Adapters & Execution
 
 ### 3.1 Execution Adapter Interface
-- [ ] Define `ExecutionAdapter` interface
-- [ ] Define `ExecutionCallbacks` interface
-- [ ] Define `ExecutionResult` interface
-- [ ] Define `ExecutionContext` interface
-- [ ] Define `ExecutionOptions` interface
+- [x] Define `ExecutionAdapter` interface
+- [x] Define `ExecutionCallbacks` interface
+- [x] Define `ExecutionResult` interface
+- [x] Define `ExecutionContext` interface
+- [x] Define `ExecutionOptions` interface
 
 ### 3.2 OpenRouterExecutionAdapter
-- [ ] Create `OpenRouterExecutionAdapter` class
-- [ ] Implement graph building (`buildGraph`):
-  - [ ] Create node map
-  - [ ] Build parent/child adjacency lists
-- [ ] Implement BFS execution loop:
-  - [ ] Dependency checking (wait for parents)
-  - [ ] Cycle/iteration safety limit
-- [ ] Implement node executors:
-  - [ ] `executeStartNode` - Pass through input (including attachments)
-  - [ ] `executeAgentNode` - LLM call with streaming and multimodal support
-  - [ ] `executeRouterNode` - Classification and route selection
-  - [ ] `executeParallelNode` - Concurrent branch execution with merge
-- [ ] **Implement Multimodal Support**:
-  - [ ] `buildMessageContent(text, attachments)` - Convert attachments to SDK format
-  - [ ] Handle `image_url` type (URL or base64 data URI)
-  - [ ] Handle `file` type for PDFs and documents
-  - [ ] Handle `audio` type for audio inputs
-  - [ ] Validate attachments against model's `inputModalities`
-  - [ ] Skip unsupported attachments with warning callback
-- [ ] **Implement Model Capability Queries**:
-  - [ ] `getModelCapabilities(modelId)` - Fetch model info from OpenRouter
-  - [ ] `supportsModality(modelId, modality)` - Check if model accepts modality
-  - [ ] Cache model capabilities to avoid repeated API calls
-- [ ] Implement streaming support:
-  - [ ] Call `onToken` callback for each chunk
-  - [ ] Accumulate output
-- [ ] Implement retry logic:
-  - [ ] Exponential backoff
-  - [ ] Skip retry for auth errors
-- [ ] Implement cancellation:
-  - [ ] `AbortController` integration
-  - [ ] `stop()` method
-- [ ] Implement `isRunning()` method
+- [x] Create `OpenRouterExecutionAdapter` class
+- [x] Implement graph building (`buildGraph`):
+  - [x] Create node map
+  - [x] Build parent/child adjacency lists
+- [x] Implement BFS execution loop:
+  - [x] Dependency checking (wait for parents)
+  - [x] Cycle/iteration safety limit
+- [x] Implement node executors:
+  - [x] `executeStartNode` - Pass through input (including attachments)
+  - [x] `executeAgentNode` - LLM call with streaming and multimodal support
+  - [x] `executeRouterNode` - Classification and route selection
+  - [x] `executeParallelNode` - Concurrent branch execution with merge
+- [x] **Implement Multimodal Support**:
+  - [x] `buildMessageContent(text, attachments)` - Convert attachments to SDK format
+  - [x] Handle `image_url` type (URL or base64 data URI)
+  - [x] Handle `file` type for PDFs and documents
+  - [x] Handle `audio` type for audio inputs
+  - [x] Validate attachments against model's `inputModalities`
+  - [x] Skip unsupported attachments with warning callback
+- [x] **Implement Model Capability Queries**:
+  - [x] `getModelCapabilities(modelId)` - Fetch model info from OpenRouter
+  - [x] `supportsModality(modelId, modality)` - Check if model accepts modality
+  - [x] Cache model capabilities to avoid repeated API calls
+- [x] Implement streaming support:
+  - [x] Call `onToken` callback for each chunk
+  - [x] Accumulate output
+- [x] Implement retry logic:
+  - [x] Exponential backoff
+  - [x] Skip retry for auth errors
+- [x] Implement cancellation:
+  - [x] `AbortController` integration
+  - [x] `stop()` method
+- [x] Implement `isRunning()` method
 
 ### 3.3 Storage Adapters
-- [ ] Define `StorageAdapter` interface
-- [ ] Implement `LocalStorageAdapter`:
-  - [ ] `save(workflow)` - Store in localStorage
-  - [ ] `load(id)` - Retrieve and validate
-  - [ ] `delete(id)` - Remove
-  - [ ] `list()` - Return summaries
-  - [ ] `export(workflow)` - JSON string
-  - [ ] `import(json)` - Parse and validate
-- [ ] (Optional) Implement `IndexedDBAdapter` for larger workflows
+- [x] Define `StorageAdapter` interface
+- [x] Implement `LocalStorageAdapter`:
+  - [x] `save(workflow)` - Store in localStorage
+  - [x] `load(id)` - Retrieve and validate
+  - [x] `delete(id)` - Remove
+  - [x] `list()` - Return summaries
+  - [x] `export(workflow)` - JSON string
+  - [x] `import(json)` - Parse and validate
+- [x] (Optional) Implement `IndexedDBAdapter` for larger workflows
 
 ---
 

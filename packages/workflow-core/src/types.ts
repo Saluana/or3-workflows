@@ -239,3 +239,154 @@ export const WorkflowDataSchema = z.object({
   nodes: z.array(WorkflowNodeSchema),
   edges: z.array(WorkflowEdgeSchema),
 });
+
+// ============================================================================
+// Execution Types
+// ============================================================================
+
+/** Callbacks for execution events */
+export interface ExecutionCallbacks {
+  /** Called when a node starts executing */
+  onNodeStart: (nodeId: string) => void;
+  /** Called when a node finishes executing */
+  onNodeFinish: (nodeId: string, output: string) => void;
+  /** Called when a node encounters an error */
+  onNodeError: (nodeId: string, error: Error) => void;
+  /** Called for each streaming token */
+  onToken: (nodeId: string, token: string) => void;
+  /** Called when a router selects a route */
+  onRouteSelected?: (nodeId: string, routeId: string) => void;
+}
+
+/** Result of workflow execution */
+export interface ExecutionResult {
+  /** Whether execution completed successfully */
+  success: boolean;
+  /** Final output of the workflow */
+  output: string;
+  /** Output from each node, keyed by node ID */
+  nodeOutputs: Record<string, string>;
+  /** Error if execution failed */
+  error?: Error;
+  /** Total execution duration in milliseconds */
+  duration: number;
+  /** Token usage statistics */
+  usage?: TokenUsage;
+}
+
+/** Token usage statistics */
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+/** Options for execution adapter */
+export interface ExecutionOptions {
+  /** Global tools available to all agents */
+  tools?: ToolDefinition[];
+  /** Fallback model when node doesn't specify one */
+  defaultModel?: string;
+  /** Maximum retry attempts for failed API calls */
+  maxRetries?: number;
+  /** Base delay in ms between retries */
+  retryDelayMs?: number;
+  /** Safety limit for graph traversal iterations */
+  maxIterations?: number;
+  /** Global tool call handler */
+  onToolCall?: (name: string, args: any) => Promise<string>;
+}
+
+/** Tool definition in OpenRouter/OpenAI format */
+export interface ToolDefinition {
+  type: 'function';
+  function: {
+    name: string;
+    description?: string;
+    parameters: Record<string, any>;
+  };
+  handler?: (args: any) => Promise<string> | string;
+}
+
+/** Context passed to node executors during execution */
+export interface ExecutionContext {
+  /** The node being executed */
+  node: WorkflowNode;
+  /** Current text input (from user or previous node) */
+  input: string;
+  /** Original user text input */
+  originalInput: string;
+  /** Multimodal attachments for this execution */
+  attachments: Attachment[];
+  /** Conversation history */
+  history: ChatMessage[];
+  /** Outputs from executed nodes */
+  outputs: Record<string, string>;
+  /** Ordered list of executed node IDs */
+  nodeChain: string[];
+  /** Abort signal for cancellation */
+  signal: AbortSignal;
+}
+
+/** Chat message for conversation history */
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+/** Execution adapter interface */
+export interface ExecutionAdapter {
+  /** Execute a workflow with the given input */
+  execute(
+    workflow: WorkflowData,
+    input: ExecutionInput,
+    callbacks: ExecutionCallbacks
+  ): Promise<ExecutionResult>;
+  
+  /** Stop the current execution */
+  stop(): void;
+  
+  /** Check if execution is currently running */
+  isRunning(): boolean;
+  
+  /** Get model capabilities */
+  getModelCapabilities(modelId: string): Promise<ModelCapabilities | null>;
+  
+  /** Check if model supports a specific modality */
+  supportsModality(modelId: string, modality: InputModality): Promise<boolean>;
+}
+
+// ============================================================================
+// Storage Types
+// ============================================================================
+
+/** Summary of a saved workflow */
+export interface WorkflowSummary {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+  nodeCount: number;
+}
+
+/** Storage adapter interface */
+export interface StorageAdapter {
+  /** Load a workflow by ID */
+  load(id: string): Promise<WorkflowData>;
+  
+  /** Save a workflow, returns the ID */
+  save(workflow: WorkflowData): Promise<string>;
+  
+  /** Delete a workflow by ID */
+  delete(id: string): Promise<void>;
+  
+  /** List all saved workflows */
+  list(): Promise<WorkflowSummary[]>;
+  
+  /** Export workflow to JSON string */
+  export(workflow: WorkflowData): string;
+  
+  /** Import workflow from JSON string */
+  import(json: string): WorkflowData;
+}
