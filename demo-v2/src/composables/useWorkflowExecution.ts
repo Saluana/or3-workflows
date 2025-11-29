@@ -96,10 +96,16 @@ export function useWorkflowExecution() {
         nodeMap: Map<string, GraphNode>,
         callbacks: ExecutionCallbacks
     ): Promise<string> {
-        const model = typeof node.data.model === 'string' ? node.data.model : 'openai/gpt-4o-mini';
-        const label = typeof node.data.label === 'string' ? node.data.label : 'Assistant';
-        const prompt = typeof node.data.prompt === 'string' ? node.data.prompt : '';
-        const systemPrompt = prompt || `You are a helpful assistant named ${label}.`;
+        const model =
+            typeof node.data.model === 'string'
+                ? node.data.model
+                : 'openai/gpt-4o-mini';
+        const label =
+            typeof node.data.label === 'string' ? node.data.label : 'Assistant';
+        const prompt =
+            typeof node.data.prompt === 'string' ? node.data.prompt : '';
+        const systemPrompt =
+            prompt || `You are a helpful assistant named ${label}.`;
 
         // Build context from previous nodes
         let contextInfo = '';
@@ -108,7 +114,10 @@ export function useWorkflowExecution() {
                 .filter((id: string) => context.outputs[id])
                 .map((id: string) => {
                     const prevNode = nodeMap.get(id);
-                    const prevLabel = typeof prevNode?.data.label === 'string' ? prevNode.data.label : id;
+                    const prevLabel =
+                        typeof prevNode?.data.label === 'string'
+                            ? prevNode.data.label
+                            : id;
                     return `[${prevLabel}]: ${context.outputs[id]}`;
                 });
 
@@ -162,7 +171,10 @@ export function useWorkflowExecution() {
                 (e) => e.source === node.id && e.target === child.nodeId
             );
             const edgeLabel = edge?.label;
-            const childLabel = typeof childNode?.data.label === 'string' ? childNode.data.label : '';
+            const childLabel =
+                typeof childNode?.data.label === 'string'
+                    ? childNode.data.label
+                    : '';
 
             return {
                 index,
@@ -172,8 +184,12 @@ export function useWorkflowExecution() {
             };
         });
 
-        const routerModel = typeof node.data.model === 'string' ? node.data.model : 'openai/gpt-4o-mini';
-        const customInstructions = typeof node.data.prompt === 'string' ? node.data.prompt : '';
+        const routerModel =
+            typeof node.data.model === 'string'
+                ? node.data.model
+                : 'openai/gpt-4o-mini';
+        const customInstructions =
+            typeof node.data.prompt === 'string' ? node.data.prompt : '';
 
         const routeDescriptions = routeOptions
             .map(

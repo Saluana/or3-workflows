@@ -45,12 +45,9 @@ const showLeftSidebar = ref(true);
 const activePanel = ref<'palette' | 'inspector'>('palette');
 
 // Composables
-const {
-    isMobile,
-    mobileView,
-    showMobileMenu,
-    toggleMobileView,
-} = useMobileNav({ showChatPanel, showLeftSidebar });
+const { isMobile, mobileView, showMobileMenu, toggleMobileView } = useMobileNav(
+    { showChatPanel, showLeftSidebar }
+);
 
 const {
     savedWorkflows,
@@ -288,12 +285,12 @@ async function handleSendMessage() {
 
     try {
         // Map nodes to execution format (data as Record<string, unknown>)
-        const execNodes = nodes.map(n => ({
+        const execNodes = nodes.map((n) => ({
             id: n.id,
             type: n.type,
             data: { ...n.data } as Record<string, unknown>,
         }));
-        
+
         const finalOutput = await executeWorkflowFn(
             apiKey.value,
             execNodes,
