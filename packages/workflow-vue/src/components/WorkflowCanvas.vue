@@ -87,12 +87,12 @@ onNodeDragStop((event) => {
 // Handle node click
 const onNodeClick = (event: NodeMouseEvent) => {
   props.editor.commands.selectNode(event.node.id);
-  emit('nodeClick', event.node as Node);
+  emit('nodeClick', event.node);
 };
 
 // Handle edge click
 const onEdgeClick = (event: EdgeMouseEvent) => {
-  emit('edgeClick', event.edge as Edge);
+  emit('edgeClick', event.edge);
 };
 
 // Handle pane click (deselect)

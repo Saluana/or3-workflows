@@ -17,6 +17,11 @@ import {
 } from '@or3/workflow-vue'
 
 // ============================================================================
+// Constants
+// ============================================================================
+const MAX_ITERATIONS_MULTIPLIER = 3
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -212,6 +217,11 @@ async function executeWorkflow(input: string, nodes: any[], edges: any[]) {
   error.value = null
   
   try {
+    // Validate API key format
+    if (!apiKey.value.startsWith('sk-or-')) {
+      throw new Error('Invalid API key format. Key should start with "sk-or-"')
+    }
+    
     const client = new OpenRouter({ apiKey: apiKey.value })
     const graph = buildGraph(nodes, edges)
     
@@ -231,7 +241,7 @@ async function executeWorkflow(input: string, nodes: any[], edges: any[]) {
     // BFS execution
     const queue: string[] = [startNode.id]
     const executed = new Set<string>()
-    const maxIterations = nodes.length * 3
+    const maxIterations = nodes.length * MAX_ITERATIONS_MULTIPLIER
     let iterations = 0
     let finalOutput = ''
     
