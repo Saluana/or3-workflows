@@ -140,8 +140,10 @@ export interface WorkflowEdge {
   target: string;
   sourceHandle?: string;
   targetHandle?: string;
+  type?: string;
   label?: string;
-  data?: EdgeData;
+  data?: Record<string, any>;
+  selected?: boolean;
 }
 
 export interface EdgeData {

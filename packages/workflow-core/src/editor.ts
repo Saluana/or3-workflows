@@ -117,6 +117,13 @@ export class WorkflowEditor {
     return this.edges;
   }
 
+  public getSelected() {
+    return {
+      nodes: this.nodes.filter(n => n.selected).map(n => n.id),
+      edges: this.edges.filter(e => e.selected).map(e => e.id),
+    };
+  }
+
   // Event Emitter
   public on(event: string, callback: Function): () => void {
     if (!this.listeners.has(event)) {

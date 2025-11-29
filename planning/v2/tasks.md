@@ -112,76 +112,76 @@
 ## Phase 2: Vue Integration (`@or3/workflow-vue`)
 
 ### 2.1 Core Composables
-- [ ] Create `useEditor(options)` composable:
-  - [ ] Instantiate `WorkflowEditor`
-  - [ ] Return reactive refs for state
-  - [ ] Handle cleanup on unmount
-- [ ] Create `useNodeState(nodeId)` composable:
-  - [ ] Reactive access to node data
-  - [ ] Update methods
-- [ ] Create `useExecutionState()` composable:
-  - [ ] `isRunning`, `streamingContent`, `nodeStatuses`
-  - [ ] `currentNodeId`, `error`
+- [x] Create `useEditor(options)` composable:
+  - [x] Instantiate `WorkflowEditor`
+  - [x] Return reactive refs for state
+  - [x] Handle cleanup on unmount
+- [x] Create `useNodeState(nodeId)` composable:
+  - [x] Reactive access to node data
+  - [x] Update methods
+- [x] Create `useExecutionState()` composable:
+  - [x] `isRunning`, `streamingContent`, `nodeStatuses`
+  - [x] `currentNodeId`, `error`
 
 ### 2.2 WorkflowCanvas Component
-- [ ] Create `<WorkflowCanvas>` component wrapping Vue Flow
-- [ ] Accept `editor` prop (WorkflowEditor instance)
-- [ ] Sync Vue Flow state with editor state:
-  - [ ] `nodesChange` → editor commands
-  - [ ] `edgesChange` → editor commands
-  - [ ] `connect` → `createEdge` command
-- [ ] Handle drag-and-drop from palette
-- [ ] Handle keyboard shortcuts (delegate to editor)
-- [ ] Emit events: `nodeClick`, `edgeClick`, `paneClick`
+- [x] Create `<WorkflowCanvas>` component wrapping Vue Flow
+- [x] Accept `editor` prop (WorkflowEditor instance)
+- [x] Sync Vue Flow state with editor state:
+  - [x] `nodesChange` → editor commands
+  - [x] `edgesChange` → editor commands
+  - [x] `connect` → `createEdge` command
+- [x] Handle drag-and-drop from palette
+- [x] Handle keyboard shortcuts (delegate to editor)
+- [x] Emit events: `nodeClick`, `edgeClick`, `paneClick`
 
 ### 2.3 Node Components
-- [ ] Create `<NodeWrapper>` base component:
-  - [ ] Status indicator (idle/active/completed/error)
-  - [ ] Selection styling
-  - [ ] Delete button
-  - [ ] Slot for node-specific content
-- [ ] Create `<StartNode>` component
-- [ ] Create `<AgentNode>` component:
-  - [ ] Display label, model badge
-  - [ ] Input/output handles
-- [ ] Create `<RouterNode>` component:
-  - [ ] Dynamic output handles based on routes
-  - [ ] Route labels on handles
-- [ ] Create `<ParallelNode>` component:
-  - [ ] Dynamic output handles based on branches
-  - [ ] Branch labels
-- [ ] Create `<ToolNode>` component (placeholder for future)
+- [x] Create `<NodeWrapper>` base component:
+  - [x] Status indicator (idle/active/completed/error)
+  - [x] Selection styling
+  - [x] Delete button
+  - [x] Slot for node-specific content
+- [x] Create `<StartNode>` component
+- [x] Create `<AgentNode>` component:
+  - [x] Display label, model badge
+  - [x] Input/output handles
+- [x] Create `<RouterNode>` component:
+  - [x] Dynamic output handles based on routes
+  - [x] Route labels on handles
+- [x] Create `<ParallelNode>` component:
+  - [x] Dynamic output handles based on branches
+  - [x] Branch labels
+- [x] Create `<ToolNode>` component (placeholder for future)
 
 ### 2.4 UI Components
-- [ ] Create `<NodePalette>` component:
-  - [ ] List available node types from extensions
-  - [ ] Drag-and-drop support
-  - [ ] Group by category
-- [ ] Create `<NodeInspector>` component:
-  - [ ] Tab-based UI (Prompt, Model, Tools, Routes/Branches)
-  - [ ] Type-specific panels
-  - [ ] Debounced save on input
-- [ ] Create `<ChatPanel>` component:
-  - [ ] Message list with user/assistant styling
-  - [ ] Streaming content display
-  - [ ] Process flow indicator
-  - [ ] Input with send button
-  - [ ] **Multimodal Attachment Support**:
-    - [ ] File picker button (images, PDFs, audio, etc.)
-    - [ ] Drag-and-drop file upload
-    - [ ] Attachment preview chips (thumbnail for images, icon for files)
-    - [ ] Remove attachment button
-    - [ ] Show supported modalities based on workflow's first agent model
-    - [ ] Disable/warn for unsupported file types
-- [ ] Create `<EdgeLabelEditor>` component:
-  - [ ] Inline popover for editing edge labels
-- [ ] Create `<Controls>` component:
-  - [ ] Zoom in/out, fit view buttons
-  - [ ] Undo/redo buttons
-- [ ] Create `<MiniMap>` wrapper
-- [ ] Create `<ValidationOverlay>` component:
-  - [ ] Display errors/warnings on nodes
-  - [ ] Tooltip with details
+- [x] Create `<NodePalette>` component:
+  - [x] List available node types from extensions
+  - [x] Drag-and-drop support
+  - [x] Group by category
+- [x] Create `<NodeInspector>` component:
+  - [x] Tab-based UI (Prompt, Model, Tools, Routes/Branches)
+  - [x] Type-specific panels
+  - [x] Debounced save on input
+- [x] Create `<ChatPanel>` component:
+  - [x] Message list with user/assistant styling
+  - [x] Streaming content display
+  - [x] Process flow indicator
+  - [x] Input with send button
+  - [x] **Multimodal Attachment Support**:
+    - [x] File picker button (images, PDFs, audio, etc.)
+    - [x] Drag-and-drop file upload
+    - [x] Attachment preview chips (thumbnail for images, icon for files)
+    - [x] Remove attachment button
+    - [x] Show supported modalities based on workflow's first agent model
+    - [x] Disable/warn for unsupported file types
+- [x] Create `<EdgeLabelEditor>` component:
+  - [x] Inline popover for editing edge labels
+- [x] Create `<Controls>` component:
+  - [x] Zoom in/out, fit view buttons
+  - [x] Undo/redo buttons
+- [x] Create `<MiniMap>` wrapper
+- [x] Create `<ValidationOverlay>` component:
+  - [x] Display errors/warnings on nodes
+  - [x] Tooltip with details
 
 ---
 
