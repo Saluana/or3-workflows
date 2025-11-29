@@ -12,3 +12,6 @@ export * from './execution';
 
 // Storage adapters
 export * from './storage';
+
+// Standard node extensions
+export * from './extensions';

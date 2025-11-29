@@ -245,42 +245,42 @@
 ## Phase 4: Standard Extensions
 
 ### 4.1 StartNodeExtension
-- [ ] Define extension with:
-  - [ ] `name: 'start'`
-  - [ ] `outputs: [{ id: 'output', type: 'output' }]`
-  - [ ] `defaultData: { label: 'Start' }`
-  - [ ] `component: StartNode`
-- [ ] Implement validation (only one allowed)
+- [x] Define extension with:
+  - [x] `name: 'start'`
+  - [x] `outputs: [{ id: 'output', type: 'output' }]`
+  - [x] `defaultData: { label: 'Start' }`
+  - [x] `component: StartNode`
+- [x] Implement validation (only one allowed)
 
 ### 4.2 AgentNodeExtension
-- [ ] Define extension with:
-  - [ ] `name: 'agent'`
-  - [ ] `inputs/outputs` port definitions
-  - [ ] `defaultData: { label: 'Agent', model: 'openai/gpt-4o-mini', prompt: '' }`
-  - [ ] `component: AgentNode`
-- [ ] Implement `execute` function
-- [ ] Implement validation (require model)
+- [x] Define extension with:
+  - [x] `name: 'agent'`
+  - [x] `inputs/outputs` port definitions
+  - [x] `defaultData: { label: 'Agent', model: 'openai/gpt-4o-mini', prompt: '' }`
+  - [x] `component: AgentNode`
+- [x] Implement `execute` function
+- [x] Implement validation (require model)
 
 ### 4.3 RouterNodeExtension
-- [ ] Define extension with:
-  - [ ] `name: 'router'`
-  - [ ] Dynamic outputs based on `routes` data
-  - [ ] `defaultData: { label: 'Router', routes: [...] }`
-  - [ ] `component: RouterNode`
-- [ ] Implement `execute` function (LLM classification)
-- [ ] Implement validation (require at least one route)
+- [x] Define extension with:
+  - [x] `name: 'router'`
+  - [x] Dynamic outputs based on `routes` data
+  - [x] `defaultData: { label: 'Router', routes: [...] }`
+  - [x] `component: RouterNode`
+- [x] Implement `execute` function (LLM classification)
+- [x] Implement validation (require at least one route)
 
 ### 4.4 ParallelNodeExtension
-- [ ] Define extension with:
-  - [ ] `name: 'parallel'`
-  - [ ] Dynamic outputs based on `branches` data
-  - [ ] `defaultData: { label: 'Parallel', branches: [...] }`
-  - [ ] `component: ParallelNode`
-- [ ] Implement `execute` function (concurrent execution + merge)
+- [x] Define extension with:
+  - [x] `name: 'parallel'`
+  - [x] Dynamic outputs based on `branches` data
+  - [x] `defaultData: { label: 'Parallel', branches: [...] }`
+  - [x] `component: ParallelNode`
+- [x] Implement `execute` function (concurrent execution + merge)
 
 ### 4.5 ToolNodeExtension (Placeholder)
-- [ ] Define basic extension structure
-- [ ] Defer full implementation to future iteration
+- [x] Define basic extension structure
+- [x] Defer full implementation to future iteration
 
 ---
 
