@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
-import { VueFlow, useVueFlow, Node, Edge, Connection } from '@vue-flow/core';
+import { VueFlow, useVueFlow, Node, Edge, Connection, NodeMouseEvent, EdgeMouseEvent } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
 import { WorkflowEditor } from '@or3/workflow-core';
@@ -85,14 +85,14 @@ onNodeDragStop((event) => {
 });
 
 // Handle node click
-const onNodeClick = (_event: MouseEvent, node: Node) => {
-  props.editor.commands.selectNode(node.id);
-  emit('nodeClick', node);
+const onNodeClick = (event: NodeMouseEvent) => {
+  props.editor.commands.selectNode(event.node.id);
+  emit('nodeClick', event.node as Node);
 };
 
 // Handle edge click
-const onEdgeClick = (_event: MouseEvent, edge: Edge) => {
-  emit('edgeClick', edge);
+const onEdgeClick = (event: EdgeMouseEvent) => {
+  emit('edgeClick', event.edge as Edge);
 };
 
 // Handle pane click (deselect)

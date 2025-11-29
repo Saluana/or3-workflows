@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { WorkflowEditor } from '@or3/workflow-core';
 
-const props = defineProps<{
+defineProps<{
   editor?: WorkflowEditor;
 }>();
 
