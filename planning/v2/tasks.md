@@ -8,279 +8,279 @@
 ## Phase 1: Project Setup & Core Architecture
 
 ### 1.1 Initialize Package Structure
-- [ ] Create `packages/` directory structure:
-  - [ ] `packages/workflow-core/` - Headless core library
-  - [ ] `packages/workflow-vue/` - Vue 3 components
-- [ ] Configure monorepo tooling (workspace in `package.json` or pnpm workspaces)
-- [ ] Configure Vite/Rollup for library mode (ESM/CJS builds)
-- [ ] Set up TypeScript configuration for both packages with proper paths
-- [ ] Install core dependencies:
-  - [ ] `@openrouter/sdk` in workflow-core
-  - [ ] `zod` in workflow-core for schema validation
-  - [ ] `@vue-flow/core`, `@vue-flow/background`, `@vue-flow/controls` in workflow-vue
+- [x] Create `packages/` directory structure:
+  - [x] `packages/workflow-core/` - Headless core library
+  - [x] `packages/workflow-vue/` - Vue 3 components
+- [x] Configure monorepo tooling (workspace in `package.json` or pnpm workspaces)
+- [x] Configure Vite/Rollup for library mode (ESM/CJS builds)
+- [x] Set up TypeScript configuration for both packages with proper paths
+- [x] Install core dependencies:
+  - [x] `@openrouter/sdk` in workflow-core
+  - [x] `zod` in workflow-core for schema validation
+  - [x] `@vue-flow/core`, `@vue-flow/background`, `@vue-flow/controls` in workflow-vue
 
 ### 1.2 Define Core Types & Schema
-- [ ] Create `WorkflowData`, `WorkflowNode`, `WorkflowEdge` interfaces
-- [ ] Define node-specific data interfaces:
-  - [ ] `StartNodeData`
-  - [ ] `AgentNodeData` (with multimodal flags: `acceptsImages`, `acceptsAudio`, etc.)
-  - [ ] `RouterNodeData` (with `RouteDefinition`, `RouteCondition`)
-  - [ ] `ParallelNodeData` (with `BranchDefinition`)
-  - [ ] `ToolNodeData`
-- [ ] Define `PortDefinition` interface
-- [ ] Define `Extension` and `NodeExtension` interfaces
-- [ ] **Define Multimodal Types**:
-  - [ ] `InputModality` type (`'text' | 'image' | 'file' | 'audio' | 'video'`)
-  - [ ] `OutputModality` type (`'text' | 'image' | 'embeddings'`)
-  - [ ] `Attachment` interface (id, type, name, mimeType, url/content)
-  - [ ] `MessageContentPart` interface for multimodal messages
-  - [ ] `ModelCapabilities` interface (inputModalities, outputModalities, etc.)
-  - [ ] `ExecutionInput` interface (text + attachments)
-- [ ] Create Zod schemas for runtime validation
-- [ ] Add schema version constant (`SCHEMA_VERSION = '2.0.0'`)
+- [x] Create `WorkflowData`, `WorkflowNode`, `WorkflowEdge` interfaces
+- [x] Define node-specific data interfaces:
+  - [x] `StartNodeData`
+  - [x] `AgentNodeData` (with multimodal flags: `acceptsImages`, `acceptsAudio`, etc.)
+  - [x] `RouterNodeData` (with `RouteDefinition`, `RouteCondition`)
+  - [x] `ParallelNodeData` (with `BranchDefinition`)
+  - [x] `ToolNodeData`
+- [x] Define `PortDefinition` interface
+- [x] Define `Extension` and `NodeExtension` interfaces
+- [x] **Define Multimodal Types**:
+  - [x] `InputModality` type (`'text' | 'image' | 'file' | 'audio' | 'video'`)
+  - [x] `OutputModality` type (`'text' | 'image' | 'embeddings'`)
+  - [x] `Attachment` interface (id, type, name, mimeType, url/content)
+  - [x] `MessageContentPart` interface for multimodal messages
+  - [x] `ModelCapabilities` interface (inputModalities, outputModalities, etc.)
+  - [x] `ExecutionInput` interface (text + attachments)
+- [x] Create Zod schemas for runtime validation
+- [x] Add schema version constant (`SCHEMA_VERSION = '2.0.0'`)
 
 ### 1.3 Implement `WorkflowEditor` Class
-- [ ] Create the main class shell with constructor accepting `EditorOptions`
-- [ ] Implement internal state management:
-  - [ ] `nodes: WorkflowNode[]`
-  - [ ] `edges: WorkflowEdge[]`
-  - [ ] `selection: { nodes: string[], edges: string[] }`
-- [ ] Implement Event Emitter system:
-  - [ ] `on(event, callback)` - Subscribe to events
-  - [ ] `off(event, callback)` - Unsubscribe
-  - [ ] `emit(event, ...args)` - Emit events
-  - [ ] Define all `EditorEvent` types
-- [ ] Implement Extension registry:
-  - [ ] `registerExtension(extension)`
-  - [ ] `getExtension(name)`
-  - [ ] Call lifecycle hooks (`onCreate`, `onDestroy`)
-- [ ] Implement query methods:
-  - [ ] `getJSON()`, `getNodes()`, `getEdges()`, `getSelected()`
-  - [ ] `canUndo()`, `canRedo()`
-- [ ] Implement `destroy()` cleanup
+- [x] Create the main class shell with constructor accepting `EditorOptions`
+- [x] Implement internal state management:
+  - [x] `nodes: WorkflowNode[]`
+  - [x] `edges: WorkflowEdge[]`
+  - [x] `selection: { nodes: string[], edges: string[] }`
+- [x] Implement Event Emitter system:
+  - [x] `on(event, callback)` - Subscribe to events
+  - [x] `off(event, callback)` - Unsubscribe
+  - [x] `emit(event, ...args)` - Emit events
+  - [x] Define all `EditorEvent` types
+- [x] Implement Extension registry:
+  - [x] `registerExtension(extension)`
+  - [x] `getExtension(name)`
+  - [x] Call lifecycle hooks (`onCreate`, `onDestroy`)
+- [x] Implement query methods:
+  - [x] `getJSON()`, `getNodes()`, `getEdges()`, `getSelected()`
+  - [x] `canUndo()`, `canRedo()`
+- [x] Implement `destroy()` cleanup
 
 ### 1.4 Implement History System
-- [ ] Create `HistoryManager` class
-- [ ] Implement snapshot-based undo/redo:
-  - [ ] `push(state)` - Add state to history
-  - [ ] `undo()` - Return previous state
-  - [ ] `redo()` - Return next state
-  - [ ] `clear()` - Reset history
-- [ ] Add configurable `maxHistory` (default: 50)
-- [ ] Integrate with `WorkflowEditor`
+- [x] Create `HistoryManager` class
+- [x] Implement snapshot-based undo/redo:
+  - [x] `push(state)` - Add state to history
+  - [x] `undo()` - Return previous state
+  - [x] `redo()` - Return next state
+  - [x] `clear()` - Reset history
+- [x] Add configurable `maxHistory` (default: 50)
+- [x] Integrate with `WorkflowEditor`
 
 ### 1.5 Implement Command System
-- [ ] Create `CommandManager` class
-- [ ] Implement core node commands:
-  - [ ] `createNode(type, data?, position?)`
-  - [ ] `deleteNode(id)`
-  - [ ] `updateNodeData(id, data)`
-  - [ ] `duplicateNode(id)`
-  - [ ] `setNodePosition(id, position)`
-- [ ] Implement edge commands:
-  - [ ] `createEdge(source, target, sourceHandle?, targetHandle?)`
-  - [ ] `deleteEdge(id)`
-  - [ ] `updateEdgeData(id, data)`
-- [ ] Implement selection commands:
-  - [ ] `selectNode(id, additive?)`
-  - [ ] `selectEdge(id, additive?)`
-  - [ ] `selectAll()`, `deselectAll()`
-- [ ] Implement history commands:
-  - [ ] `undo()`, `redo()`
-- [ ] Implement viewport commands:
-  - [ ] `zoomTo(level)`, `zoomIn()`, `zoomOut()`
-  - [ ] `fitView(options?)`, `setViewport(viewport)`
-- [ ] Implement chainable API (`editor.chain()...run()`)
-- [ ] Ensure all mutating commands push to history
+- [x] Create `CommandManager` class
+- [x] Implement core node commands:
+  - [x] `createNode(type, data?, position?)`
+  - [x] `deleteNode(id)`
+  - [x] `updateNodeData(id, data)`
+  - [x] `duplicateNode(id)`
+  - [x] `setNodePosition(id, position)`
+- [x] Implement edge commands:
+  - [x] `createEdge(source, target, sourceHandle?, targetHandle?)`
+  - [x] `deleteEdge(id)`
+  - [x] `updateEdgeData(id, data)`
+- [x] Implement selection commands:
+  - [x] `selectNode(id, additive?)`
+  - [x] `selectEdge(id, additive?)`
+  - [x] `selectAll()`, `deselectAll()`
+- [x] Implement history commands:
+  - [x] `undo()`, `redo()`
+- [x] Implement viewport commands:
+  - [x] `zoomTo(level)`, `zoomIn()`, `zoomOut()`
+  - [x] `fitView(options?)`, `setViewport(viewport)`
+- [x] Implement chainable API (`editor.chain()...run()`)
+- [x] Ensure all mutating commands push to history
 
 ### 1.6 Implement Validation System
-- [ ] Create `validateWorkflow(nodes, edges)` function
-- [ ] Implement validation rules:
-  - [ ] `NO_START_NODE` - Must have exactly one start node
-  - [ ] `MULTIPLE_START_NODES` - Only one start allowed
-  - [ ] `DISCONNECTED_NODE` - All nodes must be reachable from start
-  - [ ] `CYCLE_DETECTED` - DAG validation (no cycles)
-  - [ ] `MISSING_MODEL` - Agent nodes need a model
-- [ ] Implement warning rules:
-  - [ ] `EMPTY_PROMPT` - Agent without prompt
-  - [ ] `DEAD_END_NODE` - Node with no outputs
-  - [ ] `MISSING_EDGE_LABEL` - Router edge without label
-- [ ] Return `ValidationResult` with errors and warnings
+- [x] Create `validateWorkflow(nodes, edges)` function
+- [x] Implement validation rules:
+  - [x] `NO_START_NODE` - Must have exactly one start node
+  - [x] `MULTIPLE_START_NODES` - Only one start allowed
+  - [x] `DISCONNECTED_NODE` - All nodes must be reachable from start
+  - [x] `CYCLE_DETECTED` - DAG validation (no cycles)
+  - [x] `MISSING_MODEL` - Agent nodes need a model
+- [x] Implement warning rules:
+  - [x] `EMPTY_PROMPT` - Agent without prompt
+  - [x] `DEAD_END_NODE` - Node with no outputs
+  - [x] `MISSING_EDGE_LABEL` - Router edge without label
+- [x] Return `ValidationResult` with errors and warnings
 
 ---
 
 ## Phase 2: Vue Integration (`@or3/workflow-vue`)
 
 ### 2.1 Core Composables
-- [ ] Create `useEditor(options)` composable:
-  - [ ] Instantiate `WorkflowEditor`
-  - [ ] Return reactive refs for state
-  - [ ] Handle cleanup on unmount
-- [ ] Create `useNodeState(nodeId)` composable:
-  - [ ] Reactive access to node data
-  - [ ] Update methods
-- [ ] Create `useExecutionState()` composable:
-  - [ ] `isRunning`, `streamingContent`, `nodeStatuses`
-  - [ ] `currentNodeId`, `error`
+- [x] Create `useEditor(options)` composable:
+  - [x] Instantiate `WorkflowEditor`
+  - [x] Return reactive refs for state
+  - [x] Handle cleanup on unmount
+- [x] Create `useNodeState(nodeId)` composable:
+  - [x] Reactive access to node data
+  - [x] Update methods
+- [x] Create `useExecutionState()` composable:
+  - [x] `isRunning`, `streamingContent`, `nodeStatuses`
+  - [x] `currentNodeId`, `error`
 
 ### 2.2 WorkflowCanvas Component
-- [ ] Create `<WorkflowCanvas>` component wrapping Vue Flow
-- [ ] Accept `editor` prop (WorkflowEditor instance)
-- [ ] Sync Vue Flow state with editor state:
-  - [ ] `nodesChange` → editor commands
-  - [ ] `edgesChange` → editor commands
-  - [ ] `connect` → `createEdge` command
-- [ ] Handle drag-and-drop from palette
-- [ ] Handle keyboard shortcuts (delegate to editor)
-- [ ] Emit events: `nodeClick`, `edgeClick`, `paneClick`
+- [x] Create `<WorkflowCanvas>` component wrapping Vue Flow
+- [x] Accept `editor` prop (WorkflowEditor instance)
+- [x] Sync Vue Flow state with editor state:
+  - [x] `nodesChange` → editor commands
+  - [x] `edgesChange` → editor commands
+  - [x] `connect` → `createEdge` command
+- [x] Handle drag-and-drop from palette
+- [x] Handle keyboard shortcuts (delegate to editor)
+- [x] Emit events: `nodeClick`, `edgeClick`, `paneClick`
 
 ### 2.3 Node Components
-- [ ] Create `<NodeWrapper>` base component:
-  - [ ] Status indicator (idle/active/completed/error)
-  - [ ] Selection styling
-  - [ ] Delete button
-  - [ ] Slot for node-specific content
-- [ ] Create `<StartNode>` component
-- [ ] Create `<AgentNode>` component:
-  - [ ] Display label, model badge
-  - [ ] Input/output handles
-- [ ] Create `<RouterNode>` component:
-  - [ ] Dynamic output handles based on routes
-  - [ ] Route labels on handles
-- [ ] Create `<ParallelNode>` component:
-  - [ ] Dynamic output handles based on branches
-  - [ ] Branch labels
-- [ ] Create `<ToolNode>` component (placeholder for future)
+- [x] Create `<NodeWrapper>` base component:
+  - [x] Status indicator (idle/active/completed/error)
+  - [x] Selection styling
+  - [x] Delete button
+  - [x] Slot for node-specific content
+- [x] Create `<StartNode>` component
+- [x] Create `<AgentNode>` component:
+  - [x] Display label, model badge
+  - [x] Input/output handles
+- [x] Create `<RouterNode>` component:
+  - [x] Dynamic output handles based on routes
+  - [x] Route labels on handles
+- [x] Create `<ParallelNode>` component:
+  - [x] Dynamic output handles based on branches
+  - [x] Branch labels
+- [x] Create `<ToolNode>` component (placeholder for future)
 
 ### 2.4 UI Components
-- [ ] Create `<NodePalette>` component:
-  - [ ] List available node types from extensions
-  - [ ] Drag-and-drop support
-  - [ ] Group by category
-- [ ] Create `<NodeInspector>` component:
-  - [ ] Tab-based UI (Prompt, Model, Tools, Routes/Branches)
-  - [ ] Type-specific panels
-  - [ ] Debounced save on input
-- [ ] Create `<ChatPanel>` component:
-  - [ ] Message list with user/assistant styling
-  - [ ] Streaming content display
-  - [ ] Process flow indicator
-  - [ ] Input with send button
-  - [ ] **Multimodal Attachment Support**:
-    - [ ] File picker button (images, PDFs, audio, etc.)
-    - [ ] Drag-and-drop file upload
-    - [ ] Attachment preview chips (thumbnail for images, icon for files)
-    - [ ] Remove attachment button
-    - [ ] Show supported modalities based on workflow's first agent model
-    - [ ] Disable/warn for unsupported file types
-- [ ] Create `<EdgeLabelEditor>` component:
-  - [ ] Inline popover for editing edge labels
-- [ ] Create `<Controls>` component:
-  - [ ] Zoom in/out, fit view buttons
-  - [ ] Undo/redo buttons
-- [ ] Create `<MiniMap>` wrapper
-- [ ] Create `<ValidationOverlay>` component:
-  - [ ] Display errors/warnings on nodes
-  - [ ] Tooltip with details
+- [x] Create `<NodePalette>` component:
+  - [x] List available node types from extensions
+  - [x] Drag-and-drop support
+  - [x] Group by category
+- [x] Create `<NodeInspector>` component:
+  - [x] Tab-based UI (Prompt, Model, Tools, Routes/Branches)
+  - [x] Type-specific panels
+  - [x] Debounced save on input
+- [x] Create `<ChatPanel>` component:
+  - [x] Message list with user/assistant styling
+  - [x] Streaming content display
+  - [x] Process flow indicator
+  - [x] Input with send button
+  - [x] **Multimodal Attachment Support**:
+    - [x] File picker button (images, PDFs, audio, etc.)
+    - [x] Drag-and-drop file upload
+    - [x] Attachment preview chips (thumbnail for images, icon for files)
+    - [x] Remove attachment button
+    - [x] Show supported modalities based on workflow's first agent model
+    - [x] Disable/warn for unsupported file types
+- [x] Create `<EdgeLabelEditor>` component:
+  - [x] Inline popover for editing edge labels
+- [x] Create `<Controls>` component:
+  - [x] Zoom in/out, fit view buttons
+  - [x] Undo/redo buttons
+- [x] Create `<MiniMap>` wrapper
+- [x] Create `<ValidationOverlay>` component:
+  - [x] Display errors/warnings on nodes
+  - [x] Tooltip with details
 
 ---
 
 ## Phase 3: Adapters & Execution
 
 ### 3.1 Execution Adapter Interface
-- [ ] Define `ExecutionAdapter` interface
-- [ ] Define `ExecutionCallbacks` interface
-- [ ] Define `ExecutionResult` interface
-- [ ] Define `ExecutionContext` interface
-- [ ] Define `ExecutionOptions` interface
+- [x] Define `ExecutionAdapter` interface
+- [x] Define `ExecutionCallbacks` interface
+- [x] Define `ExecutionResult` interface
+- [x] Define `ExecutionContext` interface
+- [x] Define `ExecutionOptions` interface
 
 ### 3.2 OpenRouterExecutionAdapter
-- [ ] Create `OpenRouterExecutionAdapter` class
-- [ ] Implement graph building (`buildGraph`):
-  - [ ] Create node map
-  - [ ] Build parent/child adjacency lists
-- [ ] Implement BFS execution loop:
-  - [ ] Dependency checking (wait for parents)
-  - [ ] Cycle/iteration safety limit
-- [ ] Implement node executors:
-  - [ ] `executeStartNode` - Pass through input (including attachments)
-  - [ ] `executeAgentNode` - LLM call with streaming and multimodal support
-  - [ ] `executeRouterNode` - Classification and route selection
-  - [ ] `executeParallelNode` - Concurrent branch execution with merge
-- [ ] **Implement Multimodal Support**:
-  - [ ] `buildMessageContent(text, attachments)` - Convert attachments to SDK format
-  - [ ] Handle `image_url` type (URL or base64 data URI)
-  - [ ] Handle `file` type for PDFs and documents
-  - [ ] Handle `audio` type for audio inputs
-  - [ ] Validate attachments against model's `inputModalities`
-  - [ ] Skip unsupported attachments with warning callback
-- [ ] **Implement Model Capability Queries**:
-  - [ ] `getModelCapabilities(modelId)` - Fetch model info from OpenRouter
-  - [ ] `supportsModality(modelId, modality)` - Check if model accepts modality
-  - [ ] Cache model capabilities to avoid repeated API calls
-- [ ] Implement streaming support:
-  - [ ] Call `onToken` callback for each chunk
-  - [ ] Accumulate output
-- [ ] Implement retry logic:
-  - [ ] Exponential backoff
-  - [ ] Skip retry for auth errors
-- [ ] Implement cancellation:
-  - [ ] `AbortController` integration
-  - [ ] `stop()` method
-- [ ] Implement `isRunning()` method
+- [x] Create `OpenRouterExecutionAdapter` class
+- [x] Implement graph building (`buildGraph`):
+  - [x] Create node map
+  - [x] Build parent/child adjacency lists
+- [x] Implement BFS execution loop:
+  - [x] Dependency checking (wait for parents)
+  - [x] Cycle/iteration safety limit
+- [x] Implement node executors:
+  - [x] `executeStartNode` - Pass through input (including attachments)
+  - [x] `executeAgentNode` - LLM call with streaming and multimodal support
+  - [x] `executeRouterNode` - Classification and route selection
+  - [x] `executeParallelNode` - Concurrent branch execution with merge
+- [x] **Implement Multimodal Support**:
+  - [x] `buildMessageContent(text, attachments)` - Convert attachments to SDK format
+  - [x] Handle `image_url` type (URL or base64 data URI)
+  - [x] Handle `file` type for PDFs and documents
+  - [x] Handle `audio` type for audio inputs
+  - [x] Validate attachments against model's `inputModalities`
+  - [x] Skip unsupported attachments with warning callback
+- [x] **Implement Model Capability Queries**:
+  - [x] `getModelCapabilities(modelId)` - Fetch model info from OpenRouter
+  - [x] `supportsModality(modelId, modality)` - Check if model accepts modality
+  - [x] Cache model capabilities to avoid repeated API calls
+- [x] Implement streaming support:
+  - [x] Call `onToken` callback for each chunk
+  - [x] Accumulate output
+- [x] Implement retry logic:
+  - [x] Exponential backoff
+  - [x] Skip retry for auth errors
+- [x] Implement cancellation:
+  - [x] `AbortController` integration
+  - [x] `stop()` method
+- [x] Implement `isRunning()` method
 
 ### 3.3 Storage Adapters
-- [ ] Define `StorageAdapter` interface
-- [ ] Implement `LocalStorageAdapter`:
-  - [ ] `save(workflow)` - Store in localStorage
-  - [ ] `load(id)` - Retrieve and validate
-  - [ ] `delete(id)` - Remove
-  - [ ] `list()` - Return summaries
-  - [ ] `export(workflow)` - JSON string
-  - [ ] `import(json)` - Parse and validate
-- [ ] (Optional) Implement `IndexedDBAdapter` for larger workflows
+- [x] Define `StorageAdapter` interface
+- [x] Implement `LocalStorageAdapter`:
+  - [x] `save(workflow)` - Store in localStorage
+  - [x] `load(id)` - Retrieve and validate
+  - [x] `delete(id)` - Remove
+  - [x] `list()` - Return summaries
+  - [x] `export(workflow)` - JSON string
+  - [x] `import(json)` - Parse and validate
+- [x] (Optional) Implement `IndexedDBAdapter` for larger workflows
 
 ---
 
 ## Phase 4: Standard Extensions
 
 ### 4.1 StartNodeExtension
-- [ ] Define extension with:
-  - [ ] `name: 'start'`
-  - [ ] `outputs: [{ id: 'output', type: 'output' }]`
-  - [ ] `defaultData: { label: 'Start' }`
-  - [ ] `component: StartNode`
-- [ ] Implement validation (only one allowed)
+- [x] Define extension with:
+  - [x] `name: 'start'`
+  - [x] `outputs: [{ id: 'output', type: 'output' }]`
+  - [x] `defaultData: { label: 'Start' }`
+  - [x] `component: StartNode`
+- [x] Implement validation (only one allowed)
 
 ### 4.2 AgentNodeExtension
-- [ ] Define extension with:
-  - [ ] `name: 'agent'`
-  - [ ] `inputs/outputs` port definitions
-  - [ ] `defaultData: { label: 'Agent', model: 'openai/gpt-4o-mini', prompt: '' }`
-  - [ ] `component: AgentNode`
-- [ ] Implement `execute` function
-- [ ] Implement validation (require model)
+- [x] Define extension with:
+  - [x] `name: 'agent'`
+  - [x] `inputs/outputs` port definitions
+  - [x] `defaultData: { label: 'Agent', model: 'openai/gpt-4o-mini', prompt: '' }`
+  - [x] `component: AgentNode`
+- [x] Implement `execute` function
+- [x] Implement validation (require model)
 
 ### 4.3 RouterNodeExtension
-- [ ] Define extension with:
-  - [ ] `name: 'router'`
-  - [ ] Dynamic outputs based on `routes` data
-  - [ ] `defaultData: { label: 'Router', routes: [...] }`
-  - [ ] `component: RouterNode`
-- [ ] Implement `execute` function (LLM classification)
-- [ ] Implement validation (require at least one route)
+- [x] Define extension with:
+  - [x] `name: 'router'`
+  - [x] Dynamic outputs based on `routes` data
+  - [x] `defaultData: { label: 'Router', routes: [...] }`
+  - [x] `component: RouterNode`
+- [x] Implement `execute` function (LLM classification)
+- [x] Implement validation (require at least one route)
 
 ### 4.4 ParallelNodeExtension
-- [ ] Define extension with:
-  - [ ] `name: 'parallel'`
-  - [ ] Dynamic outputs based on `branches` data
-  - [ ] `defaultData: { label: 'Parallel', branches: [...] }`
-  - [ ] `component: ParallelNode`
-- [ ] Implement `execute` function (concurrent execution + merge)
+- [x] Define extension with:
+  - [x] `name: 'parallel'`
+  - [x] Dynamic outputs based on `branches` data
+  - [x] `defaultData: { label: 'Parallel', branches: [...] }`
+  - [x] `component: ParallelNode`
+- [x] Implement `execute` function (concurrent execution + merge)
 
 ### 4.5 ToolNodeExtension (Placeholder)
-- [ ] Define basic extension structure
-- [ ] Defer full implementation to future iteration
+- [x] Define basic extension structure
+- [x] Defer full implementation to future iteration
 
 ---
 
