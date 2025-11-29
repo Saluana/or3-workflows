@@ -126,25 +126,26 @@ watch(() => editor.value?.getNodes(), () => {
 function createDefaultWorkflow() {
   if (!editor.value) return
   
-  editor.value.commands.createNode('start', { label: 'Start' }, { x: 250, y: 0 })
-  editor.value.commands.createNode('router', { 
-    label: 'Detect Intent',
-  }, { x: 200, y: 120 })
-  editor.value.commands.createNode('agent', { 
-    label: 'Technical Agent',
-    model: 'anthropic/claude-3.5-sonnet',
-    prompt: 'You are a technical support specialist. Help users with technical issues.'
-  }, { x: 50, y: 280 })
-  editor.value.commands.createNode('agent', { 
-    label: 'Sales Agent',
-    model: 'openai/gpt-4o',
-    prompt: 'You are a friendly sales representative. Help users with product inquiries.'
-  }, { x: 350, y: 280 })
-  editor.value.commands.createNode('agent', { 
-    label: 'Response Formatter',
-    model: 'openai/gpt-4o-mini',
-    prompt: 'Format the response professionally and ensure it is helpful and complete.'
-  }, { x: 200, y: 440 })
+  // Load a pre-built default workflow with edges
+  const defaultWorkflow: WorkflowData = {
+    meta: { version: '2.0.0', name: 'Customer Support Workflow' },
+    nodes: [
+      { id: 'start', type: 'start', position: { x: 250, y: 0 }, data: { label: 'Start' } },
+      { id: 'router', type: 'router', position: { x: 200, y: 120 }, data: { label: 'Detect Intent', prompt: 'Route to technical support for technical issues, sales for product inquiries.' } },
+      { id: 'tech-agent', type: 'agent', position: { x: 50, y: 280 }, data: { label: 'Technical Agent', model: 'anthropic/claude-3.5-sonnet', prompt: 'You are a technical support specialist. Help users with technical issues, troubleshooting, and bug fixes.' } },
+      { id: 'sales-agent', type: 'agent', position: { x: 350, y: 280 }, data: { label: 'Sales Agent', model: 'openai/gpt-4o', prompt: 'You are a friendly sales representative. Help users with product inquiries, pricing, and features.' } },
+      { id: 'formatter', type: 'agent', position: { x: 200, y: 440 }, data: { label: 'Response Formatter', model: 'openai/gpt-4o-mini', prompt: 'Format the response professionally and ensure it is helpful, complete, and friendly.' } },
+    ],
+    edges: [
+      { id: 'e1', source: 'start', target: 'router' },
+      { id: 'e2', source: 'router', target: 'tech-agent', label: 'Technical' },
+      { id: 'e3', source: 'router', target: 'sales-agent', label: 'Sales' },
+      { id: 'e4', source: 'tech-agent', target: 'formatter' },
+      { id: 'e5', source: 'sales-agent', target: 'formatter' },
+    ],
+  }
+  
+  editor.value.load(defaultWorkflow)
 }
 
 // ============================================================================
