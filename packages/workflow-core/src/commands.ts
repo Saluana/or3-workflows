@@ -104,7 +104,7 @@ export class CommandManager {
             ...node,
             id: crypto.randomUUID(),
             position: { x: node.position.x + 20, y: node.position.y + 20 },
-            data: structuredClone(node.data),
+            data: JSON.parse(JSON.stringify(node.data)),
             selected: false,
         };
 
@@ -282,9 +282,13 @@ export class CommandManager {
     }
 
     private pushHistory(): void {
+        // Use JSON serialization to ensure we store clean snapshots without proxies or non-serializable data
+        const nodesSnapshot = JSON.parse(JSON.stringify(this.editor.nodes));
+        const edgesSnapshot = JSON.parse(JSON.stringify(this.editor.edges));
+
         this.editor.history.push({
-            nodes: structuredClone(this.editor.nodes),
-            edges: structuredClone(this.editor.edges),
+            nodes: nodesSnapshot,
+            edges: edgesSnapshot,
         });
     }
 }

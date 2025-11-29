@@ -1,63 +1,70 @@
-import { ref } from 'vue';
+import {
+    useWorkflowStorage as useCoreStorage,
+} from '@or3/workflow-vue';
 import { LocalStorageAdapter, type WorkflowData } from '@or3/workflow-core';
 
-// ============================================================================
-// Types
-// ============================================================================
-
-export interface SavedWorkflow {
-    id: string;
-    name: string;
-    nodes: unknown[];
-    edges: unknown[];
-    createdAt: string;
-    updatedAt: string;
-}
-
-// ============================================================================
-// Composable
-// ============================================================================
-
-const STORAGE_KEY = 'or3-workflow-saved';
+export type SavedWorkflow = WorkflowData & { id: string };
 
 export function useWorkflowStorage() {
-    const savedWorkflows = ref<SavedWorkflow[]>([]);
-    const storage = new LocalStorageAdapter();
+    const adapter = new LocalStorageAdapter('or3-workflow-saved');
+    const {
+        workflows,
+        loadList,
+        load,
+        save,
+        remove,
+    } = useCoreStorage(adapter);
 
-    function loadSavedWorkflows(): void {
-        try {
-            const stored = localStorage.getItem(STORAGE_KEY);
-            if (stored) {
-                savedWorkflows.value = JSON.parse(stored);
-            }
-        } catch (e) {
-            console.error('Failed to load saved workflows:', e);
-        }
+    // Wrapper to match demo's expected API
+    const savedWorkflows = workflows;
+
+    // Autosave adapter - needs to be declared before functions that use it
+    const autosaveAdapter = new LocalStorageAdapter('or3-workflow-autosave');
+
+    function loadSavedWorkflows() {
+        return loadList();
     }
 
-    function saveWorkflow(
+    // ... (rest of file)
+
+    return {
+        savedWorkflows,
+        storage: adapter,
+        loadSavedWorkflows,
+        loadList,
+        load,
+        saveWorkflow,
+        deleteWorkflow,
+        exportWorkflow,
+        importWorkflow,
+        autosave,
+        loadAutosave,
+    };
+
+    async function saveWorkflow(
         name: string,
         nodes: unknown[],
         edges: unknown[]
-    ): SavedWorkflow {
-        const now = new Date().toISOString();
-        const workflow: SavedWorkflow = {
-            id: crypto.randomUUID(),
-            name,
-            nodes: structuredClone(nodes),
-            edges: structuredClone(edges),
-            createdAt: now,
-            updatedAt: now,
+    ) {
+        const workflow: WorkflowData = {
+            meta: {
+                version: '2.0.0',
+                name,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+            },
+            nodes: nodes as any,
+            edges: edges as any,
         };
-
-        savedWorkflows.value.push(workflow);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(savedWorkflows.value));
+        
+        await save(workflow);
+        // Return type in demo was SavedWorkflow, but core save returns ID.
+        // We'll just reload the list to update UI.
         return workflow;
     }
 
-    function deleteWorkflow(id: string): void {
-        savedWorkflows.value = savedWorkflows.value.filter((w) => w.id !== id);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(savedWorkflows.value));
+    function deleteWorkflow(id: string) {
+        return remove(id);
     }
 
     function exportWorkflow(
@@ -100,17 +107,19 @@ export function useWorkflowStorage() {
     }
 
     function autosave(workflow: WorkflowData): void {
-        storage.autosave(workflow);
+        autosaveAdapter.autosave(workflow);
     }
 
     function loadAutosave(): WorkflowData | null {
-        return storage.loadAutosave();
+        return autosaveAdapter.loadAutosave();
     }
 
     return {
         savedWorkflows,
-        storage,
+        storage: adapter,
         loadSavedWorkflows,
+        loadList,
+        load,
         saveWorkflow,
         deleteWorkflow,
         exportWorkflow,

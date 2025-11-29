@@ -9,6 +9,28 @@ export interface EditorOptions {
   onSelectionUpdate?: (props: { editor: WorkflowEditor }) => void;
 }
 
+/**
+ * Factory function to create a new WorkflowEditor instance.
+ * 
+ * @example
+ * ```ts
+ * const editor = createWorkflowEditor({
+ *   content: initialWorkflowData,
+ *   extensions: [new MyExtension()]
+ * });
+ * ```
+ * 
+ * @param options - Configuration options for the editor
+ * @returns A new WorkflowEditor instance
+ */
+export function createWorkflowEditor(options: EditorOptions = {}): WorkflowEditor {
+  return new WorkflowEditor(options);
+}
+
+/**
+ * Core class for managing workflow state and operations.
+ * Handles node/edge management, history (undo/redo), selection, and extensions.
+ */
 export class WorkflowEditor {
   public nodes: WorkflowNode[] = [];
   public edges: WorkflowEdge[] = [];
@@ -39,6 +61,10 @@ export class WorkflowEditor {
     this.emit = this.emit.bind(this);
   }
 
+  /**
+   * Register an extension with the editor.
+   * @param extension - The extension to register
+   */
   public registerExtension(extension: Extension) {
     if (this.extensions.has(extension.name)) {
       console.warn(`Extension ${extension.name} already registered.`);
@@ -56,6 +82,11 @@ export class WorkflowEditor {
     }
   }
 
+  /**
+   * Load workflow data into the editor.
+   * Clears history and emits 'update' event.
+   * @param content - The workflow data to load
+   */
   public load(content: WorkflowData) {
     try {
       const parsed = WorkflowDataSchema.parse(content);
@@ -98,6 +129,10 @@ export class WorkflowEditor {
     }
   }
 
+  /**
+   * Get the current workflow data as JSON.
+   * @returns The current workflow data
+   */
   public getJSON(): WorkflowData {
     return {
       meta: {

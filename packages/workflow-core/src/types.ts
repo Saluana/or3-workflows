@@ -47,6 +47,10 @@ export interface ExecutionInput {
 // Workflow Data Types
 // ============================================================================
 
+/**
+ * Represents the complete data structure of a workflow.
+ * Contains metadata, nodes, and edges.
+ */
 export interface WorkflowData {
   meta: {
     version: string;
@@ -59,14 +63,25 @@ export interface WorkflowData {
   edges: WorkflowEdge[];
 }
 
+/**
+ * Represents a single node in the workflow graph.
+ */
 export interface WorkflowNode {
+  /** Unique identifier for the node */
   id: string;
+  /** Type of the node (e.g., 'agent', 'router') */
   type: string;
+  /** Position on the canvas */
   position: { x: number; y: number };
+  /** Node-specific data */
   data: NodeData;
+  /** Selection state */
   selected?: boolean;
 }
 
+/**
+ * Union type for all possible node data structures.
+ */
 export type NodeData =
   | StartNodeData
   | AgentNodeData
@@ -74,17 +89,32 @@ export type NodeData =
   | ParallelNodeData
   | ToolNodeData;
 
+/**
+ * Base interface for all node data.
+ */
 export interface BaseNodeData {
+  /** Display label for the node */
   label: string;
+  /** Current execution status */
   status?: NodeStatus;
 }
 
+/**
+ * Execution status of a node.
+ */
 export type NodeStatus = 'idle' | 'active' | 'completed' | 'error';
 
+/**
+ * Data for the Start node.
+ */
 export interface StartNodeData extends BaseNodeData {
   // Minimal
 }
 
+/**
+ * Data for an Agent node.
+ * Configures the AI model and its parameters.
+ */
 export interface AgentNodeData extends BaseNodeData {
   model: string;
   prompt: string;
@@ -97,18 +127,28 @@ export interface AgentNodeData extends BaseNodeData {
   acceptsFiles?: boolean;
 }
 
+/**
+ * Data for a Router node.
+ * Defines routing logic based on conditions.
+ */
 export interface RouterNodeData extends BaseNodeData {
   model?: string;
   prompt?: string;
   routes: RouteDefinition[];
 }
 
+/**
+ * Definition of a single route in a Router node.
+ */
 export interface RouteDefinition {
   id: string;
   label: string;
   condition?: RouteCondition;
 }
 
+/**
+ * Condition for a route.
+ */
 export interface RouteCondition {
   type: 'contains' | 'equals' | 'regex' | 'custom';
   field?: string;
@@ -116,12 +156,19 @@ export interface RouteCondition {
   expression?: string;
 }
 
+/**
+ * Data for a Parallel node.
+ * Defines parallel execution branches.
+ */
 export interface ParallelNodeData extends BaseNodeData {
   model?: string;
   prompt?: string;
   branches: BranchDefinition[];
 }
 
+/**
+ * Definition of a branch in a Parallel node.
+ */
 export interface BranchDefinition {
   id: string;
   label: string;
@@ -129,11 +176,18 @@ export interface BranchDefinition {
   prompt?: string;
 }
 
+/**
+ * Data for a Tool node.
+ * Configures a specific tool execution.
+ */
 export interface ToolNodeData extends BaseNodeData {
   toolId: string;
   config?: Record<string, any>;
 }
 
+/**
+ * Represents a connection between two nodes.
+ */
 export interface WorkflowEdge {
   id: string;
   source: string;
@@ -150,6 +204,9 @@ export interface EdgeData {
   condition?: RouteCondition;
 }
 
+/**
+ * Defines an input or output port on a node.
+ */
 export interface PortDefinition {
   id: string;
   label?: string;
@@ -163,6 +220,9 @@ export interface PortDefinition {
 // Extension Types
 // ============================================================================
 
+/**
+ * Base interface for editor extensions.
+ */
 export interface Extension {
   name: string;
   type: 'node' | 'behavior';
@@ -173,6 +233,9 @@ export interface Extension {
   onDestroy?: () => void;
 }
 
+/**
+ * Extension for defining custom node types.
+ */
 export interface NodeExtension extends Extension {
   type: 'node';
   inputs?: PortDefinition[];

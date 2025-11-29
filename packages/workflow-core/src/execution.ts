@@ -154,9 +154,30 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
       // BFS execution through the graph
       const queue: string[] = [startNode.id];
       const executed = new Set<string>();
+      const skipped = new Set<string>();
       const maxIterations = workflow.nodes.length * MAX_ITERATIONS_MULTIPLIER;
       let iterations = 0;
       let finalOutput = '';
+
+      // Helper to propagate skip status
+      const propagateSkip = (nodeId: string) => {
+        if (executed.has(nodeId)) return;
+
+        // Check if all parents are resolved (executed or skipped)
+        const parentIds = graph.parents[nodeId] || [];
+        const allParentsResolved = parentIds.every(p => executed.has(p));
+
+        if (allParentsResolved) {
+          executed.add(nodeId);
+          skipped.add(nodeId);
+          
+          // Propagate to children
+          const children = graph.children[nodeId] || [];
+          for (const child of children) {
+            propagateSkip(child.nodeId);
+          }
+        }
+      };
 
       while (queue.length > 0 && iterations < maxIterations) {
         iterations++;
@@ -175,6 +196,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         const allParentsExecuted = parentIds.every(p => executed.has(p));
 
         if (!allParentsExecuted && currentId !== startNode.id) {
+          // If not all parents executed, check if we should wait or if we are stuck
+          // But since we only add to queue when parents complete, this case implies
+          // we were added by one parent but another is still pending.
+          // We should re-queue and wait.
           queue.push(currentId);
           continue;
         }
@@ -194,12 +219,32 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         nodeOutputs[currentId] = result.output;
         finalOutput = result.output;
 
+        // Handle skipped nodes (children not in nextNodes)
+        const allChildren = graph.children[currentId] || [];
+        for (const child of allChildren) {
+          if (!result.nextNodes.includes(child.nodeId)) {
+            propagateSkip(child.nodeId);
+          }
+        }
+
         // Queue next nodes
         for (const nextId of result.nextNodes) {
           if (!executed.has(nextId)) {
             queue.push(nextId);
           }
         }
+        
+        // Also check children of skipped nodes - they might be ready now if they have multiple parents
+        // (e.g. merge node where one parent was skipped and one just finished)
+        // Actually, propagateSkip handles the recursive skipping.
+        // But if a merge node has one skipped parent and one active parent (nextId),
+        // nextId is added to queue. When nextId runs, it will add merge node to queue.
+        // When merge node runs, it checks allParentsExecuted.
+        // Since skipped parent is in executed set, it passes.
+        // So we just need to ensure that if a node was WAITING in the queue (re-queued),
+        // and its other parent just got skipped, it should be processed.
+        // But we don't keep waiting nodes in a separate list, we re-push to queue.
+        // So it will be checked again.
       }
 
       if (iterations >= maxIterations) {

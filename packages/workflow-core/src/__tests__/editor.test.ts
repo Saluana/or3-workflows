@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { WorkflowEditor } from '../editor';
+import { WorkflowEditor, createWorkflowEditor } from '../editor';
 import type { WorkflowData, NodeExtension } from '../types';
 
 // Sample workflow for testing
@@ -253,6 +253,19 @@ describe('WorkflowEditor', () => {
 
       expect(editor.nodes).toHaveLength(0);
       expect(editor.edges).toHaveLength(0);
+    });
+  });
+
+  describe('createWorkflowEditor', () => {
+    it('should create an editor instance', () => {
+      const editor = createWorkflowEditor();
+      expect(editor).toBeInstanceOf(WorkflowEditor);
+    });
+
+    it('should pass options to constructor', () => {
+      const workflow = createTestWorkflow();
+      const editor = createWorkflowEditor({ content: workflow });
+      expect(editor.nodes).toHaveLength(2);
     });
   });
 });

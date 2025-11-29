@@ -20,9 +20,9 @@ import {
     useWorkflowValidation,
     useMobileNav,
     type ChatMessage,
-    type SavedWorkflow,
     type ValidationResult,
 } from './composables';
+import type { WorkflowSummary } from '@or3/workflow-core';
 
 // ============================================================================
 // Editor Setup
@@ -58,6 +58,7 @@ const {
     importWorkflow,
     autosave,
     loadAutosave,
+    load,
 } = useWorkflowStorage();
 
 const { execute: executeWorkflowFn } = useWorkflowExecution();
@@ -344,17 +345,14 @@ function handleSave() {
     showSaveModal.value = false;
 }
 
-function handleLoad(workflow: SavedWorkflow) {
+async function handleLoad(summary: WorkflowSummary) {
     if (!editor.value) return;
 
-    const data: WorkflowData = {
-        meta: { version: '2.0.0', name: workflow.name },
-        nodes: workflow.nodes as WorkflowData['nodes'],
-        edges: workflow.edges as WorkflowData['edges'],
-    };
+    const fullWorkflow = await load(summary.id);
+    if (!fullWorkflow) return;
 
-    editor.value.load(data);
-    workflowName.value = workflow.name;
+    editor.value.load(fullWorkflow);
+    workflowName.value = fullWorkflow.meta.name;
     showLoadModal.value = false;
 }
 
