@@ -343,4 +343,193 @@ describe('CommandManager', () => {
       expect(result).toBe(false);
     });
   });
+
+  describe('immutability', () => {
+    it('selectNode should not mutate existing nodes array', () => {
+      const originalNodes = editor.nodes;
+
+      editor.commands.selectNode('agent-1');
+
+      expect(editor.nodes).not.toBe(originalNodes);
+    });
+
+    it('selectNode should create new node objects', () => {
+      const originalNode = editor.nodes.find(n => n.id === 'agent-1');
+
+      editor.commands.selectNode('agent-1');
+
+      const newNode = editor.nodes.find(n => n.id === 'agent-1');
+      expect(newNode).not.toBe(originalNode);
+      expect(newNode?.selected).toBe(true);
+    });
+
+    it('deselectAll should not mutate existing nodes array', () => {
+      editor.commands.selectNode('agent-1');
+      const originalNodes = editor.nodes;
+
+      editor.commands.deselectAll();
+
+      expect(editor.nodes).not.toBe(originalNodes);
+    });
+
+    it('updateNodeData should not mutate existing node', () => {
+      const originalNode = editor.nodes.find(n => n.id === 'agent-1');
+      const originalData = originalNode?.data;
+
+      editor.commands.updateNodeData('agent-1', { label: 'Updated' });
+
+      const updatedNode = editor.nodes.find(n => n.id === 'agent-1');
+      expect(updatedNode).not.toBe(originalNode);
+      expect(updatedNode?.data).not.toBe(originalData);
+    });
+
+    it('setNodePosition should not mutate existing node', () => {
+      const originalNode = editor.nodes.find(n => n.id === 'agent-1');
+
+      editor.commands.setNodePosition('agent-1', { x: 500, y: 500 });
+
+      const updatedNode = editor.nodes.find(n => n.id === 'agent-1');
+      expect(updatedNode).not.toBe(originalNode);
+    });
+
+    it('updateEdgeData should not mutate existing edge', () => {
+      const originalEdge = editor.edges.find(e => e.id === 'edge-1');
+
+      editor.commands.updateEdgeData('edge-1', { label: 'Updated' });
+
+      const updatedEdge = editor.edges.find(e => e.id === 'edge-1');
+      expect(updatedEdge).not.toBe(originalEdge);
+    });
+  });
+
+  describe('debounced history', () => {
+    it('should batch rapid updateNodeData calls into single history entry', async () => {
+      // Clear history
+      editor.load(createTestWorkflow());
+      await new Promise(resolve => setTimeout(resolve, 350));
+
+      // Rapid updates
+      editor.commands.updateNodeData('agent-1', { label: 'Update 1' });
+      editor.commands.updateNodeData('agent-1', { label: 'Update 2' });
+      editor.commands.updateNodeData('agent-1', { label: 'Update 3' });
+
+      // Wait for debounce to settle
+      await new Promise(resolve => setTimeout(resolve, 350));
+
+      // Should have only one undo available (the batched update)
+      expect(editor.canUndo()).toBe(true);
+      editor.commands.undo();
+      expect(editor.canUndo()).toBe(false);
+    });
+
+    it('commitHistory should flush pending history immediately', async () => {
+      editor.load(createTestWorkflow());
+      await new Promise(resolve => setTimeout(resolve, 350));
+
+      editor.commands.updateNodeData('agent-1', { label: 'Update 1' });
+      editor.commands.commitHistory();
+
+      // Should be immediately undoable without waiting
+      expect(editor.canUndo()).toBe(true);
+    });
+
+    it('should batch setNodePosition calls during drag', async () => {
+      editor.load(createTestWorkflow());
+      await new Promise(resolve => setTimeout(resolve, 350));
+
+      // Simulate drag with many position updates
+      for (let i = 0; i < 10; i++) {
+        editor.commands.setNodePosition('agent-1', { x: i * 10, y: i * 10 });
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 350));
+
+      // Single undo should restore to original
+      editor.commands.undo();
+      const node = editor.nodes.find(n => n.id === 'agent-1');
+      expect(node?.position).toEqual({ x: 200, y: 0 });
+    });
+  });
+
+  describe('duplicateNode', () => {
+    it('should deep clone node data', () => {
+      // Add a node with nested data
+      editor.commands.createNode('agent', { 
+        label: 'Test',
+        model: 'test-model',
+        prompt: 'test prompt',
+        tools: ['tool1', 'tool2'],
+      });
+      const originalNode = editor.nodes[editor.nodes.length - 1];
+
+      editor.commands.duplicateNode(originalNode.id);
+
+      const duplicatedNode = editor.nodes[editor.nodes.length - 1];
+      
+      // Should have same values
+      expect(duplicatedNode.data.label).toBe(originalNode.data.label);
+      
+      // But be different objects (deep clone)
+      expect(duplicatedNode.data).not.toBe(originalNode.data);
+      
+      // Nested arrays should also be cloned
+      if ('tools' in duplicatedNode.data && 'tools' in originalNode.data) {
+        expect(duplicatedNode.data.tools).not.toBe(originalNode.data.tools);
+        expect(duplicatedNode.data.tools).toEqual(originalNode.data.tools);
+      }
+    });
+
+    it('should offset position', () => {
+      const originalNode = editor.nodes.find(n => n.id === 'agent-1')!;
+
+      editor.commands.duplicateNode('agent-1');
+
+      const duplicatedNode = editor.nodes[editor.nodes.length - 1];
+      expect(duplicatedNode.position.x).toBe(originalNode.position.x + 20);
+      expect(duplicatedNode.position.y).toBe(originalNode.position.y + 20);
+    });
+
+    it('should not select duplicated node', () => {
+      editor.commands.duplicateNode('agent-1');
+
+      const duplicatedNode = editor.nodes[editor.nodes.length - 1];
+      expect(duplicatedNode.selected).toBe(false);
+    });
+  });
+
+  describe('Zod validation', () => {
+    it('should reject invalid edge label (too long)', () => {
+      const result = editor.commands.updateEdgeData('edge-1', { 
+        label: 'a'.repeat(101) // exceeds 100 char limit
+      });
+
+      expect(result).toBe(false);
+    });
+
+    it('should reject invalid temperature (out of range)', () => {
+      const result = editor.commands.updateNodeData('agent-1', { 
+        temperature: 3 // exceeds max of 2
+      });
+
+      expect(result).toBe(false);
+    });
+
+    it('should reject negative maxTokens', () => {
+      const result = editor.commands.updateNodeData('agent-1', { 
+        maxTokens: -100
+      });
+
+      expect(result).toBe(false);
+    });
+
+    it('should accept valid node data update', () => {
+      const result = editor.commands.updateNodeData('agent-1', { 
+        label: 'Valid Label',
+        temperature: 0.7,
+        maxTokens: 1000,
+      });
+
+      expect(result).toBe(true);
+    });
+  });
 });

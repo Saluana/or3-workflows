@@ -1,6 +1,30 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, watchEffect } from 'vue';
 import { WorkflowEditor, WorkflowNode } from '@or3/workflow-core';
+
+// Type guard for configurable node data
+interface ConfigurableNodeData {
+    label: string;
+    prompt?: string;
+    model?: string;
+    tools?: string[];
+    temperature?: number;
+    maxTokens?: number;
+}
+
+function isConfigurableData(data: unknown): data is ConfigurableNodeData {
+    return (
+        typeof data === 'object' &&
+        data !== null &&
+        'label' in data &&
+        typeof (data as Record<string, unknown>).label === 'string'
+    );
+}
+
+function getToolsArray(data: unknown): string[] {
+    if (!isConfigurableData(data)) return [];
+    return Array.isArray(data.tools) ? data.tools : [];
+}
 
 const props = defineProps<{
     editor: WorkflowEditor;
@@ -102,9 +126,9 @@ const updateSelection = () => {
         const node =
             props.editor.getNodes().find((n) => n.id === selected[0]) || null;
         selectedNode.value = node;
-        // Sync tools from node data
+        // Sync tools from node data using type guard
         if (node) {
-            selectedTools.value = (node.data as any)?.tools || [];
+            selectedTools.value = getToolsArray(node.data);
         }
     } else {
         selectedNode.value = null;
@@ -117,24 +141,21 @@ watch(
     () => selectedNode.value?.data,
     (data) => {
         if (data) {
-            selectedTools.value = (data as any)?.tools || [];
+            selectedTools.value = getToolsArray(data);
         }
     },
     { deep: true }
 );
 
-let unsubscribe: (() => void) | null = null;
-let unsubUpdate: (() => void) | null = null;
-
-onMounted(() => {
+// Use watchEffect for proper subscription cleanup on editor prop change
+watchEffect((onCleanup) => {
     updateSelection();
-    unsubscribe = props.editor.on('selectionUpdate', updateSelection);
-    unsubUpdate = props.editor.on('update', updateSelection);
-});
-
-onUnmounted(() => {
-    unsubscribe?.();
-    unsubUpdate?.();
+    const unsub1 = props.editor.on('selectionUpdate', updateSelection);
+    const unsub2 = props.editor.on('update', updateSelection);
+    onCleanup(() => {
+        unsub1();
+        unsub2();
+    });
 });
 
 // Computed helpers
@@ -149,7 +170,10 @@ const isConfigurable = computed(
     () => isAgentNode.value || isRouterNode.value || isParallelNode.value
 );
 
-const nodeData = computed(() => (selectedNode.value?.data as any) || {});
+const nodeData = computed<ConfigurableNodeData>(() => {
+    const data = selectedNode.value?.data;
+    return isConfigurableData(data) ? data : { label: 'Unknown' };
+});
 
 // Update handlers with debounce
 let debounceTimeout: ReturnType<typeof setTimeout> | null = null;

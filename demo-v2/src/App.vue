@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import type { Node, Edge } from '@vue-flow/core';
-import { OpenRouter } from '@openrouter/sdk';
 
 // Import from our v2 packages
-import { LocalStorageAdapter, type WorkflowData } from '@or3/workflow-core';
+import { type WorkflowData } from '@or3/workflow-core';
 import {
     WorkflowCanvas,
     NodePalette,
@@ -14,43 +13,16 @@ import {
     useExecutionState,
 } from '@or3/workflow-vue';
 
-// ============================================================================
-// Constants
-// ============================================================================
-const MAX_ITERATIONS_MULTIPLIER = 3;
-
-// ============================================================================
-// Types
-// ============================================================================
-
-interface ChatMessage {
-    id: string;
-    role: 'user' | 'assistant';
-    content: string;
-    nodeId?: string;
-    timestamp: Date;
-}
-
-interface SavedWorkflow {
-    id: string;
-    name: string;
-    nodes: any[];
-    edges: any[];
-    createdAt: string;
-    updatedAt: string;
-}
-
-interface ValidationError {
-    type: 'error' | 'warning';
-    nodeId?: string;
-    message: string;
-}
-
-interface ValidationResult {
-    isValid: boolean;
-    errors: ValidationError[];
-    warnings: ValidationError[];
-}
+// Local composables
+import {
+    useWorkflowExecution,
+    useWorkflowStorage,
+    useWorkflowValidation,
+    useMobileNav,
+    type ChatMessage,
+    type SavedWorkflow,
+    type ValidationResult,
+} from './composables';
 
 // ============================================================================
 // Editor Setup
@@ -72,10 +44,27 @@ const showChatPanel = ref(true);
 const showLeftSidebar = ref(true);
 const activePanel = ref<'palette' | 'inspector'>('palette');
 
-// Mobile
-const isMobile = ref(false);
-const mobileView = ref<'editor' | 'chat'>('editor');
-const showMobileMenu = ref(false);
+// Composables
+const {
+    isMobile,
+    mobileView,
+    showMobileMenu,
+    toggleMobileView,
+} = useMobileNav({ showChatPanel, showLeftSidebar });
+
+const {
+    savedWorkflows,
+    loadSavedWorkflows,
+    saveWorkflow: saveWorkflowToStorage,
+    deleteWorkflow,
+    exportWorkflow,
+    importWorkflow,
+    autosave,
+    loadAutosave,
+} = useWorkflowStorage();
+
+const { execute: executeWorkflowFn } = useWorkflowExecution();
+const { validateWorkflow } = useWorkflowValidation();
 
 // Edge editing
 const selectedEdge = ref<Edge | null>(null);
@@ -91,9 +80,7 @@ const messages = ref<ChatMessage[]>([]);
 const chatInput = ref('');
 const conversationHistory = ref<Array<{ role: string; content: string }>>([]);
 
-// Workflow Storage
-const STORAGE_KEY = 'or3-workflow-saved';
-const savedWorkflows = ref<SavedWorkflow[]>([]);
+// Workflow name
 const workflowName = ref('My Workflow');
 
 // Modals
@@ -102,22 +89,6 @@ const showLoadModal = ref(false);
 const showValidationModal = ref(false);
 const validationResult = ref<ValidationResult | null>(null);
 const error = ref<string | null>(null);
-
-// Storage adapter
-const storage = new LocalStorageAdapter();
-
-// ============================================================================
-// Mobile Detection
-// ============================================================================
-function checkMobile() {
-    isMobile.value = window.innerWidth <= 768;
-    if (isMobile.value) {
-        showChatPanel.value = mobileView.value === 'chat';
-        showLeftSidebar.value = false;
-    } else {
-        showLeftSidebar.value = true;
-    }
-}
 
 // ============================================================================
 // Computed
@@ -134,23 +105,17 @@ const streamingContent = computed(() => executionState.value.streamingContent);
 // ============================================================================
 onMounted(() => {
     loadSavedWorkflows();
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
 
     if (!editor.value) return;
 
     // Try to load autosave
-    const autosave = storage.loadAutosave();
-    if (autosave) {
-        editor.value.load(autosave);
+    const autosaveData = loadAutosave();
+    if (autosaveData) {
+        editor.value.load(autosaveData);
     } else {
         // Create default workflow
         createDefaultWorkflow();
     }
-});
-
-onUnmounted(() => {
-    window.removeEventListener('resize', checkMobile);
 });
 
 // Autosave on changes
@@ -158,7 +123,7 @@ watch(
     () => editor.value?.getNodes(),
     () => {
         if (!editor.value) return;
-        storage.autosave(editor.value.getJSON());
+        autosave(editor.value.getJSON());
     },
     { deep: true }
 );
@@ -274,15 +239,6 @@ function deleteEdge(edgeId: string) {
 }
 
 // ============================================================================
-// Mobile Navigation
-// ============================================================================
-function toggleMobileView(view: 'editor' | 'chat') {
-    mobileView.value = view;
-    showChatPanel.value = view === 'chat';
-    showMobileMenu.value = false;
-}
-
-// ============================================================================
 // API Key
 // ============================================================================
 function saveApiKey() {
@@ -313,19 +269,15 @@ async function handleSendMessage() {
     const nodes = editor.value.getNodes();
     const edges = editor.value.getEdges();
 
-    await executeWorkflow(message, nodes, edges);
-}
-
-async function executeWorkflow(input: string, nodes: any[], edges: any[]) {
     // Add user message
     const userMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'user',
-        content: input,
+        content: message,
         timestamp: new Date(),
     };
     messages.value.push(userMessage);
-    conversationHistory.value.push({ role: 'user', content: input });
+    conversationHistory.value.push({ role: 'user', content: message });
 
     // Reset node statuses
     nodes.forEach((n) => setNodeStatus(n.id, 'idle'));
@@ -335,69 +287,25 @@ async function executeWorkflow(input: string, nodes: any[], edges: any[]) {
     error.value = null;
 
     try {
-        // Validate API key format
-        if (!apiKey.value.startsWith('sk-or-')) {
-            throw new Error(
-                'Invalid API key format. Key should start with "sk-or-"'
-            );
-        }
-
-        const client = new OpenRouter({ apiKey: apiKey.value });
-        const graph = buildGraph(nodes, edges);
-
-        // Find start node
-        const startNode = nodes.find((n: any) => n.type === 'start');
-        if (!startNode) throw new Error('No start node found');
-
-        // Initialize execution context
-        const context = {
-            input,
-            currentInput: input,
-            history: [...conversationHistory.value.slice(0, -1)],
-            outputs: {} as Record<string, string>,
-            nodeChain: [] as string[],
-        };
-
-        // BFS execution
-        const queue: string[] = [startNode.id];
-        const executed = new Set<string>();
-        const maxIterations = nodes.length * MAX_ITERATIONS_MULTIPLIER;
-        let iterations = 0;
-        let finalOutput = '';
-
-        while (queue.length > 0 && iterations < maxIterations) {
-            iterations++;
-            const currentId = queue.shift()!;
-
-            if (executed.has(currentId)) continue;
-
-            const parentIds = graph.parents[currentId] || [];
-            const allParentsExecuted = parentIds.every((p: string) =>
-                executed.has(p)
-            );
-
-            if (!allParentsExecuted && currentId !== startNode.id) {
-                queue.push(currentId);
-                continue;
+        // Map nodes to execution format (data as Record<string, unknown>)
+        const execNodes = nodes.map(n => ({
+            id: n.id,
+            type: n.type,
+            data: { ...n.data } as Record<string, unknown>,
+        }));
+        
+        const finalOutput = await executeWorkflowFn(
+            apiKey.value,
+            execNodes,
+            edges,
+            message,
+            conversationHistory.value.slice(0, -1),
+            {
+                onNodeStatus: setNodeStatus,
+                onStreamingContent: setStreamingContent,
+                onAppendContent: appendStreamingContent,
             }
-
-            executed.add(currentId);
-
-            const result = await executeNode(
-                client,
-                currentId,
-                context,
-                graph,
-                edges
-            );
-            finalOutput = result.output;
-
-            for (const nextId of result.nextNodes) {
-                if (!executed.has(nextId)) {
-                    queue.push(nextId);
-                }
-            }
-        }
+        );
 
         // Add final assistant message
         const assistantMessage: ChatMessage = {
@@ -411,12 +319,13 @@ async function executeWorkflow(input: string, nodes: any[], edges: any[]) {
             role: 'assistant',
             content: finalOutput,
         });
-    } catch (err: any) {
-        error.value = err.message;
+    } catch (err: unknown) {
+        const errMessage = err instanceof Error ? err.message : 'Unknown error';
+        error.value = errMessage;
         const errorMessage: ChatMessage = {
             id: crypto.randomUUID(),
             role: 'assistant',
-            content: `Error: ${err.message}`,
+            content: `Error: ${errMessage}`,
             timestamp: new Date(),
         };
         messages.value.push(errorMessage);
@@ -426,259 +335,15 @@ async function executeWorkflow(input: string, nodes: any[], edges: any[]) {
     }
 }
 
-function buildGraph(nodes: any[], edges: any[]) {
-    const nodeMap = new Map();
-    const children: Record<
-        string,
-        Array<{ nodeId: string; handleId?: string }>
-    > = {};
-    const parents: Record<string, string[]> = {};
-
-    for (const node of nodes) {
-        nodeMap.set(node.id, node);
-        children[node.id] = [];
-        parents[node.id] = [];
-    }
-
-    for (const edge of edges) {
-        children[edge.source]?.push({
-            nodeId: edge.target,
-            handleId: edge.sourceHandle,
-        });
-        parents[edge.target]?.push(edge.source);
-    }
-
-    return { nodeMap, children, parents };
-}
-
-async function executeNode(
-    client: any,
-    nodeId: string,
-    context: any,
-    graph: any,
-    edges: any[]
-): Promise<{ output: string; nextNodes: string[] }> {
-    const node = graph.nodeMap.get(nodeId);
-    if (!node) return { output: '', nextNodes: [] };
-
-    const childEdges = graph.children[nodeId] || [];
-
-    setNodeStatus(nodeId, 'active');
-    setStreamingContent('');
-
-    try {
-        let output = '';
-        let nextNodes: string[] = [];
-
-        switch (node.type) {
-            case 'start':
-                output = context.currentInput;
-                nextNodes = childEdges.map((c: any) => c.nodeId);
-                break;
-
-            case 'agent':
-                output = await executeAgent(
-                    client,
-                    node,
-                    context,
-                    graph.nodeMap
-                );
-                nextNodes = childEdges.map((c: any) => c.nodeId);
-                context.outputs[nodeId] = output;
-                context.nodeChain.push(nodeId);
-                context.currentInput = output;
-                break;
-
-            case 'router':
-            case 'condition':
-                const routeResult = await executeRouter(
-                    client,
-                    node,
-                    childEdges,
-                    context,
-                    graph.nodeMap,
-                    edges
-                );
-                output = `Routed to: ${routeResult.selectedRoute}`;
-                nextNodes = routeResult.nextNodes;
-                break;
-
-            default:
-                nextNodes = childEdges.map((c: any) => c.nodeId);
-        }
-
-        setNodeStatus(nodeId, 'completed');
-        return { output, nextNodes };
-    } catch (err) {
-        setNodeStatus(nodeId, 'error');
-        throw err;
-    }
-}
-
-async function executeAgent(
-    client: any,
-    node: any,
-    context: any,
-    nodeMap: Map<string, any>
-): Promise<string> {
-    const model = node.data.model || 'openai/gpt-4o-mini';
-    const systemPrompt =
-        node.data.prompt ||
-        `You are a helpful assistant named ${node.data.label}.`;
-
-    // Build context from previous nodes
-    let contextInfo = '';
-    if (context.nodeChain.length > 0) {
-        const previousOutputs = context.nodeChain
-            .filter((id: string) => context.outputs[id])
-            .map((id: string) => {
-                const prevNode = nodeMap.get(id);
-                return `[${prevNode?.data.label || id}]: ${
-                    context.outputs[id]
-                }`;
-            });
-
-        if (previousOutputs.length > 0) {
-            contextInfo = `\n\nContext from previous agents:\n${previousOutputs.join(
-                '\n\n'
-            )}`;
-        }
-    }
-
-    const chatMessages = [
-        { role: 'system' as const, content: systemPrompt + contextInfo },
-        ...context.history.map((h: any) => ({
-            role: h.role as 'user' | 'assistant',
-            content: h.content,
-        })),
-        { role: 'user' as const, content: context.currentInput },
-    ];
-
-    const stream = (await client.chat.send({
-        model,
-        messages: chatMessages,
-        stream: true,
-    })) as AsyncIterable<any>;
-
-    let output = '';
-    for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content;
-        if (content) {
-            output += content;
-            appendStreamingContent(content);
-        }
-    }
-
-    return output;
-}
-
-async function executeRouter(
-    client: any,
-    node: any,
-    childEdges: any[],
-    context: any,
-    nodeMap: Map<string, any>,
-    edges: any[]
-): Promise<{ selectedRoute: string; nextNodes: string[] }> {
-    const routeOptions = childEdges.map((child, index) => {
-        const childNode = nodeMap.get(child.nodeId);
-        const edge = edges.find(
-            (e) => e.source === node.id && e.target === child.nodeId
-        );
-        const edgeLabel = edge?.label;
-
-        return {
-            index,
-            nodeId: child.nodeId,
-            label: edgeLabel || childNode?.data.label || `Option ${index + 1}`,
-            description: childNode?.data.label || '',
-        };
-    });
-
-    const routerModel = node.data.model || 'openai/gpt-4o-mini';
-    const customInstructions = node.data.prompt || '';
-
-    const routeDescriptions = routeOptions
-        .map(
-            (opt, i) =>
-                `${i + 1}. ${opt.label}${
-                    opt.description && opt.description !== opt.label
-                        ? ` (connects to: ${opt.description})`
-                        : ''
-                }`
-        )
-        .join('\n');
-
-    const classificationPrompt = `You are a routing assistant. Based on the user's message, determine which route to take.
-
-Available routes:
-${routeDescriptions}
-${customInstructions ? `\nRouting instructions:\n${customInstructions}` : ''}
-
-User message: "${context.currentInput}"
-
-Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do not explain.`;
-
-    const response = await client.chat.send({
-        model: routerModel,
-        messages: [
-            {
-                role: 'system',
-                content:
-                    'You are a routing classifier. Respond only with a number.',
-            },
-            { role: 'user', content: classificationPrompt },
-        ],
-    });
-
-    const messageContent = response.choices[0]?.message?.content;
-    const choice =
-        (typeof messageContent === 'string' ? messageContent.trim() : '1') ||
-        '1';
-    const selectedIndex = parseInt(choice, 10) - 1;
-
-    if (selectedIndex >= 0 && selectedIndex < routeOptions.length) {
-        const selected = routeOptions[selectedIndex]!;
-        return { selectedRoute: selected.label, nextNodes: [selected.nodeId] };
-    }
-
-    return {
-        selectedRoute: routeOptions[0]?.label || 'default',
-        nextNodes: routeOptions.length > 0 ? [routeOptions[0]!.nodeId] : [],
-    };
-}
-
 // ============================================================================
 // Workflow Storage
 // ============================================================================
-function loadSavedWorkflows() {
-    try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-            savedWorkflows.value = JSON.parse(stored);
-        }
-    } catch (e) {
-        console.error('Failed to load saved workflows:', e);
-    }
-}
-
 function handleSave() {
     if (!editor.value) return;
     const nodes = editor.value.getNodes();
     const edges = editor.value.getEdges();
 
-    const now = new Date().toISOString();
-    const workflow: SavedWorkflow = {
-        id: crypto.randomUUID(),
-        name: workflowName.value,
-        nodes: JSON.parse(JSON.stringify(nodes)),
-        edges: JSON.parse(JSON.stringify(edges)),
-        createdAt: now,
-        updatedAt: now,
-    };
-
-    savedWorkflows.value.push(workflow);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedWorkflows.value));
+    saveWorkflowToStorage(workflowName.value, nodes, edges);
     showSaveModal.value = false;
 }
 
@@ -687,8 +352,8 @@ function handleLoad(workflow: SavedWorkflow) {
 
     const data: WorkflowData = {
         meta: { version: '2.0.0', name: workflow.name },
-        nodes: workflow.nodes,
-        edges: workflow.edges,
+        nodes: workflow.nodes as WorkflowData['nodes'],
+        edges: workflow.edges as WorkflowData['edges'],
     };
 
     editor.value.load(data);
@@ -696,35 +361,11 @@ function handleLoad(workflow: SavedWorkflow) {
     showLoadModal.value = false;
 }
 
-function deleteWorkflow(id: string) {
-    savedWorkflows.value = savedWorkflows.value.filter((w) => w.id !== id);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedWorkflows.value));
-}
-
 function handleExport() {
     if (!editor.value) return;
     const nodes = editor.value.getNodes();
     const edges = editor.value.getEdges();
-
-    const workflow = {
-        name: workflowName.value,
-        version: '2.0',
-        exportedAt: new Date().toISOString(),
-        nodes,
-        edges,
-    };
-
-    const blob = new Blob([JSON.stringify(workflow, null, 2)], {
-        type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${workflowName.value
-        .replace(/\s+/g, '-')
-        .toLowerCase()}-workflow.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    exportWorkflow(workflowName.value, nodes, edges);
 }
 
 async function handleImport(event: Event) {
@@ -733,21 +374,9 @@ async function handleImport(event: Event) {
     if (!file || !editor.value) return;
 
     try {
-        const content = await file.text();
-        const data = JSON.parse(content);
-
-        if (!data.nodes || !data.edges) {
-            throw new Error('Invalid workflow file format');
-        }
-
-        const workflowData: WorkflowData = {
-            meta: { version: '2.0.0', name: data.name || 'Imported Workflow' },
-            nodes: data.nodes,
-            edges: data.edges,
-        };
-
+        const workflowData = await importWorkflow(file);
         editor.value.load(workflowData);
-        workflowName.value = data.name || 'Imported Workflow';
+        workflowName.value = workflowData.meta.name;
     } catch (err) {
         console.error('Failed to import workflow:', err);
         alert('Failed to import workflow. Please check the file format.');
@@ -763,77 +392,14 @@ function handleValidate() {
     if (!editor.value) return;
     const nodes = editor.value.getNodes();
     const edges = editor.value.getEdges();
-    validationResult.value = validateWorkflow(nodes, edges);
+    // Map to the expected validation shape
+    const validationNodes = nodes.map((n) => ({
+        id: n.id,
+        type: n.type,
+        data: { ...n.data } as Record<string, unknown>,
+    }));
+    validationResult.value = validateWorkflow(validationNodes, edges);
     showValidationModal.value = true;
-}
-
-function validateWorkflow(nodes: any[], edges: any[]): ValidationResult {
-    const errors: ValidationError[] = [];
-    const warnings: ValidationError[] = [];
-
-    // Check for start node
-    const startNode = nodes.find((n) => n.type === 'start');
-    if (!startNode) {
-        errors.push({
-            type: 'error',
-            message: 'Workflow must have a Start node',
-        });
-    }
-
-    // Build adjacency maps
-    const outgoing: Record<string, string[]> = {};
-    const incoming: Record<string, string[]> = {};
-
-    for (const node of nodes) {
-        outgoing[node.id] = [];
-        incoming[node.id] = [];
-    }
-
-    for (const edge of edges) {
-        outgoing[edge.source]?.push(edge.target);
-        incoming[edge.target]?.push(edge.source);
-    }
-
-    // Check for disconnected nodes
-    for (const node of nodes) {
-        if (node.type === 'start') continue;
-
-        const hasIncoming = (incoming[node.id]?.length || 0) > 0;
-        const hasOutgoing = (outgoing[node.id]?.length || 0) > 0;
-
-        if (!hasIncoming && !hasOutgoing) {
-            errors.push({
-                type: 'error',
-                nodeId: node.id,
-                message: `Node "${node.data.label}" is not connected to the workflow`,
-            });
-        } else if (!hasIncoming) {
-            warnings.push({
-                type: 'warning',
-                nodeId: node.id,
-                message: `Node "${node.data.label}" has no incoming connections`,
-            });
-        }
-    }
-
-    // Check agent nodes have prompts
-    for (const node of nodes) {
-        if (node.type === 'agent') {
-            if (!node.data.prompt || node.data.prompt.trim() === '') {
-                warnings.push({
-                    type: 'warning',
-                    nodeId: node.id,
-                    message: `Agent "${node.data.label}" has no system prompt configured`,
-                });
-            }
-        }
-    }
-
-    return {
-        isValid: errors.length === 0,
-        errors,
-        warnings,
-    };
 }
 
 // ============================================================================

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, watch, nextTick } from 'vue';
 import type { Edge } from '@vue-flow/core';
 
 const props = defineProps<{
@@ -14,6 +14,8 @@ const emit = defineEmits<{
 }>();
 
 const localLabel = ref('');
+const inputRef = ref<HTMLInputElement | null>(null);
+const showDeleteConfirm = ref(false);
 
 watch(
     () => props.edge,
@@ -23,6 +25,20 @@ watch(
         }
     },
     { immediate: true }
+);
+
+// Focus input when modal opens
+watch(
+    () => props.show,
+    (show) => {
+        if (show) {
+            showDeleteConfirm.value = false;
+            nextTick(() => {
+                inputRef.value?.focus();
+                inputRef.value?.select();
+            });
+        }
+    }
 );
 
 function saveLabel() {
@@ -41,9 +57,16 @@ function handleKeydown(event: KeyboardEvent) {
 
 function handleDelete() {
     if (!props.edge) return;
-    if (confirm('Delete this connection?')) {
+    if (showDeleteConfirm.value) {
         emit('delete', props.edge.id);
+        showDeleteConfirm.value = false;
+    } else {
+        showDeleteConfirm.value = true;
     }
+}
+
+function cancelDelete() {
+    showDeleteConfirm.value = false;
 }
 </script>
 
@@ -84,19 +107,39 @@ function handleDelete() {
 
                 <div class="editor-content">
                     <input
+                        ref="inputRef"
                         v-model="localLabel"
                         type="text"
                         class="label-input"
                         placeholder="Enter edge label (e.g., 'Technical', 'Sales')"
                         @input="saveLabel"
                         @keydown="handleKeydown"
-                        autofocus
                     />
                     <p class="hint">
                         This label is shown on the connection line and helps the
                         router make decisions.
                     </p>
-                    <button class="delete-btn" @click="handleDelete">
+
+                    <!-- Delete confirmation -->
+                    <div v-if="showDeleteConfirm" class="delete-confirm">
+                        <span>Delete this connection?</span>
+                        <div class="confirm-actions">
+                            <button
+                                class="confirm-btn confirm-yes"
+                                @click="handleDelete"
+                            >
+                                Yes, delete
+                            </button>
+                            <button
+                                class="confirm-btn confirm-no"
+                                @click="cancelDelete"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+
+                    <button v-else class="delete-btn" @click="handleDelete">
                         <svg
                             viewBox="0 0 24 24"
                             fill="none"
@@ -228,6 +271,59 @@ function handleDelete() {
 .delete-btn svg {
     width: 14px;
     height: 14px;
+}
+
+/* Delete confirmation */
+.delete-confirm {
+    margin-top: var(--or3-spacing-md, 16px);
+    padding: var(--or3-spacing-md, 16px);
+    background: var(--or3-color-error-muted, rgba(239, 68, 68, 0.1));
+    border: 1px solid var(--or3-color-error, #ef4444);
+    border-radius: var(--or3-radius-md, 10px);
+    text-align: center;
+}
+
+.delete-confirm span {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--or3-color-error, #ef4444);
+    margin-bottom: var(--or3-spacing-sm, 8px);
+}
+
+.confirm-actions {
+    display: flex;
+    gap: var(--or3-spacing-sm, 8px);
+    justify-content: center;
+}
+
+.confirm-btn {
+    padding: var(--or3-spacing-xs, 4px) var(--or3-spacing-md, 16px);
+    border-radius: var(--or3-radius-sm, 6px);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.confirm-yes {
+    background: var(--or3-color-error, #ef4444);
+    color: white;
+    border: none;
+}
+
+.confirm-yes:hover {
+    background: #dc2626;
+}
+
+.confirm-no {
+    background: transparent;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+}
+
+.confirm-no:hover {
+    background: var(--or3-color-surface-hover, rgba(255, 255, 255, 0.05));
 }
 
 /* Modal transitions */
