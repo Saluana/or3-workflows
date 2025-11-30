@@ -387,7 +387,7 @@ describe('OpenRouterExecutionAdapter - Memory Node', () => {
                     content: 'Remember this fact',
                     metadata: {
                         timestamp: new Date().toISOString(),
-                        source: 'user',
+                        source: 'user' as const,
                     },
                 },
             ]),

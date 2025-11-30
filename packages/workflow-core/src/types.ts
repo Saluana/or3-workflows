@@ -544,6 +544,13 @@ export interface NodeExtension {
     /** Default data when creating a new node */
     defaultData: Record<string, any>;
 
+    /** Add custom commands to the editor */
+    addCommands?: () => Record<string, Command>;
+    /** Lifecycle hook called when extension is registered */
+    onCreate?: () => void;
+    /** Lifecycle hook called when extension is destroyed */
+    onDestroy?: () => void;
+
     /**
      * Execute the node logic.
      * @param context - The execution context.

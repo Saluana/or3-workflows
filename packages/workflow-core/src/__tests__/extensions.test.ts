@@ -7,7 +7,7 @@ import {
     ToolNodeExtension,
     WhileLoopExtension,
 } from '../extensions/index.js';
-import type { WorkflowNode, WorkflowEdge } from '../types';
+import type { WorkflowNode, WorkflowEdge, NodeExtension } from '../types';
 
 // Helper to create nodes
 const createNode = (type: string, id: string, data: any): WorkflowNode => ({
@@ -650,7 +650,9 @@ describe('StarterKit', () => {
                 },
             });
 
-            const agentExt = extensions.find((ext) => ext.name === 'agent');
+            const agentExt = extensions.find((ext) => ext.name === 'agent') as
+                | NodeExtension
+                | undefined;
             expect(agentExt).toBeDefined();
             expect(agentExt?.defaultData?.model).toBe(
                 'anthropic/claude-3-opus'
@@ -665,7 +667,9 @@ describe('StarterKit', () => {
                 },
             });
 
-            const loopExt = extensions.find((ext) => ext.name === 'whileLoop');
+            const loopExt = extensions.find(
+                (ext) => ext.name === 'whileLoop'
+            ) as NodeExtension | undefined;
             expect(loopExt).toBeDefined();
             expect(loopExt?.defaultData?.maxIterations).toBe(50);
             expect(loopExt?.defaultData?.onMaxIterations).toBe('error');

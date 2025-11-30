@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
     ApproximateTokenCounter,
     DEFAULT_COMPACTION_CONFIG,
@@ -11,7 +11,6 @@ import {
     buildSummarizationPrompt,
     isCompactionConfig,
     type CompactionConfig,
-    type TokenCounter,
 } from '../compaction';
 import type { ChatMessage } from '../types';
 
