@@ -418,17 +418,92 @@ export interface Extension {
 }
 
 /**
- * Extension for defining custom node types.
+ * Interface for an LLM Provider.
+ * Abstracts the underlying LLM client (OpenRouter, OpenAI, Anthropic, etc.)
  */
-export interface NodeExtension extends Extension {
+export interface LLMProvider {
+    /**
+     * Generate a completion for a chat conversation.
+     */
+    chat(
+        model: string,
+        messages: ChatMessage[],
+        options?: {
+            temperature?: number;
+            maxTokens?: number;
+            tools?: any[]; // TODO: Define strict tool types
+            responseFormat?: { type: 'json_object' | 'text' };
+        }
+    ): Promise<{
+        content: string | null;
+        toolCalls?: any[];
+        usage?: {
+            promptTokens: number;
+            completionTokens: number;
+            totalTokens: number;
+        };
+    }>;
+
+    /**
+     * Get capabilities for a model.
+     */
+    getModelCapabilities(modelId: string): Promise<ModelCapabilities | null>;
+}
+
+/**
+ * Result of a node execution.
+ */
+export interface NodeExecutionResult {
+    /** The primary output text of the node */
+    output: string;
+    /** The IDs of the next nodes to execute */
+    nextNodes: string[];
+    /** Optional additional outputs (e.g. for debugging or specific UI rendering) */
+    metadata?: Record<string, any>;
+}
+
+/**
+ * Extension definition for a custom node type.
+ */
+export interface NodeExtension {
+    /** Unique type identifier for the node (e.g., 'agent', 'router') */
+    name: string;
+    /** The type of extension */
     type: 'node';
-    inputs?: PortDefinition[];
-    outputs?: PortDefinition[];
-    defaultData?: Record<string, any>;
-    execute?: (context: any) => Promise<any>; // Typed properly in execution phase
-    tools?: any[]; // ToolDefinition
-    component?: any; // Vue Component
-    validate?: (node: WorkflowNode, edges: WorkflowEdge[]) => any[]; // ValidationError
+    /** Label to display in the palette */
+    label?: string;
+    /** Description to display in the palette */
+    description?: string;
+    /** Category for grouping in the palette */
+    category?: string;
+    /** Icon to display (lucide icon name) */
+    icon?: string;
+    /** Input handles definition */
+    inputs: NodeHandleDefinition[];
+    /** Output handles definition */
+    outputs: NodeHandleDefinition[];
+    /** Default data when creating a new node */
+    defaultData: Record<string, any>;
+
+    /**
+     * Execute the node logic.
+     * @param context - The execution context.
+     * @param node - The node being executed.
+     * @param provider - The LLM provider (optional, for nodes that need LLM).
+     */
+    execute(
+        context: ExecutionContext,
+        node: WorkflowNode,
+        provider?: LLMProvider
+    ): Promise<NodeExecutionResult>;
+
+    /**
+     * Validate the node configuration.
+     */
+    validate(
+        node: WorkflowNode,
+        edges: WorkflowEdge[]
+    ): (ValidationError | ValidationWarning)[];
 }
 
 export interface KeyboardShortcutHandler {

@@ -44,47 +44,248 @@ interface MemoryResult {
 }
 ```
 
-## Custom Adapter Example
+---
+
+## Embedding Provider Abstraction
+
+> **Important:** In production, embedding generation should be separated from storage adapters. This allows you to swap providers, add caching, handle rate limits, and control costs independently.
+
+### EmbeddingProvider Interface
+
+```typescript
+interface EmbeddingProvider {
+    /** Generate embedding for a single text */
+    embed(text: string): Promise<number[]>;
+
+    /** Generate embeddings for multiple texts (batched) */
+    embedBatch(texts: string[]): Promise<number[][]>;
+
+    /** Embedding dimension (e.g., 1536 for OpenAI) */
+    readonly dimensions: number;
+}
+```
+
+### OpenAI Embedding Provider
+
+```typescript
+import OpenAI from 'openai';
+
+export class OpenAIEmbeddingProvider implements EmbeddingProvider {
+    private client: OpenAI;
+    private model: string;
+    readonly dimensions: number;
+
+    constructor(options: { apiKey: string; model?: string }) {
+        this.client = new OpenAI({ apiKey: options.apiKey });
+        this.model = options.model ?? 'text-embedding-3-small';
+        this.dimensions = this.model.includes('3-large') ? 3072 : 1536;
+    }
+
+    async embed(text: string): Promise<number[]> {
+        const response = await this.client.embeddings.create({
+            model: this.model,
+            input: text,
+        });
+        return response.data[0].embedding;
+    }
+
+    async embedBatch(texts: string[]): Promise<number[][]> {
+        // OpenAI supports up to 2048 inputs per request
+        const response = await this.client.embeddings.create({
+            model: this.model,
+            input: texts,
+        });
+        return response.data.map((d) => d.embedding);
+    }
+}
+```
+
+### Cached Embedding Provider
+
+Wrap any provider with caching to reduce API calls and costs:
+
+```typescript
+export class CachedEmbeddingProvider implements EmbeddingProvider {
+    private cache = new Map<string, number[]>();
+    readonly dimensions: number;
+
+    constructor(
+        private inner: EmbeddingProvider,
+        private options?: { maxCacheSize?: number }
+    ) {
+        this.dimensions = inner.dimensions;
+    }
+
+    private hash(text: string): string {
+        // Simple hash for cache key (use crypto.subtle in production)
+        let hash = 0;
+        for (let i = 0; i < text.length; i++) {
+            hash = (hash << 5) - hash + text.charCodeAt(i);
+            hash |= 0;
+        }
+        return hash.toString(36);
+    }
+
+    async embed(text: string): Promise<number[]> {
+        const key = this.hash(text);
+
+        if (this.cache.has(key)) {
+            return this.cache.get(key)!;
+        }
+
+        const embedding = await this.inner.embed(text);
+
+        // LRU eviction
+        if (this.cache.size >= (this.options?.maxCacheSize ?? 10000)) {
+            const firstKey = this.cache.keys().next().value;
+            this.cache.delete(firstKey);
+        }
+
+        this.cache.set(key, embedding);
+        return embedding;
+    }
+
+    async embedBatch(texts: string[]): Promise<number[][]> {
+        const results: number[][] = [];
+        const uncached: { index: number; text: string }[] = [];
+
+        // Check cache first
+        for (let i = 0; i < texts.length; i++) {
+            const key = this.hash(texts[i]);
+            if (this.cache.has(key)) {
+                results[i] = this.cache.get(key)!;
+            } else {
+                uncached.push({ index: i, text: texts[i] });
+            }
+        }
+
+        // Batch embed uncached texts
+        if (uncached.length > 0) {
+            const embeddings = await this.inner.embedBatch(
+                uncached.map((u) => u.text)
+            );
+            for (let i = 0; i < uncached.length; i++) {
+                const key = this.hash(uncached[i].text);
+                this.cache.set(key, embeddings[i]);
+                results[uncached[i].index] = embeddings[i];
+            }
+        }
+
+        return results;
+    }
+
+    clearCache(): void {
+        this.cache.clear();
+    }
+}
+```
+
+### Rate-Limited Provider
+
+Add rate limiting to avoid API throttling:
+
+```typescript
+export class RateLimitedEmbeddingProvider implements EmbeddingProvider {
+    private queue: Array<() => void> = [];
+    private processing = 0;
+    readonly dimensions: number;
+
+    constructor(
+        private inner: EmbeddingProvider,
+        private options: {
+            maxConcurrent?: number;
+            minDelayMs?: number;
+        } = {}
+    ) {
+        this.dimensions = inner.dimensions;
+    }
+
+    private async withRateLimit<T>(fn: () => Promise<T>): Promise<T> {
+        const maxConcurrent = this.options.maxConcurrent ?? 5;
+        const minDelay = this.options.minDelayMs ?? 100;
+
+        // Wait if at capacity
+        if (this.processing >= maxConcurrent) {
+            await new Promise<void>((resolve) => this.queue.push(resolve));
+        }
+
+        this.processing++;
+        try {
+            const result = await fn();
+            await new Promise((r) => setTimeout(r, minDelay));
+            return result;
+        } finally {
+            this.processing--;
+            const next = this.queue.shift();
+            if (next) next();
+        }
+    }
+
+    async embed(text: string): Promise<number[]> {
+        return this.withRateLimit(() => this.inner.embed(text));
+    }
+
+    async embedBatch(texts: string[]): Promise<number[][]> {
+        return this.withRateLimit(() => this.inner.embedBatch(texts));
+    }
+}
+```
+
+### Composing Providers
+
+```typescript
+// Production setup: cached + rate-limited
+const baseProvider = new OpenAIEmbeddingProvider({
+    apiKey: process.env.OPENAI_API_KEY!,
+});
+
+const cachedProvider = new CachedEmbeddingProvider(baseProvider, {
+    maxCacheSize: 50000,
+});
+
+const embeddingProvider = new RateLimitedEmbeddingProvider(cachedProvider, {
+    maxConcurrent: 10,
+    minDelayMs: 50,
+});
+```
+
+---
+
+## Memory Adapters (Production Pattern)
+
+With the embedding provider abstraction, memory adapters focus solely on storage:
 
 ### Pinecone Adapter
 
 ```typescript
 import { Pinecone } from '@pinecone-database/pinecone';
-import OpenAI from 'openai';
 import type {
     MemoryAdapter,
     MemoryContent,
     SearchOptions,
     MemoryResult,
 } from '@or3/workflow-core';
+import type { EmbeddingProvider } from './embedding-provider';
 
 export class PineconeMemoryAdapter implements MemoryAdapter {
     private pinecone: Pinecone;
-    private openai: OpenAI;
     private indexName: string;
 
-    constructor(options: {
-        pineconeApiKey: string;
-        openaiApiKey: string;
-        indexName: string;
-    }) {
+    constructor(
+        private embeddings: EmbeddingProvider,
+        options: {
+            pineconeApiKey: string;
+            indexName: string;
+        }
+    ) {
         this.pinecone = new Pinecone({ apiKey: options.pineconeApiKey });
-        this.openai = new OpenAI({ apiKey: options.openaiApiKey });
         this.indexName = options.indexName;
-    }
-
-    private async embed(text: string): Promise<number[]> {
-        const response = await this.openai.embeddings.create({
-            model: 'text-embedding-3-small',
-            input: text,
-        });
-        return response.data[0].embedding;
     }
 
     async store(content: MemoryContent): Promise<string> {
         const index = this.pinecone.index(this.indexName);
         const id = crypto.randomUUID();
-        const embedding = await this.embed(content.text);
+        const embedding = await this.embeddings.embed(content.text);
 
         await index.upsert([
             {
@@ -106,7 +307,7 @@ export class PineconeMemoryAdapter implements MemoryAdapter {
         options?: SearchOptions
     ): Promise<MemoryResult[]> {
         const index = this.pinecone.index(this.indexName);
-        const embedding = await this.embed(query);
+        const embedding = await this.embeddings.embed(query);
 
         const results = await index.query({
             vector: embedding,
@@ -140,6 +341,8 @@ export class PineconeMemoryAdapter implements MemoryAdapter {
 ```
 
 ### Chroma Adapter
+
+Chroma handles embeddings internally, so no provider needed:
 
 ```typescript
 import { ChromaClient } from 'chromadb';
@@ -195,7 +398,7 @@ export class ChromaMemoryAdapter implements MemoryAdapter {
         return (results.ids[0] ?? []).map((id, i) => ({
             id,
             text: results.documents[0]?.[i] ?? '',
-            score: 1 - (results.distances?.[0]?.[i] ?? 0), // Convert distance to similarity
+            score: 1 - (results.distances?.[0]?.[i] ?? 0),
             metadata: results.metadatas?.[0]?.[i],
         }));
     }
@@ -215,38 +418,30 @@ export class ChromaMemoryAdapter implements MemoryAdapter {
 
 ```typescript
 import { createClient } from '@supabase/supabase-js';
-import OpenAI from 'openai';
 import type {
     MemoryAdapter,
     MemoryContent,
     SearchOptions,
     MemoryResult,
 } from '@or3/workflow-core';
+import type { EmbeddingProvider } from './embedding-provider';
 
 export class SupabaseMemoryAdapter implements MemoryAdapter {
     private supabase;
-    private openai: OpenAI;
 
-    constructor(options: {
-        supabaseUrl: string;
-        supabaseKey: string;
-        openaiApiKey: string;
-    }) {
+    constructor(
+        private embeddings: EmbeddingProvider,
+        options: {
+            supabaseUrl: string;
+            supabaseKey: string;
+        }
+    ) {
         this.supabase = createClient(options.supabaseUrl, options.supabaseKey);
-        this.openai = new OpenAI({ apiKey: options.openaiApiKey });
-    }
-
-    private async embed(text: string): Promise<number[]> {
-        const response = await this.openai.embeddings.create({
-            model: 'text-embedding-3-small',
-            input: text,
-        });
-        return response.data[0].embedding;
     }
 
     async store(content: MemoryContent): Promise<string> {
         const id = crypto.randomUUID();
-        const embedding = await this.embed(content.text);
+        const embedding = await this.embeddings.embed(content.text);
 
         const { error } = await this.supabase.from('memories').insert({
             id,
@@ -264,7 +459,7 @@ export class SupabaseMemoryAdapter implements MemoryAdapter {
         query: string,
         options?: SearchOptions
     ): Promise<MemoryResult[]> {
-        const embedding = await this.embed(query);
+        const embedding = await this.embeddings.embed(query);
 
         const { data, error } = await this.supabase.rpc('match_memories', {
             query_embedding: embedding,
@@ -345,10 +540,22 @@ Memory adapters are used with Memory Nodes in workflows:
 ```typescript
 import { WorkflowEditor, StarterKit } from '@or3/workflow-core';
 import { PineconeMemoryAdapter } from './adapters/pinecone';
+import {
+    OpenAIEmbeddingProvider,
+    CachedEmbeddingProvider,
+} from './embedding-provider';
 
-const memory = new PineconeMemoryAdapter({
-    pineconeApiKey: process.env.PINECONE_API_KEY,
-    openaiApiKey: process.env.OPENAI_API_KEY,
+// Create embedding provider with caching
+const embeddings = new CachedEmbeddingProvider(
+    new OpenAIEmbeddingProvider({
+        apiKey: process.env.OPENAI_API_KEY!,
+    }),
+    { maxCacheSize: 10000 }
+);
+
+// Create memory adapter with injected provider
+const memory = new PineconeMemoryAdapter(embeddings, {
+    pineconeApiKey: process.env.PINECONE_API_KEY!,
     indexName: 'workflow-memories',
 });
 
@@ -533,6 +740,140 @@ for (const chunk of chunks) {
         text: chunk,
         metadata: { documentId, chunkIndex: chunks.indexOf(chunk) },
     });
+}
+```
+
+---
+
+## Production Best Practices
+
+### 1. Separate Embedding from Storage
+
+**Don't do this:**
+
+```typescript
+// ❌ Embedding logic coupled to storage adapter
+class BadAdapter implements MemoryAdapter {
+    private openai = new OpenAI({ apiKey: '...' });
+
+    async store(content: MemoryContent) {
+        // Embedding call hidden inside storage
+        const embedding = await this.openai.embeddings.create({...});
+        // ...
+    }
+}
+```
+
+**Do this instead:**
+
+```typescript
+// ✅ Embedding provider injected as dependency
+class GoodAdapter implements MemoryAdapter {
+    constructor(private embeddings: EmbeddingProvider) {}
+
+    async store(content: MemoryContent) {
+        const embedding = await this.embeddings.embed(content.text);
+        // ...
+    }
+}
+```
+
+This separation allows you to:
+
+-   Swap embedding providers without changing storage code
+-   Add caching, rate limiting, and batching transparently
+-   Monitor embedding costs separately from storage costs
+-   Test storage logic with mock embeddings
+
+### 2. Always Cache Embeddings
+
+Embedding API calls are expensive (both latency and cost). Cache aggressively:
+
+```typescript
+// Shared cached provider across all adapters
+const embeddingProvider = new CachedEmbeddingProvider(
+    new OpenAIEmbeddingProvider({ apiKey }),
+    { maxCacheSize: 100000 } // ~100K embeddings cached
+);
+
+// Same provider for multiple adapters
+const pineconeAdapter = new PineconeMemoryAdapter(embeddingProvider, {...});
+const supabaseAdapter = new SupabaseMemoryAdapter(embeddingProvider, {...});
+```
+
+### 3. Batch Operations When Possible
+
+```typescript
+// ❌ N API calls for N documents
+for (const doc of documents) {
+    const embedding = await provider.embed(doc.text);
+    await store(doc, embedding);
+}
+
+// ✅ 1 API call for N documents (up to batch limit)
+const texts = documents.map((d) => d.text);
+const embeddings = await provider.embedBatch(texts);
+for (let i = 0; i < documents.length; i++) {
+    await store(documents[i], embeddings[i]);
+}
+```
+
+### 4. Handle Rate Limits Gracefully
+
+```typescript
+const provider = new RateLimitedEmbeddingProvider(
+    new CachedEmbeddingProvider(new OpenAIEmbeddingProvider({ apiKey })),
+    {
+        maxConcurrent: 5, // Max parallel requests
+        minDelayMs: 100, // Minimum delay between requests
+    }
+);
+```
+
+### 5. Monitor Costs
+
+```typescript
+class MonitoredEmbeddingProvider implements EmbeddingProvider {
+    private callCount = 0;
+    private tokenCount = 0;
+
+    constructor(private inner: EmbeddingProvider) {}
+
+    async embed(text: string): Promise<number[]> {
+        this.callCount++;
+        this.tokenCount += Math.ceil(text.length / 4); // Approximate
+        return this.inner.embed(text);
+    }
+
+    getStats() {
+        return {
+            calls: this.callCount,
+            estimatedTokens: this.tokenCount,
+            estimatedCost: this.tokenCount * 0.00002, // ~$0.02/1M tokens
+        };
+    }
+}
+```
+
+### 6. Use Persistent Cache for Production
+
+```typescript
+// Redis-backed cache for production
+class RedisEmbeddingCache implements EmbeddingProvider {
+    constructor(private inner: EmbeddingProvider, private redis: Redis) {}
+
+    async embed(text: string): Promise<number[]> {
+        const key = `emb:${this.hash(text)}`;
+        const cached = await this.redis.get(key);
+
+        if (cached) {
+            return JSON.parse(cached);
+        }
+
+        const embedding = await this.inner.embed(text);
+        await this.redis.setex(key, 86400 * 7, JSON.stringify(embedding)); // 7 day TTL
+        return embedding;
+    }
 }
 ```
 
