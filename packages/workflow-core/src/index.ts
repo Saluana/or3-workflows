@@ -119,4 +119,11 @@ export {
     SubflowExtension,
     getSubflowPorts,
     createDefaultInputMappings,
+    OutputNodeExtension,
+    type OutputNodeData,
+    type OutputFormat,
+    isOutputNodeData,
+    interpolateTemplate,
+    formatOutput,
+    extractTemplatePlaceholders,
 } from './extensions';

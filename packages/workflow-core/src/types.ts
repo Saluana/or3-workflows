@@ -4,6 +4,7 @@ import type { Session } from './session';
 import type { NodeErrorConfig } from './errors';
 import type { HITLConfig, HITLCallback } from './hitl';
 import type { SubflowNodeData, SubflowRegistry } from './subflow';
+import type { OutputNodeData } from './extensions/OutputNodeExtension';
 
 export const SCHEMA_VERSION = '2.0.0';
 
@@ -143,7 +144,8 @@ export type NodeData =
     | ToolNodeData
     | MemoryNodeData
     | WhileLoopNodeData
-    | SubflowNodeData;
+    | SubflowNodeData
+    | OutputNodeData;
 
 // ============================================================================
 // Type Guards for Node Data
@@ -203,6 +205,13 @@ export function isWhileLoopNodeData(data: NodeData): data is WhileLoopNodeData {
  * This is a re-export from subflow.ts for convenience.
  */
 export { isSubflowNodeData } from './subflow';
+
+/**
+ * Type guard to check if node data is OutputNodeData.
+ * This is a re-export from OutputNodeExtension.ts for convenience.
+ */
+export { isOutputNodeData } from './extensions/OutputNodeExtension';
+
 /**
  * Type guard to check if node data is StartNodeData.
  * Start nodes have minimal data - only label and optional status.

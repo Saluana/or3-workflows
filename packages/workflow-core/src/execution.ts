@@ -27,6 +27,11 @@ import type { SubflowNodeData, SubflowRegistry } from './subflow';
 import { validateInputMappings } from './subflow';
 import { toolRegistry } from './extensions/ToolNodeExtension';
 import {
+    type OutputNodeData,
+    interpolateTemplate,
+    formatOutput,
+} from './extensions/OutputNodeExtension';
+import {
     InMemoryAdapter,
     type MemoryAdapter,
     type MemoryEntry,
@@ -678,6 +683,14 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     : childEdges
                           .filter((c) => c.handleId === 'error')
                           .map((c) => c.nodeId);
+                context.outputs[nodeId] = output;
+                context.nodeChain.push(nodeId);
+                context.currentInput = output;
+                break;
+
+            case 'output':
+                output = await this.executeOutputNode(node, context);
+                nextNodes = []; // Terminal node - no next nodes
                 context.outputs[nodeId] = output;
                 context.nodeChain.push(nodeId);
                 context.currentInput = output;
@@ -1418,6 +1431,33 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 error instanceof Error ? error.message : String(error);
             return { output: `Subflow error: ${message}`, success: false };
         }
+    }
+
+    /**
+     * Execute an output node - terminal node that formats the final result.
+     */
+    private async executeOutputNode(
+        node: WorkflowNode,
+        context: InternalExecutionContext
+    ): Promise<string> {
+        const data = node.data as OutputNodeData;
+
+        let content: string;
+
+        // Apply template interpolation if template is provided
+        if (data.template) {
+            content = interpolateTemplate(data.template, context.outputs);
+        } else {
+            content = context.currentInput;
+        }
+
+        // Format output based on format type
+        const output = formatOutput(content, data.format, {
+            includeMetadata: data.includeMetadata,
+            nodeChain: context.nodeChain,
+        });
+
+        return output;
     }
 
     /**

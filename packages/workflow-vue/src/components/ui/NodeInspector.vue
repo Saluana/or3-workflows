@@ -7,6 +7,7 @@ import {
     type NodeRetryConfig,
     type HITLConfig,
     type HITLMode,
+    type OutputFormat,
 } from '@or3/workflow-core';
 
 // Type guard for configurable node data
@@ -44,7 +45,7 @@ const emit = defineEmits<{
 
 const selectedNode = ref<WorkflowNode | null>(null);
 const activeTab = ref<
-    'prompt' | 'model' | 'tools' | 'errors' | 'hitl' | 'subflow'
+    'prompt' | 'model' | 'tools' | 'errors' | 'hitl' | 'subflow' | 'output'
 >('prompt');
 
 // Available models
@@ -180,6 +181,7 @@ const isWhileNode = computed(() => selectedNode.value?.type === 'whileLoop');
 const isToolNode = computed(() => selectedNode.value?.type === 'tool');
 const isStartNode = computed(() => selectedNode.value?.type === 'start');
 const isSubflowNode = computed(() => selectedNode.value?.type === 'subflow');
+const isOutputNode = computed(() => selectedNode.value?.type === 'output');
 const canDelete = computed(
     () => selectedNode.value && selectedNode.value.type !== 'start'
 );
@@ -189,7 +191,8 @@ const isConfigurable = computed(
         isRouterNode.value ||
         isParallelNode.value ||
         isWhileNode.value ||
-        isSubflowNode.value
+        isSubflowNode.value ||
+        isOutputNode.value
 );
 const hasErrorHandling = computed(
     () => isAgentNode.value || isRouterNode.value || isToolNode.value
@@ -208,6 +211,18 @@ const whileData = computed(() => {
     return data || {};
 });
 
+const outputData = computed<{
+    format: OutputFormat;
+    template: string;
+    includeMetadata: boolean;
+}>(() => {
+    const data = selectedNode.value?.data as any;
+    return {
+        format: data?.format ?? 'text',
+        template: data?.template ?? '',
+        includeMetadata: data?.includeMetadata ?? false,
+    };
+});
 const subflowData = computed(() => {
     const data = selectedNode.value?.data as any;
     return {
@@ -450,6 +465,33 @@ const removeInputMapping = (inputId: string) => {
     });
 };
 
+// Output node update handlers
+const updateOutputFormat = (event: Event) => {
+    if (!selectedNode.value) return;
+    const value = (event.target as HTMLSelectElement).value as OutputFormat;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        format: value,
+    });
+};
+
+const updateOutputTemplate = (event: Event) => {
+    if (!selectedNode.value) return;
+    const value = (event.target as HTMLTextAreaElement).value;
+    if (debounceTimeout) clearTimeout(debounceTimeout);
+    debounceTimeout = setTimeout(() => {
+        props.editor.commands.updateNodeData(selectedNode.value!.id, {
+            template: value,
+        });
+    }, 200);
+};
+
+const toggleIncludeMetadata = () => {
+    if (!selectedNode.value) return;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        includeMetadata: !outputData.value.includeMetadata,
+    });
+};
+
 const handleDelete = () => {
     if (!selectedNode.value || !canDelete.value) return;
     if (confirm(`Delete "${nodeData.value.label}"?`)) {
@@ -686,12 +728,35 @@ const handleDelete = () => {
                 </svg>
                 Subflow
             </button>
+            <button
+                v-if="isOutputNode"
+                class="tab"
+                :class="{ active: activeTab === 'output' }"
+                @click="activeTab = 'output'"
+            >
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                >
+                    <path
+                        d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"
+                    ></path>
+                    <line x1="4" y1="22" x2="4" y2="15"></line>
+                </svg>
+                Output
+            </button>
         </div>
 
         <!-- Tab Content -->
         <div
             v-if="
-                isConfigurable || hasErrorHandling || hasHITL || isSubflowNode
+                isConfigurable ||
+                hasErrorHandling ||
+                hasHITL ||
+                isSubflowNode ||
+                isOutputNode
             "
             class="tab-content"
         >
@@ -1127,14 +1192,76 @@ const handleDelete = () => {
                     <p><strong>Expressions:</strong></p>
                     <ul class="expression-hints">
                         <li>
-                            <code>{{ output }}</code> - Current input/output
+                            <code v-pre>{{ output }}</code> - Current
+                            input/output
                         </li>
                         <li>
-                            <code>{{ outputs.nodeId }}</code> - Output from a
-                            specific node
+                            <code v-pre>{{ outputs.nodeId }}</code> - Output
+                            from a specific node
                         </li>
                         <li><code>"literal"</code> - Static value</li>
                     </ul>
+                </div>
+            </div>
+
+            <!-- Output Tab -->
+            <div
+                v-if="activeTab === 'output' && isOutputNode"
+                class="output-tab"
+            >
+                <div class="field-group">
+                    <label class="field-label">Output Format</label>
+                    <select
+                        class="select-input"
+                        :value="outputData.format"
+                        @change="updateOutputFormat"
+                    >
+                        <option value="text">Text</option>
+                        <option value="json">JSON</option>
+                        <option value="markdown">Markdown</option>
+                    </select>
+                    <p class="field-hint">
+                        The format for the workflow's final output.
+                    </p>
+                </div>
+
+                <div class="field-group">
+                    <label class="field-label">Output Template</label>
+                    <textarea
+                        class="textarea-input"
+                        :value="outputData.template"
+                        :placeholder="'e.g., Final result: {{outputs.nodeId}}'"
+                        @input="updateOutputTemplate"
+                        rows="4"
+                    ></textarea>
+                    <p class="field-hint">
+                        Use <code v-pre>{{ outputs.nodeId }}</code> to reference
+                        output from specific nodes. Leave empty to use the last
+                        node's output.
+                    </p>
+                </div>
+
+                <div class="output-toggle">
+                    <label class="toggle-label">
+                        <input
+                            type="checkbox"
+                            :checked="outputData.includeMetadata"
+                            @change="toggleIncludeMetadata"
+                        />
+                        <span class="toggle-text">Include Metadata</span>
+                    </label>
+                    <p class="field-hint" style="margin-top: 4px">
+                        When enabled, the output includes timing, token usage,
+                        and execution metadata.
+                    </p>
+                </div>
+
+                <div class="info-box">
+                    <p><strong>Output Node</strong></p>
+                    <p style="margin-top: 8px; color: var(--text-secondary)">
+                        This is a terminal node that formats the final workflow
+                        output. It has no outgoing connections.
+                    </p>
                 </div>
             </div>
         </div>
@@ -1753,5 +1880,17 @@ const handleDelete = () => {
     background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
     padding: 1px 4px;
     border-radius: 3px;
+}
+
+.output-tab {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-md, 16px);
+}
+
+.output-toggle {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-xs, 4px);
 }
 </style>

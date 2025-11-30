@@ -74,6 +74,18 @@ const nodeTypes = [
             shareSession: true,
         },
     },
+    {
+        type: 'output',
+        label: 'Output Node',
+        description: 'Terminal workflow output',
+        colorVar: '--or3-color-success',
+        defaultData: {
+            label: 'Output',
+            format: 'text',
+            template: '',
+            includeMetadata: false,
+        },
+    },
 ];
 
 const onDragStart = (
@@ -189,6 +201,18 @@ const onDragStart = (
                         <rect x="8.5" y="14" width="7" height="7" rx="1"></rect>
                         <path d="M6.5 10v2a2 2 0 002 2h1"></path>
                         <path d="M17.5 10v2a2 2 0 01-2 2h-1"></path>
+                    </svg>
+                    <svg
+                        v-else-if="node.type === 'output'"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                    >
+                        <path
+                            d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"
+                        ></path>
+                        <line x1="4" y1="22" x2="4" y2="15"></line>
                     </svg>
                 </div>
                 <div class="node-info">

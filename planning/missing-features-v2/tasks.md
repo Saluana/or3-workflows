@@ -358,48 +358,48 @@ _Requirements: 5.2, 5.4_
 
 _Requirements: 6.1, 6.2_
 
--   [ ] Create `packages/workflow-core/src/extensions/OutputNodeExtension.ts`
-    -   [ ] Define `OutputNodeData` interface
-        -   [ ] `format: 'text' | 'json' | 'markdown'`
-        -   [ ] `template?: string`
-        -   [ ] `includeMetadata?: boolean`
-        -   [ ] `schema?: Record<string, unknown>`
-    -   [ ] Implement node extension (no outputs - terminal)
-    -   [ ] Implement `execute()` with template interpolation
-    -   [ ] Add format handling
-    -   [ ] Add validation
-    -   [ ] Write unit tests
+-   [x] Create `packages/workflow-core/src/extensions/OutputNodeExtension.ts`
+    -   [x] Define `OutputNodeData` interface
+        -   [x] `format: 'text' | 'json' | 'markdown'`
+        -   [x] `template?: string`
+        -   [x] `includeMetadata?: boolean`
+        -   [x] `schema?: Record<string, unknown>`
+    -   [x] Implement node extension (no outputs - terminal)
+    -   [x] Implement `execute()` with template interpolation
+    -   [x] Add format handling
+    -   [x] Add validation
+    -   [x] Write unit tests
 
 ### 6.2 Output Node Execution
 
 _Requirements: 6.1_
 
--   [ ] Mark output nodes as terminal
+-   [x] Mark output nodes as terminal
 
-    -   [ ] Return empty `nextNodes` array
-    -   [ ] Use output as workflow final result
+    -   [x] Return empty `nextNodes` array
+    -   [x] Use output as workflow final result
 
--   [ ] Handle multiple output nodes
-    -   [ ] Any reached output node is valid endpoint
-    -   [ ] Use first reached output's result
+-   [x] Handle multiple output nodes
+    -   [x] Any reached output node is valid endpoint
+    -   [x] Use first reached output's result
 
 ### 6.3 Output Vue Component
 
 _Requirements: 6.1_
 
--   [ ] Create `packages/workflow-vue/src/components/nodes/OutputNode.vue`
+-   [x] Create `packages/workflow-vue/src/components/nodes/OutputNode.vue`
 
-    -   [ ] Display as terminal node (distinct styling)
-    -   [ ] Show format badge
+    -   [x] Display as terminal node (distinct styling)
+    -   [x] Show format badge
 
--   [ ] Add Output inspector UI
+-   [x] Add Output inspector UI
 
-    -   [ ] Format selector
-    -   [ ] Template editor with {{nodeId}} autocomplete
-    -   [ ] Include metadata toggle
-    -   [ ] JSON schema editor (advanced)
+    -   [x] Format selector
+    -   [x] Template editor with {{nodeId}} syntax
+    -   [x] Include metadata toggle
+    -   [ ] JSON schema editor (advanced) - deferred
 
--   [ ] Add to NodePalette
+-   [x] Add to NodePalette
 
 ---
 
