@@ -5,6 +5,8 @@ import {
     WorkflowNode,
     type NodeErrorConfig,
     type NodeRetryConfig,
+    type HITLConfig,
+    type HITLMode,
 } from '@or3/workflow-core';
 
 // Type guard for configurable node data
@@ -41,7 +43,9 @@ const emit = defineEmits<{
 }>();
 
 const selectedNode = ref<WorkflowNode | null>(null);
-const activeTab = ref<'prompt' | 'model' | 'tools' | 'errors'>('prompt');
+const activeTab = ref<'prompt' | 'model' | 'tools' | 'errors' | 'hitl'>(
+    'prompt'
+);
 
 // Available models
 const availableModels = [
@@ -188,6 +192,9 @@ const isConfigurable = computed(
 const hasErrorHandling = computed(
     () => isAgentNode.value || isRouterNode.value || isToolNode.value
 );
+const hasHITL = computed(
+    () => isAgentNode.value || isRouterNode.value || isToolNode.value
+);
 
 const nodeData = computed<ConfigurableNodeData>(() => {
     const data = selectedNode.value?.data;
@@ -200,7 +207,9 @@ const whileData = computed(() => {
 });
 
 const errorHandling = computed<NodeErrorConfig>(() => {
-    const data = selectedNode.value?.data as { errorHandling?: NodeErrorConfig } | undefined;
+    const data = selectedNode.value?.data as
+        | { errorHandling?: NodeErrorConfig }
+        | undefined;
     return data?.errorHandling ?? { mode: 'stop' };
 });
 
@@ -214,6 +223,35 @@ const retryConfig = computed<NodeRetryConfig>(() => {
         skipOn: retry.skipOn,
     };
 });
+
+const hitlConfig = computed<HITLConfig>(() => {
+    const data = selectedNode.value?.data as { hitl?: HITLConfig } | undefined;
+    return data?.hitl ?? { enabled: false, mode: 'approval' };
+});
+
+const hitlModes: Array<{ id: HITLMode; label: string; description: string }> = [
+    {
+        id: 'approval',
+        label: 'Approval',
+        description: 'Pause before execution for approve/reject',
+    },
+    {
+        id: 'input',
+        label: 'Input',
+        description: 'Collect human input before execution',
+    },
+    {
+        id: 'review',
+        label: 'Review',
+        description: 'Pause after execution to review output',
+    },
+];
+
+const hitlDefaultActions = [
+    { id: 'approve', label: 'Approve' },
+    { id: 'reject', label: 'Reject' },
+    { id: 'skip', label: 'Skip' },
+];
 
 const errorCodes = [
     { id: 'RATE_LIMIT', label: 'Rate Limit' },
@@ -314,11 +352,59 @@ const updateMaxIterations = (event: Event) => {
 };
 
 const updateOnMaxBehavior = (event: Event) => {
-    debouncedUpdate('onMaxIterations', (event.target as HTMLSelectElement).value);
+    debouncedUpdate(
+        'onMaxIterations',
+        (event.target as HTMLSelectElement).value
+    );
 };
 
 const updateCustomEvaluator = (event: Event) => {
-    debouncedUpdate('customEvaluator', (event.target as HTMLInputElement).value);
+    debouncedUpdate(
+        'customEvaluator',
+        (event.target as HTMLInputElement).value
+    );
+};
+
+// HITL update handlers
+const updateHITL = (partial: Partial<HITLConfig>) => {
+    if (!selectedNode.value) return;
+    const current = hitlConfig.value;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        hitl: {
+            ...current,
+            ...partial,
+        },
+    });
+};
+
+const toggleHITLEnabled = () => {
+    updateHITL({ enabled: !hitlConfig.value.enabled });
+};
+
+const updateHITLMode = (mode: HITLMode) => {
+    updateHITL({ mode });
+};
+
+const updateHITLPrompt = (event: Event) => {
+    if (!selectedNode.value) return;
+    const value = (event.target as HTMLTextAreaElement).value;
+    if (debounceTimeout) clearTimeout(debounceTimeout);
+    debounceTimeout = setTimeout(() => {
+        updateHITL({ prompt: value });
+    }, 200);
+};
+
+const updateHITLTimeout = (event: Event) => {
+    const value = Number((event.target as HTMLInputElement).value);
+    updateHITL({
+        timeout: Number.isFinite(value) && value > 0 ? value : undefined,
+    });
+};
+
+const updateHITLDefaultAction = (event: Event) => {
+    const value = (event.target as HTMLSelectElement)
+        .value as HITLConfig['defaultAction'];
+    updateHITL({ defaultAction: value });
 };
 
 const handleDelete = () => {
@@ -519,12 +605,36 @@ const handleDelete = () => {
                 </svg>
                 Errors
             </button>
+            <button
+                v-if="hasHITL"
+                class="tab"
+                :class="{ active: activeTab === 'hitl' }"
+                @click="activeTab = 'hitl'"
+            >
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                >
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+                HITL
+                <span v-if="hitlConfig.enabled" class="hitl-badge">ON</span>
+            </button>
         </div>
 
         <!-- Tab Content -->
-        <div v-if="isConfigurable || hasErrorHandling" class="tab-content">
+        <div
+            v-if="isConfigurable || hasErrorHandling || hasHITL"
+            class="tab-content"
+        >
             <!-- Prompt Tab -->
-            <div v-if="activeTab === 'prompt' && isConfigurable" class="prompt-tab">
+            <div
+                v-if="activeTab === 'prompt' && isConfigurable"
+                class="prompt-tab"
+            >
                 <template v-if="isWhileNode">
                     <label class="field-label">Condition Prompt</label>
                     <textarea
@@ -551,14 +661,18 @@ const handleDelete = () => {
                                 :value="whileData.onMaxIterations || 'warning'"
                                 @change="updateOnMaxBehavior"
                             >
-                                <option value="warning">Warning then exit</option>
+                                <option value="warning">
+                                    Warning then exit
+                                </option>
                                 <option value="continue">Exit silently</option>
                                 <option value="error">Throw error</option>
                             </select>
                         </div>
                     </div>
                     <div class="field-group">
-                        <label class="field-label">Custom evaluator (optional)</label>
+                        <label class="field-label"
+                            >Custom evaluator (optional)</label
+                        >
                         <input
                             type="text"
                             class="text-input"
@@ -568,7 +682,8 @@ const handleDelete = () => {
                         />
                     </div>
                     <p class="field-hint">
-                        Loops run at least once. Provide a custom evaluator name to use an injected function instead of an LLM.
+                        Loops run at least once. Provide a custom evaluator name
+                        to use an injected function instead of an LLM.
                     </p>
                 </template>
                 <template v-else>
@@ -632,7 +747,8 @@ const handleDelete = () => {
                     <code>
                         {{
                             isWhileNode
-                                ? whileData.conditionModel || 'openai/gpt-4o-mini'
+                                ? whileData.conditionModel ||
+                                  'openai/gpt-4o-mini'
                                 : nodeData.model || 'openai/gpt-4o-mini'
                         }}
                     </code>
@@ -773,7 +889,11 @@ const handleDelete = () => {
                         >
                             <input
                                 type="checkbox"
-                                :checked="(retryConfig.retryOn || []).includes(code.id)"
+                                :checked="
+                                    (retryConfig.retryOn || []).includes(
+                                        code.id
+                                    )
+                                "
                                 @change="toggleRetryOn(code.id)"
                             />
                             <span>{{ code.label }}</span>
@@ -785,6 +905,93 @@ const handleDelete = () => {
                     Branch mode sends errors to the "error" handle if connected.
                     Continue mode logs the error and moves forward.
                 </p>
+            </div>
+
+            <!-- HITL Tab -->
+            <div v-if="activeTab === 'hitl' && hasHITL" class="hitl-tab">
+                <div class="hitl-toggle">
+                    <label class="toggle-label">
+                        <input
+                            type="checkbox"
+                            :checked="hitlConfig.enabled"
+                            @change="toggleHITLEnabled"
+                        />
+                        <span class="toggle-text">Enable Human Review</span>
+                    </label>
+                    <p class="field-hint" style="margin-top: 4px">
+                        Pause execution for human approval, input, or review.
+                    </p>
+                </div>
+
+                <template v-if="hitlConfig.enabled">
+                    <div class="hitl-section">
+                        <label class="field-label">Review Mode</label>
+                        <div class="mode-buttons">
+                            <button
+                                v-for="mode in hitlModes"
+                                :key="mode.id"
+                                class="mode-button hitl-mode"
+                                :class="{ active: hitlConfig.mode === mode.id }"
+                                @click="updateHITLMode(mode.id)"
+                                :title="mode.description"
+                            >
+                                {{ mode.label }}
+                            </button>
+                        </div>
+                        <p class="field-hint">
+                            {{
+                                hitlModes.find((m) => m.id === hitlConfig.mode)
+                                    ?.description
+                            }}
+                        </p>
+                    </div>
+
+                    <div class="hitl-section">
+                        <label class="field-label">Prompt</label>
+                        <textarea
+                            :value="hitlConfig.prompt || ''"
+                            class="prompt-textarea hitl-prompt"
+                            placeholder="Message to show the reviewer..."
+                            @input="updateHITLPrompt"
+                        ></textarea>
+                    </div>
+
+                    <div class="hitl-grid">
+                        <div class="field-group">
+                            <label class="field-label">Timeout (ms)</label>
+                            <input
+                                type="number"
+                                min="0"
+                                class="text-input"
+                                :value="hitlConfig.timeout || ''"
+                                placeholder="No timeout"
+                                @input="updateHITLTimeout"
+                            />
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">Default Action</label>
+                            <select
+                                class="model-select"
+                                :value="hitlConfig.defaultAction || 'reject'"
+                                @change="updateHITLDefaultAction"
+                            >
+                                <option
+                                    v-for="action in hitlDefaultActions"
+                                    :key="action.id"
+                                    :value="action.id"
+                                >
+                                    {{ action.label }}
+                                </option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <p class="field-hint">
+                        When timeout is set, the default action is taken
+                        automatically. Connect the "Rejected" handle to route
+                        rejected items.
+                    </p>
+                </template>
             </div>
         </div>
 
@@ -1250,5 +1457,74 @@ const handleDelete = () => {
     font-size: 12px;
     color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
     line-height: 1.5;
+}
+
+/* HITL Tab */
+.hitl-tab {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-md, 16px);
+}
+
+.hitl-toggle {
+    padding: var(--or3-spacing-md, 16px);
+    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.03));
+    border-radius: var(--or3-radius-md, 10px);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+}
+
+.toggle-label {
+    display: flex;
+    align-items: center;
+    gap: var(--or3-spacing-sm, 8px);
+    cursor: pointer;
+}
+
+.toggle-label input[type='checkbox'] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--or3-color-info, #3b82f6);
+}
+
+.toggle-text {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
+}
+
+.hitl-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-sm, 8px);
+}
+
+.hitl-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: var(--or3-spacing-sm, 8px);
+}
+
+.hitl-prompt {
+    min-height: 80px;
+}
+
+.hitl-badge {
+    background: var(--or3-color-info, #3b82f6);
+    color: white;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 5px;
+    border-radius: 4px;
+    margin-left: 4px;
+}
+
+.mode-button.hitl-mode.active {
+    border-color: var(--or3-color-info, #3b82f6);
+    color: var(--or3-color-info, #3b82f6);
+    background: color-mix(
+        in srgb,
+        var(--or3-color-info, #3b82f6) 12%,
+        transparent
+    );
 }
 </style>

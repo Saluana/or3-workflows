@@ -214,69 +214,69 @@ _Requirements: 2.1_
 
 _Requirements: 4.1, 4.2, 4.3, 4.4_
 
--   [ ] Create `packages/workflow-core/src/hitl.ts`
-    -   [ ] Define `HITLMode` type: `'approval' | 'input' | 'review'`
-    -   [ ] Define `HITLConfig` interface
-        -   [ ] `enabled: boolean`
-        -   [ ] `mode: HITLMode`
-        -   [ ] `prompt?: string`
-        -   [ ] `inputSchema?: Record<string, unknown>`
-        -   [ ] `options?: Array<{ id, label, action }>`
-        -   [ ] `timeout?: number`
-        -   [ ] `defaultAction?: 'approve' | 'reject' | 'skip'`
-    -   [ ] Define `HITLRequest` interface
-    -   [ ] Define `HITLResponse` interface
-    -   [ ] Define `HITLCallback` type
-    -   [ ] Write unit tests for type guards
+-   [x] Create `packages/workflow-core/src/hitl.ts`
+    -   [x] Define `HITLMode` type: `'approval' | 'input' | 'review'`
+    -   [x] Define `HITLConfig` interface
+        -   [x] `enabled: boolean`
+        -   [x] `mode: HITLMode`
+        -   [x] `prompt?: string`
+        -   [x] `inputSchema?: Record<string, unknown>`
+        -   [x] `options?: Array<{ id, label, action }>`
+        -   [x] `timeout?: number`
+        -   [x] `defaultAction?: 'approve' | 'reject' | 'skip'`
+    -   [x] Define `HITLRequest` interface
+    -   [x] Define `HITLResponse` interface
+    -   [x] Define `HITLCallback` type
+    -   [x] Write unit tests for type guards
 
 ### 4.2 HITL Execution Integration
 
 _Requirements: 4.1, 4.2, 4.3, 4.4_
 
--   [ ] Add HITL to node data types
+-   [x] Add HITL to node data types
 
-    -   [ ] Add `hitl?: HITLConfig` to `AgentNodeData`
-    -   [ ] Add `hitl?: HITLConfig` to `RouterNodeData`
-    -   [ ] Add `hitl?: HITLConfig` to `ToolNodeData`
+    -   [x] Add `hitl?: HITLConfig` to `AgentNodeData`
+    -   [x] Add `hitl?: HITLConfig` to `RouterNodeData`
+    -   [x] Add `hitl?: HITLConfig` to `ToolNodeData`
 
--   [ ] Add HITL callback to execution options
+-   [x] Add HITL callback to execution options
 
-    -   [ ] Add `onHITLRequest?: HITLCallback` to `ExecutionOptions`
+    -   [x] Add `onHITLRequest?: HITLCallback` to `ExecutionOptions`
 
--   [ ] Implement `executeWithHITL()` wrapper
+-   [x] Implement `executeWithHITL()` wrapper
 
-    -   [ ] Check if HITL enabled on node
-    -   [ ] Check if callback provided (skip HITL if not)
-    -   [ ] Implement approval mode (pause before execution)
-    -   [ ] Implement input mode (collect input before execution)
-    -   [ ] Implement review mode (pause after execution)
-    -   [ ] Handle timeout with default action
-    -   [ ] Route to rejection branch if configured
+    -   [x] Check if HITL enabled on node
+    -   [x] Check if callback provided (skip HITL if not)
+    -   [x] Implement approval mode (pause before execution)
+    -   [x] Implement input mode (collect input before execution)
+    -   [x] Implement review mode (pause after execution)
+    -   [x] Handle timeout with default action
+    -   [x] Route to rejection branch if configured
 
--   [ ] Implement helper methods
-    -   [ ] `createHITLRequest()` - build request object
-    -   [ ] `waitForHITL()` - call callback with timeout
-    -   [ ] Write integration tests
+-   [x] Implement helper methods
+    -   [x] `createHITLRequest()` - build request object
+    -   [x] `waitForHITL()` - call callback with timeout
+    -   [x] Write integration tests
 
 ### 4.3 HITL Node Outputs
 
 _Requirements: 4.2, 4.4_
 
--   [ ] Add HITL-related output handles
-    -   [ ] Add optional `rejected` handle to agent nodes
-    -   [ ] Handle rejection routing in execution
+-   [x] Add HITL-related output handles
+    -   [x] Add optional `rejected` handle to agent nodes
+    -   [x] Handle rejection routing in execution
 
 ### 4.4 HITL UI Integration
 
 _Requirements: 4.1_
 
--   [ ] Update NodeInspector with HITL config
-    -   [ ] Add "Human Review" section
-    -   [ ] Add enabled toggle (default: off)
-    -   [ ] Add mode selector (approval/input/review)
-    -   [ ] Add prompt input
-    -   [ ] Add timeout input
-    -   [ ] Add default action selector
+-   [x] Update NodeInspector with HITL config
+    -   [x] Add "Human Review" section
+    -   [x] Add enabled toggle (default: off)
+    -   [x] Add mode selector (approval/input/review)
+    -   [x] Add prompt input
+    -   [x] Add timeout input
+    -   [x] Add default action selector
 
 ---
 
