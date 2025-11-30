@@ -13,6 +13,14 @@ interface BranchStream {
     expanded: boolean;
 }
 
+// Completed branch collection type (matches App.vue)
+interface CompletedBranchCollection {
+    id: string;
+    nodeId: string;
+    branches: BranchStream[];
+    timestamp: Date;
+}
+
 const props = defineProps<{
     messages: ChatMessage[];
     nodeStatuses: Record<string, string>;
@@ -22,6 +30,7 @@ const props = defineProps<{
     chatInput: string;
     tokenUsage?: { nodeId: string; usage: TokenUsageDetails } | null;
     branchStreams?: Record<string, BranchStream>;
+    completedBranchCollections?: CompletedBranchCollection[];
 }>();
 
 const emit = defineEmits<{
@@ -29,6 +38,7 @@ const emit = defineEmits<{
     send: [];
     clear: [];
     toggleBranch: [key: string];
+    toggleCompletedBranch: [payload: { collectionId: string; branchId: string }];
 }>();
 
 const messagesContainer = ref<HTMLElement | null>(null);
@@ -46,6 +56,15 @@ const getNodeDisplayName = (nodeId: string): string => {
     // Fall back to showing truncated ID if no label
     return nodeId.length > 12 ? `${nodeId.slice(0, 8)}...` : nodeId;
 };
+
+// Debug: watch completedBranchCollections
+watch(
+    () => props.completedBranchCollections,
+    (newVal) => {
+        console.log('[ChatPanel] completedBranchCollections changed:', newVal?.length, newVal);
+    },
+    { deep: true }
+);
 
 // Auto-scroll to bottom when new messages arrive
 watch(
@@ -258,7 +277,57 @@ const formatNumber = (value?: number) =>
                     </div>
                 </div>
 
-                <!-- Parallel Branch Streams -->
+                <!-- Completed Parallel Branch Collections (persisted) -->
+                <div
+                    v-for="collection in completedBranchCollections"
+                    :key="collection.id"
+                    class="parallel-branches completed"
+                >
+                    <div class="branches-header">
+                        <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            class="branches-icon"
+                        >
+                            <path d="M6 3v12"></path>
+                            <circle cx="18" cy="6" r="3"></circle>
+                            <circle cx="6" cy="18" r="3"></circle>
+                            <path d="M18 9a9 9 0 0 1-9 9"></path>
+                        </svg>
+                        <span>{{ getNodeDisplayName(collection.nodeId) }}</span>
+                        <span class="branch-count">({{ collection.branches.length }} branches)</span>
+                    </div>
+                    <div
+                        v-for="branch in collection.branches"
+                        :key="branch.branchId"
+                        class="branch-item completed"
+                        :class="{ expanded: branch.expanded }"
+                    >
+                        <button
+                            class="branch-header"
+                            @click="emit('toggleCompletedBranch', { collectionId: collection.id, branchId: branch.branchId })"
+                        >
+                            <svg
+                                class="branch-chevron"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <polyline points="9 18 15 12 9 6"></polyline>
+                            </svg>
+                            <span class="branch-label">{{ branch.label }}</span>
+                            <span class="branch-status-dot"></span>
+                        </button>
+                        <div v-show="branch.expanded" class="branch-content">
+                            <div class="branch-text">{{ branch.content }}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Active Parallel Branch Streams -->
                 <div v-if="hasActiveBranches" class="parallel-branches">
                     <div class="branches-header">
                         <svg
@@ -858,6 +927,12 @@ const formatNumber = (value?: number) =>
 .branch-status-text {
     font-size: var(--or3-text-xs, 11px);
     color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
+}
+
+.branch-count {
+    font-size: var(--or3-text-xs, 11px);
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+    margin-left: auto;
 }
 
 .branch-content {

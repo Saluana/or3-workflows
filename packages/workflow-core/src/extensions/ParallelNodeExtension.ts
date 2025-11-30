@@ -211,9 +211,31 @@ export const ParallelNodeExtension: NodeExtension = {
                 },
             ];
 
+            // Notify merge branch start
+            const mergeBranchId = '__merge__';
+            const mergeBranchLabel = 'Merge';
+            context.onBranchStart?.(mergeBranchId, mergeBranchLabel);
+
+            let mergeContent = '';
             const result = await provider.chat(mergeModel, mergeMessages, {
-                onToken: context.onToken,
+                onToken: (token) => {
+                    mergeContent += token;
+                    // Stream to both the main output and the merge branch
+                    context.onToken?.(token);
+                    context.onBranchToken?.(
+                        mergeBranchId,
+                        mergeBranchLabel,
+                        token
+                    );
+                },
             });
+
+            // Notify merge branch complete
+            context.onBranchComplete?.(
+                mergeBranchId,
+                mergeBranchLabel,
+                result.content || mergeContent
+            );
 
             if (context.tokenCounter && context.onTokenUsage) {
                 let usage = estimateTokenUsage({
