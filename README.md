@@ -10,7 +10,9 @@ Building AI applications often requires orchestrating multiple LLM calls in sequ
 -   **Multi-model support** - Use any model available on OpenRouter (GPT-4, Claude, Llama, etc.)
 -   **Real-time execution** - Watch your workflow execute with streaming responses
 -   **Type-safe core** - Framework-agnostic TypeScript core with Zod validation
--   **Extensible architecture** - Add custom node types via the extension system
+-   **TipTap-style extensions** - Configurable, composable node extensions
+-   **Human-in-the-loop** - Pause for approval, input, or review at any step
+-   **Context compaction** - Automatic conversation summarization to stay within limits
 
 ## Packages
 
@@ -18,6 +20,11 @@ Building AI applications often requires orchestrating multiple LLM calls in sequ
 | -------------------- | ----------------------------------------------------------------------- |
 | `@or3/workflow-core` | Framework-agnostic editor, history, commands, validation, and execution |
 | `@or3/workflow-vue`  | Vue 3 components: canvas, nodes, inspector, palette                     |
+
+## Documentation
+
+-   [EXTENSIONS.md](./EXTENSIONS.md) - Creating custom extensions, StarterKit configuration
+-   [ADAPTERS.md](./ADAPTERS.md) - Memory, storage, and token counter adapters
 
 ## Installation
 
@@ -30,6 +37,36 @@ npm install @or3/workflow-core @or3/workflow-vue
 ```
 
 ## Quick Start
+
+### TipTap-Style Setup
+
+```typescript
+import { WorkflowEditor, StarterKit } from '@or3/workflow-core';
+
+// Basic setup with all extensions
+const editor = new WorkflowEditor({
+    extensions: StarterKit.configure(),
+});
+
+// Customize which extensions to include
+const editor = new WorkflowEditor({
+    extensions: StarterKit.configure({
+        // Disable specific nodes
+        whileLoop: false,
+        parallel: false,
+
+        // Configure specific nodes
+        agent: {
+            defaultModel: 'anthropic/claude-3.5-sonnet',
+        },
+        subflow: {
+            maxNestingDepth: 5,
+        },
+    }),
+});
+```
+
+### Vue Component Setup
 
 ```vue
 <script setup lang="ts">
@@ -290,73 +327,195 @@ Executes a specific tool/function and passes results downstream.
 The demo includes a full execution engine using OpenRouter:
 
 ```typescript
-import { useWorkflowExecution } from './composables';
+import { OpenRouterExecutionAdapter } from '@or3/workflow-core';
 
-const { execute } = useWorkflowExecution();
+const adapter = new OpenRouterExecutionAdapter({
+    apiKey: process.env.OPENROUTER_API_KEY!,
+    extensions: StarterKit.configure(),
+    onNodeStart: (nodeId) => setNodeStatus(nodeId, 'active'),
+    onNodeComplete: (nodeId, result) => setNodeStatus(nodeId, 'completed'),
+    onNodeError: (nodeId, error) => setNodeStatus(nodeId, 'error'),
+    onStreamChunk: (chunk) => appendContent(chunk),
+    onHITLRequest: async (request) => showApprovalModal(request),
+});
 
-const result = await execute(
-    apiKey, // OpenRouter API key
-    nodes, // Workflow nodes
-    edges, // Workflow edges
-    userInput, // User message
+const result = await adapter.execute({
+    nodes,
+    edges,
+    input: userMessage,
     conversationHistory,
-    {
-        onNodeStatus: (nodeId, status) => {
-            /* Update UI */
+});
+```
+
+## Human-in-the-Loop (HITL)
+
+Pause workflow execution for human review, approval, or input:
+
+```typescript
+import { OpenRouterExecutionAdapter } from '@or3/workflow-core';
+import type { HITLRequest, HITLResponse, HITLAction } from '@or3/workflow-core';
+
+const adapter = new OpenRouterExecutionAdapter({
+    apiKey,
+    extensions: StarterKit.configure(),
+
+    // Handle HITL requests
+    onHITLRequest: async (request: HITLRequest): Promise<HITLResponse> => {
+        // Show modal to user, wait for response
+        const userAction = await showApprovalModal(request);
+
+        return {
+            action: userAction.action, // 'approve' | 'reject' | 'modify' | 'skip'
+            modifiedContent: userAction.content,
+            metadata: { reviewedBy: 'user@example.com' },
+        };
+    },
+});
+
+// Configure HITL on agent nodes
+const node = {
+    type: 'agent',
+    data: {
+        label: 'Draft Email',
+        hitl: {
+            enabled: true,
+            type: 'approval', // 'approval' | 'input' | 'review'
+            message: 'Review this email before sending',
+            timeout: 300000, // 5 minutes
+            actions: ['approve', 'reject', 'modify'],
         },
-        onStreamingContent: (content) => {
-            /* Show streaming */
-        },
-        onAppendContent: (chunk) => {
-            /* Append chunk */
-        },
+    },
+};
+```
+
+## Context Compaction
+
+Automatically summarize conversation history when approaching token limits:
+
+```typescript
+import {
+    OpenRouterExecutionAdapter,
+    ApproximateTokenCounter,
+} from '@or3/workflow-core';
+
+const adapter = new OpenRouterExecutionAdapter({
+    apiKey,
+    extensions: StarterKit.configure(),
+    tokenCounter: new ApproximateTokenCounter(),
+
+    compaction: {
+        enabled: true,
+        maxTokens: 100000, // When to trigger
+        targetTokens: 60000, // Target after compaction
+        summaryModel: 'openai/gpt-4o-mini',
+        preserveSystemPrompt: true,
+        preserveLastN: 5, // Keep last N messages
+    },
+});
+```
+
+For custom token counting (tiktoken, etc.), implement `TokenCounter`:
+
+```typescript
+import { TokenCounter } from '@or3/workflow-core';
+import { encoding_for_model } from 'tiktoken';
+
+class TiktokenCounter implements TokenCounter {
+    private encoder = encoding_for_model('gpt-4o');
+
+    count(text: string): number {
+        return this.encoder.encode(text).length;
     }
-);
+
+    countMessages(messages: Message[]): number {
+        return messages.reduce((sum, m) => sum + this.count(m.content) + 4, 0);
+    }
+}
 ```
 
 ## Extensions
 
-Add custom node types via the extension system:
+TipTap-style configurable extensions for custom node types.
+
+### Using StarterKit
 
 ```typescript
-import { Extension } from '@or3/workflow-core';
+import { WorkflowEditor, StarterKit } from '@or3/workflow-core';
 
-const CustomExtension: Extension = {
-    name: 'custom',
-    type: 'custom',
+// All built-in extensions
+const editor = new WorkflowEditor({
+    extensions: StarterKit.configure(),
+});
 
-    // Default data for new nodes
-    getDefaultData: () => ({
-        label: 'Custom Node',
-        customField: '',
+// Selective configuration
+const editor = new WorkflowEditor({
+    extensions: StarterKit.configure({
+        whileLoop: false, // Disable
+        agent: { defaultModel: 'anthropic/claude-3.5-sonnet' },
+    }),
+});
+```
+
+### Creating Custom Extensions
+
+```typescript
+import { createConfigurableExtension } from '@or3/workflow-core';
+import type { Extension } from '@or3/workflow-core';
+
+interface ApprovalOptions {
+    defaultTimeout?: number;
+    requireReason?: boolean;
+}
+
+const ApprovalExtension = createConfigurableExtension<ApprovalOptions>({
+    name: 'approval',
+    type: 'approval',
+
+    getDefaultData: (options) => ({
+        label: 'Approval Gate',
+        timeout: options.defaultTimeout ?? 300000,
+        requireReason: options.requireReason ?? false,
     }),
 
-    // Validation
     validate: (node, workflow) => {
         const issues = [];
-        if (!node.data.customField) {
-            issues.push({ type: 'warning', message: 'Custom field is empty' });
+        if (node.data.timeout < 1000) {
+            issues.push({ type: 'error', message: 'Timeout too short' });
         }
         return issues;
     },
 
-    // Dynamic handles
-    getDynamicOutputs: (node) => [
-        { id: 'output-1', label: 'Success' },
-        { id: 'output-2', label: 'Failure' },
-    ],
-
-    // Execution
     execute: async (node, input, context) => {
-        // Custom execution logic
-        return { output: 'result', nextHandleId: 'output-1' };
-    },
-};
+        // Request human approval
+        const response = await context.requestHITL({
+            nodeId: node.id,
+            type: 'approval',
+            content: input,
+            message: 'Approve to continue',
+        });
 
+        if (response.action === 'approve') {
+            return { output: input, nextHandleId: 'approved' };
+        }
+        return { output: response.modifiedContent, nextHandleId: 'rejected' };
+    },
+
+    getDynamicOutputs: () => [
+        { id: 'approved', label: 'Approved' },
+        { id: 'rejected', label: 'Rejected' },
+    ],
+});
+
+// Use with configuration
 const editor = new WorkflowEditor({
-    extensions: [CustomExtension],
+    extensions: [
+        ...StarterKit.configure({ parallel: false }),
+        ApprovalExtension.configure({ defaultTimeout: 60000 }),
+    ],
 });
 ```
+
+See [EXTENSIONS.md](./EXTENSIONS.md) for complete extension API documentation.
 
 ## Development
 
@@ -389,9 +548,16 @@ or3-workflows/
 │   │   │   ├── commands.ts    # Command system with validation
 │   │   │   ├── history.ts     # Undo/redo manager
 │   │   │   ├── validation.ts  # Workflow validation
-│   │   │   ├── execution.ts   # Execution adapters
+│   │   │   ├── execution.ts   # Execution adapters, HITL, Compaction
 │   │   │   ├── storage.ts     # Persistence adapters
-│   │   │   └── extensions/    # Built-in node extensions
+│   │   │   ├── memory.ts      # Memory adapters
+│   │   │   └── extensions/    # TipTap-style node extensions
+│   │   │       ├── index.ts       # StarterKit bundle
+│   │   │       ├── AgentNodeExtension.ts
+│   │   │       ├── RouterNodeExtension.ts
+│   │   │       ├── ParallelNodeExtension.ts
+│   │   │       ├── WhileLoopExtension.ts
+│   │   │       └── ...
 │   │   └── __tests__/
 │   │
 │   └── workflow-vue/      # Vue 3 components
@@ -404,7 +570,9 @@ or3-workflows/
 │       └── styles/
 │
 ├── demo-v2/               # Full-featured demo app
-└── tests/
+├── EXTENSIONS.md          # Extension API documentation
+├── ADAPTERS.md            # Adapter interface documentation
+└── README.md
 ```
 
 ## License

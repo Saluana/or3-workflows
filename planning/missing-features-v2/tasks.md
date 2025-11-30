@@ -539,23 +539,23 @@ _Requirements: All_
 
 ### 9.2 Documentation
 
--   [ ] Update README
+-   [x] Update README
 
-    -   [ ] Add TipTap-style usage examples
-    -   [ ] Document extension configuration
-    -   [ ] Document adapter interfaces
+    -   [x] Add TipTap-style usage examples
+    -   [x] Document extension configuration
+    -   [x] Document adapter interfaces
 
--   [ ] Add ADAPTERS.md
+-   [x] Add ADAPTERS.md
 
-    -   [ ] Document MemoryAdapter interface
-    -   [ ] Example: Redis adapter
-    -   [ ] Example: PostgreSQL adapter
-    -   [ ] Example: Pinecone adapter
+    -   [x] Document MemoryAdapter interface
+    -   [x] Example: Redis adapter
+    -   [x] Example: PostgreSQL adapter
+    -   [x] Example: Pinecone adapter
 
--   [ ] Add EXTENSIONS.md
-    -   [ ] Document creating custom extensions
-    -   [ ] Document StarterKit options
-    -   [ ] Document node extension pattern
+-   [x] Add EXTENSIONS.md
+    -   [x] Document creating custom extensions
+    -   [x] Document StarterKit options
+    -   [x] Document node extension pattern
 
 ---
 
