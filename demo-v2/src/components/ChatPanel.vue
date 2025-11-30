@@ -38,7 +38,9 @@ const emit = defineEmits<{
     send: [];
     clear: [];
     toggleBranch: [key: string];
-    toggleCompletedBranch: [payload: { collectionId: string; branchId: string }];
+    toggleCompletedBranch: [
+        payload: { collectionId: string; branchId: string }
+    ];
 }>();
 
 const messagesContainer = ref<HTMLElement | null>(null);
@@ -61,7 +63,11 @@ const getNodeDisplayName = (nodeId: string): string => {
 watch(
     () => props.completedBranchCollections,
     (newVal) => {
-        console.log('[ChatPanel] completedBranchCollections changed:', newVal?.length, newVal);
+        console.log(
+            '[ChatPanel] completedBranchCollections changed:',
+            newVal?.length,
+            newVal
+        );
     },
     { deep: true }
 );
@@ -297,7 +303,9 @@ const formatNumber = (value?: number) =>
                             <path d="M18 9a9 9 0 0 1-9 9"></path>
                         </svg>
                         <span>{{ getNodeDisplayName(collection.nodeId) }}</span>
-                        <span class="branch-count">({{ collection.branches.length }} branches)</span>
+                        <span class="branch-count"
+                            >({{ collection.branches.length }} branches)</span
+                        >
                     </div>
                     <div
                         v-for="branch in collection.branches"
@@ -307,7 +315,12 @@ const formatNumber = (value?: number) =>
                     >
                         <button
                             class="branch-header"
-                            @click="emit('toggleCompletedBranch', { collectionId: collection.id, branchId: branch.branchId })"
+                            @click="
+                                emit('toggleCompletedBranch', {
+                                    collectionId: collection.id,
+                                    branchId: branch.branchId,
+                                })
+                            "
                         >
                             <svg
                                 class="branch-chevron"

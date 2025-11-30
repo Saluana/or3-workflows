@@ -471,10 +471,17 @@ function toggleBranchExpanded(key: string) {
 }
 
 // Handle toggling completed branch expansion
-function toggleCompletedBranchExpanded(payload: { collectionId: string; branchId: string }) {
-    const collection = completedBranchCollections.value.find(c => c.id === payload.collectionId);
+function toggleCompletedBranchExpanded(payload: {
+    collectionId: string;
+    branchId: string;
+}) {
+    const collection = completedBranchCollections.value.find(
+        (c) => c.id === payload.collectionId
+    );
     if (collection) {
-        const branch = collection.branches.find(b => b.branchId === payload.branchId);
+        const branch = collection.branches.find(
+            (b) => b.branchId === payload.branchId
+        );
         if (branch) {
             branch.expanded = !branch.expanded;
         }
@@ -509,7 +516,9 @@ async function handleSendMessage() {
     setStreamingContent('');
     tokenUsage.value = null;
     error.value = null;
-    console.log('[Execution] Resetting active branch streams (keeping completed collections)');
+    console.log(
+        '[Execution] Resetting active branch streams (keeping completed collections)'
+    );
     branchStreams.value = {}; // Reset active branch streams only
     // Note: completedBranchCollections persists until chat is cleared
 
@@ -561,17 +570,22 @@ async function handleSendMessage() {
                         branchStreams.value[key].content = output;
                         branchStreams.value[key].status = 'completed';
                     }
-                    
+
                     // Check if all branches for this node are completed
-                    const nodeBranches = Object.values(branchStreams.value)
-                        .filter(b => b.nodeId === nodeId);
-                    const allCompleted = nodeBranches.length > 0 && 
-                        nodeBranches.every(b => b.status === 'completed' || b.status === 'error');
-                    
+                    const nodeBranches = Object.values(
+                        branchStreams.value
+                    ).filter((b) => b.nodeId === nodeId);
+                    const allCompleted =
+                        nodeBranches.length > 0 &&
+                        nodeBranches.every(
+                            (b) =>
+                                b.status === 'completed' || b.status === 'error'
+                        );
+
                     if (allCompleted) {
                         // Move to completed collections for persistence
                         // Deep copy branches to ensure reactivity works
-                        const branchesCopy = nodeBranches.map(b => ({
+                        const branchesCopy = nodeBranches.map((b) => ({
                             nodeId: b.nodeId,
                             branchId: b.branchId,
                             label: b.label,
@@ -579,17 +593,26 @@ async function handleSendMessage() {
                             status: b.status,
                             expanded: false, // Start collapsed in completed view
                         }));
-                        console.log('[Branches] Moving completed branches to persistent storage:', branchesCopy);
+                        console.log(
+                            '[Branches] Moving completed branches to persistent storage:',
+                            branchesCopy
+                        );
                         completedBranchCollections.value.push({
                             id: crypto.randomUUID(),
                             nodeId,
                             branches: branchesCopy,
                             timestamp: new Date(),
                         });
-                        console.log('[Branches] completedBranchCollections now has:', completedBranchCollections.value.length, 'collections');
+                        console.log(
+                            '[Branches] completedBranchCollections now has:',
+                            completedBranchCollections.value.length,
+                            'collections'
+                        );
                         // Clear streaming branches for this node
                         for (const b of nodeBranches) {
-                            delete branchStreams.value[`${b.nodeId}-${b.branchId}`];
+                            delete branchStreams.value[
+                                `${b.nodeId}-${b.branchId}`
+                            ];
                         }
                     }
                 },
