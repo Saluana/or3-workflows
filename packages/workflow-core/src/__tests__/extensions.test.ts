@@ -95,9 +95,9 @@ describe('AgentNodeExtension', () => {
     expect(AgentNodeExtension.inputs![0].id).toBe('input');
   });
 
-  it('should have one output', () => {
-    expect(AgentNodeExtension.outputs).toHaveLength(1);
-    expect(AgentNodeExtension.outputs![0].id).toBe('output');
+  it('should have primary output and error handle', () => {
+    const ids = (AgentNodeExtension.outputs || []).map(o => o.id);
+    expect(ids).toEqual(expect.arrayContaining(['output', 'error']));
   });
 
   it('should have default data with model', () => {

@@ -135,7 +135,8 @@ export type NodeData =
   | RouterNodeData
   | ParallelNodeData
   | ToolNodeData
-  | MemoryNodeData;
+  | MemoryNodeData
+  | WhileLoopNodeData;
 
 // ============================================================================
 // Type Guards for Node Data
@@ -177,11 +178,25 @@ export function isMemoryNodeData(data: NodeData): data is MemoryNodeData {
 }
 
 /**
+ * Type guard to check if node data is WhileLoopNodeData.
+ */
+export function isWhileLoopNodeData(data: NodeData): data is WhileLoopNodeData {
+  return 'maxIterations' in data && 'conditionPrompt' in data;
+}
+
+/**
  * Type guard to check if node data is StartNodeData.
  * Start nodes have minimal data - only label and optional status.
  */
 export function isStartNodeData(data: NodeData): data is StartNodeData {
-  return !isAgentNodeData(data) && !isRouterNodeData(data) && !isParallelNodeData(data) && !isToolNodeData(data) && !isMemoryNodeData(data);
+  return (
+    !isAgentNodeData(data) &&
+    !isRouterNodeData(data) &&
+    !isParallelNodeData(data) &&
+    !isToolNodeData(data) &&
+    !isMemoryNodeData(data) &&
+    !isWhileLoopNodeData(data)
+  );
 }
 
 /**
@@ -294,6 +309,17 @@ export interface MemoryNodeData extends BaseNodeData {
   filter?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   fallback?: string;
+}
+
+/**
+ * Data for a While Loop node.
+ */
+export interface WhileLoopNodeData extends BaseNodeData {
+  conditionPrompt: string;
+  conditionModel?: string;
+  maxIterations: number;
+  onMaxIterations: 'error' | 'warning' | 'continue';
+  customEvaluator?: string;
 }
 
 /**

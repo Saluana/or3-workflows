@@ -135,21 +135,21 @@ _Requirements: 3.1, 3.2_
 
 _Requirements: 2.1, 2.2, 2.3_
 
--   [ ] Create `packages/workflow-core/src/extensions/WhileLoopExtension.ts`
-    -   [ ] Define `WhileLoopNodeData` interface
-        -   [ ] `conditionPrompt: string`
-        -   [ ] `conditionModel?: string`
-        -   [ ] `maxIterations: number`
-        -   [ ] `onMaxIterations: 'error' | 'warning' | 'continue'`
-        -   [ ] `customEvaluator?: string`
-    -   [ ] Define `LoopState` interface
-        -   [ ] `iteration: number`
-        -   [ ] `outputs: string[]`
-        -   [ ] `lastOutput: string | null`
-        -   [ ] `totalIterations?: number`
-        -   [ ] `isActive: boolean`
-    -   [ ] Implement node extension with body/exit outputs
-    -   [ ] Add validation (maxIterations required, > 0)
+-   [x] Create `packages/workflow-core/src/extensions/WhileLoopExtension.ts`
+    -   [x] Define `WhileLoopNodeData` interface
+        -   [x] `conditionPrompt: string`
+        -   [x] `conditionModel?: string`
+        -   [x] `maxIterations: number`
+        -   [x] `onMaxIterations: 'error' | 'warning' | 'continue'`
+        -   [x] `customEvaluator?: string`
+    -   [x] Define `LoopState` interface
+        -   [x] `iteration: number`
+        -   [x] `outputs: string[]`
+        -   [x] `lastOutput: string | null`
+        -   [x] `totalIterations?: number`
+        -   [x] `isActive: boolean`
+    -   [x] Implement node extension with body/exit outputs
+    -   [x] Add validation (maxIterations required, > 0)
     -   [ ] Write unit tests
 
 ### 3.2 Loop Execution Logic

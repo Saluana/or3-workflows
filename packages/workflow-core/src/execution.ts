@@ -626,7 +626,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         const mode = errorConfig?.mode || 'stop';
 
         if (mode === 'branch' && errorEdge) {
-          context.outputs[`${nodeId}_error`] = JSON.stringify(execError);
+          context.outputs[`${nodeId}_error`] = this.serializeError(execError);
           callbacks.onNodeError(nodeId, execError);
           return {
             output: '',
@@ -1100,6 +1100,23 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
     return edges
       .filter(e => e.source === nodeId && e.sourceHandle !== 'error')
       .map(e => e.target);
+  }
+
+  private serializeError(error: ExecutionError): string {
+    const plain = {
+      message: error.message,
+      code: error.code,
+      nodeId: error.nodeId,
+      statusCode: error.statusCode,
+      retry: error.retry,
+      rateLimit: error.rateLimit,
+      stack: error.stack,
+    };
+    try {
+      return JSON.stringify(plain);
+    } catch {
+      return JSON.stringify({ message: error.message, code: error.code });
+    }
   }
 
   /**

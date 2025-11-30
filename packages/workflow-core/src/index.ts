@@ -28,6 +28,7 @@ export {
   isParallelNodeData,
   isToolNodeData,
   isMemoryNodeData,
+  isWhileLoopNodeData,
   isStartNodeData,
   // Utility functions
   generateWorkflowId,
@@ -70,4 +71,5 @@ export {
   toolRegistry,
   type RegisteredTool,
   MemoryNodeExtension,
+  WhileLoopExtension,
 } from './extensions';

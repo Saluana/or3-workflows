@@ -5,3 +5,4 @@ export * from './RouterNodeExtension.js';
 export * from './ParallelNodeExtension.js';
 export * from './ToolNodeExtension.js';
 export * from './MemoryNodeExtension.js';
+export * from './WhileLoopExtension.js';
