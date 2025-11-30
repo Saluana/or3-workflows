@@ -321,8 +321,8 @@ describe('ParallelNodeExtension', () => {
         expect(ParallelNodeExtension.type).toBe('node');
     });
 
-    it('should have default branches', () => {
-        expect(ParallelNodeExtension.defaultData?.branches).toHaveLength(2);
+    it('should have empty branches by default', () => {
+        expect(ParallelNodeExtension.defaultData?.branches).toHaveLength(0);
     });
 
     describe('validate', () => {
@@ -363,13 +363,33 @@ describe('ParallelNodeExtension', () => {
     });
 
     describe('getDynamicOutputs', () => {
-        it('should return outputs based on branches', () => {
+        it('should return merged output when merge is enabled (default)', () => {
             const node = createNode('parallel', 'parallel-1', {
                 label: 'Parallel',
                 branches: [
                     { id: 'branch-a', label: 'Research' },
                     { id: 'branch-b', label: 'Analysis' },
                 ],
+                // mergeEnabled defaults to true
+            });
+
+            const outputs = ParallelNodeExtension.getDynamicOutputs!(node);
+
+            expect(outputs).toHaveLength(1);
+            expect(outputs[0]).toEqual({
+                id: 'merged',
+                label: 'Merged Output',
+            });
+        });
+
+        it('should return branch outputs when merge is disabled', () => {
+            const node = createNode('parallel', 'parallel-1', {
+                label: 'Parallel',
+                branches: [
+                    { id: 'branch-a', label: 'Research' },
+                    { id: 'branch-b', label: 'Analysis' },
+                ],
+                mergeEnabled: false,
             });
 
             const outputs = ParallelNodeExtension.getDynamicOutputs!(node);
