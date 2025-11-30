@@ -403,71 +403,71 @@ _Requirements: 6.1_
 
 ---
 
-## Phase 7: Context Compaction
+## Phase 7: Context Compaction ✅
 
-### 7.1 Token Counting
+### 7.1 Token Counting ✅
 
 _Requirements: 7.4_
 
--   [ ] Create `packages/workflow-core/src/compaction.ts`
-    -   [ ] Define `TokenCounter` interface
-    -   [ ] Implement `ApproximateTokenCounter` (4 chars ≈ 1 token)
-    -   [ ] Add model context limits map
-    -   [ ] Write unit tests
+-   [x] Create `packages/workflow-core/src/compaction.ts`
+    -   [x] Define `TokenCounter` interface
+    -   [x] Implement `ApproximateTokenCounter` (4 chars ≈ 1 token)
+    -   [x] Add model context limits map
+    -   [x] Write unit tests
 
-### 7.2 Compaction Configuration
+### 7.2 Compaction Configuration ✅
 
 _Requirements: 7.2, 7.3_
 
--   [ ] Define compaction types
-    -   [ ] Define `CompactionStrategy` type
-    -   [ ] Define `CompactionConfig` interface
-        -   [ ] `threshold: 'auto' | number`
-        -   [ ] `preserveRecent: number`
-        -   [ ] `strategy: CompactionStrategy`
-        -   [ ] `summarizeModel?: string`
-        -   [ ] `summarizePrompt?: string`
-        -   [ ] `customCompactor?: function`
-    -   [ ] Define `DEFAULT_COMPACTION_CONFIG`
+-   [x] Define compaction types
+    -   [x] Define `CompactionStrategy` type
+    -   [x] Define `CompactionConfig` interface
+        -   [x] `threshold: 'auto' | number`
+        -   [x] `preserveRecent: number`
+        -   [x] `strategy: CompactionStrategy`
+        -   [x] `summarizeModel?: string`
+        -   [x] `summarizePrompt?: string`
+        -   [x] `customCompactor?: function`
+    -   [x] Define `DEFAULT_COMPACTION_CONFIG`
 
-### 7.3 Compaction Logic
+### 7.3 Compaction Logic ✅
 
 _Requirements: 7.1, 7.3_
 
--   [ ] Add compaction to execution options
+-   [x] Add compaction to execution options
 
-    -   [ ] Add `compaction?: CompactionConfig` to `ExecutionOptions`
-    -   [ ] Add `tokenCounter?: TokenCounter` to `ExecutionOptions`
+    -   [x] Add `compaction?: CompactionConfig` to `ExecutionOptions`
+    -   [x] Add `tokenCounter?: TokenCounter` to `ExecutionOptions`
 
--   [ ] Implement `compactContextIfNeeded()`
+-   [x] Implement `compactContextIfNeeded()`
 
-    -   [ ] Calculate current token count
-    -   [ ] Calculate threshold (auto = modelLimit - 10000)
-    -   [ ] Split messages into preserve and compact sections
-    -   [ ] Implement `summarize` strategy
-    -   [ ] Implement `truncate` strategy
-    -   [ ] Support `custom` strategy
-    -   [ ] Return compacted messages
+    -   [x] Calculate current token count
+    -   [x] Calculate threshold (auto = modelLimit - 10000)
+    -   [x] Split messages into preserve and compact sections
+    -   [x] Implement `summarize` strategy
+    -   [x] Implement `truncate` strategy
+    -   [x] Support `custom` strategy
+    -   [x] Return compacted messages
 
--   [ ] Implement `summarizeMessages()`
-    -   [ ] Build summarization prompt
-    -   [ ] Call LLM with summarize model
-    -   [ ] Return summary text
-    -   [ ] Write integration tests
+-   [x] Implement `summarizeMessages()`
+    -   [x] Build summarization prompt
+    -   [x] Call LLM with summarize model
+    -   [x] Return summary text
+    -   [x] Write integration tests
 
-### 7.4 Compaction Integration
+### 7.4 Compaction Integration ✅
 
 _Requirements: 7.1_
 
--   [ ] Call compaction before agent execution
+-   [x] Call compaction before agent execution
 
-    -   [ ] Check context before building messages
-    -   [ ] Compact if over threshold
-    -   [ ] Use compacted context for LLM call
+    -   [x] Check context before building messages
+    -   [x] Compact if over threshold
+    -   [x] Use compacted context for LLM call
 
--   [ ] Add compaction events
-    -   [ ] Add `onContextCompacted` callback option
-    -   [ ] Call with before/after token counts
+-   [x] Add compaction events
+    -   [x] Add `onContextCompacted` callback option
+    -   [x] Call with before/after token counts
 
 ---
 

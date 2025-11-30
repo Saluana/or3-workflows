@@ -127,3 +127,22 @@ export {
     formatOutput,
     extractTemplatePlaceholders,
 } from './extensions';
+
+// Context Compaction
+export {
+    type CompactionStrategy,
+    type CompactionConfig,
+    type CompactionResult,
+    type TokenCounter,
+    ApproximateTokenCounter,
+    DEFAULT_COMPACTION_CONFIG,
+    DEFAULT_SUMMARIZE_PROMPT,
+    MODEL_CONTEXT_LIMITS,
+    countMessageTokens,
+    formatMessagesForSummary,
+    calculateThreshold,
+    splitMessagesForCompaction,
+    createSummaryMessage,
+    buildSummarizationPrompt,
+    isCompactionConfig,
+} from './compaction';

@@ -5,6 +5,11 @@ import type { NodeErrorConfig } from './errors';
 import type { HITLConfig, HITLCallback } from './hitl';
 import type { SubflowNodeData, SubflowRegistry } from './subflow';
 import type { OutputNodeData } from './extensions/OutputNodeExtension';
+import type {
+    CompactionConfig,
+    CompactionResult,
+    TokenCounter,
+} from './compaction';
 
 export const SCHEMA_VERSION = '2.0.0';
 
@@ -543,6 +548,13 @@ export interface ExecutionCallbacks {
      * @param routeId - The ID of the selected route.
      */
     onRouteSelected?: (nodeId: string, routeId: string) => void;
+
+    /**
+     * Called when context compaction occurs.
+     * Optional - use this to log or display compaction events.
+     * @param result - Details about the compaction operation.
+     */
+    onContextCompacted?: (result: CompactionResult) => void;
 }
 
 /**
@@ -642,6 +654,17 @@ export interface ExecutionOptions {
      * Prevents infinite recursion if subflows call each other.
      */
     maxSubflowDepth?: number;
+    /**
+     * Configuration for automatic context compaction.
+     * When enabled, older messages will be summarized or truncated
+     * when approaching the model's context limit.
+     */
+    compaction?: CompactionConfig;
+    /**
+     * Token counter for measuring context size.
+     * Defaults to ApproximateTokenCounter (4 chars ≈ 1 token).
+     */
+    tokenCounter?: TokenCounter;
 }
 
 /** Tool definition in OpenRouter/OpenAI format */

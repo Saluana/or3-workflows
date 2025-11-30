@@ -51,6 +51,18 @@ import {
     generateHITLRequestId,
     getDefaultApprovalOptions,
 } from './hitl';
+import {
+    type CompactionConfig,
+    type CompactionResult,
+    type TokenCounter,
+    ApproximateTokenCounter,
+    DEFAULT_COMPACTION_CONFIG,
+    countMessageTokens,
+    splitMessagesForCompaction,
+    buildSummarizationPrompt,
+    createSummaryMessage,
+    calculateThreshold,
+} from './compaction';
 
 // ============================================================================
 // Constants
@@ -146,6 +158,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         new Map();
     private memory: MemoryAdapter;
     private loopStates: Map<string, LoopState> = new Map();
+    private tokenCounter: TokenCounter;
 
     /**
      * Create a new OpenRouterExecutionAdapter.
@@ -177,6 +190,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             ...options,
         };
         this.memory = this.options.memory || new InMemoryAdapter();
+        this.tokenCounter =
+            this.options.tokenCounter || new ApproximateTokenCounter();
     }
 
     // ==========================================================================
@@ -1140,6 +1155,161 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         return this.options.onHITLRequest(request);
     }
 
+    // ==========================================================================
+    // Context Compaction
+    // ==========================================================================
+
+    /**
+     * Compact conversation context if it exceeds the threshold.
+     * Uses the configured compaction strategy (summarize, truncate, or custom).
+     */
+    private async compactContextIfNeeded(
+        messages: ChatMessage[],
+        model: string,
+        callbacks: ExecutionCallbacks
+    ): Promise<ChatMessage[]> {
+        // If no compaction config, return messages unchanged
+        if (!this.options.compaction) {
+            return messages;
+        }
+
+        const config = {
+            ...DEFAULT_COMPACTION_CONFIG,
+            ...this.options.compaction,
+        };
+
+        // Calculate current token count
+        const tokensBefore = countMessageTokens(messages, this.tokenCounter);
+
+        // Calculate threshold
+        const threshold = calculateThreshold(config, model, this.tokenCounter);
+
+        // Check if compaction is needed
+        if (tokensBefore < threshold) {
+            return messages;
+        }
+
+        // Split messages into preserve and compact sections
+        const { toPreserve, toCompact } = splitMessagesForCompaction(
+            messages,
+            config.preserveRecent
+        );
+
+        // Nothing to compact - already at minimum
+        if (toCompact.length === 0) {
+            return messages;
+        }
+
+        let compactedMessages: ChatMessage[];
+        let summary: string | undefined;
+
+        switch (config.strategy) {
+            case 'summarize':
+                summary = await this.summarizeMessages(
+                    toCompact,
+                    config,
+                    model
+                );
+                compactedMessages = [
+                    createSummaryMessage(summary),
+                    ...toPreserve,
+                ];
+                break;
+
+            case 'truncate':
+                // Just drop old messages
+                compactedMessages = toPreserve;
+                break;
+
+            case 'custom':
+                if (!config.customCompactor) {
+                    throw new Error(
+                        'Custom compaction strategy requires customCompactor function'
+                    );
+                }
+                compactedMessages = await config.customCompactor(
+                    messages,
+                    threshold
+                );
+                break;
+
+            default:
+                compactedMessages = messages;
+        }
+
+        const tokensAfter = countMessageTokens(
+            compactedMessages,
+            this.tokenCounter
+        );
+
+        // Create result for callback
+        const result: CompactionResult = {
+            compacted: true,
+            messages: compactedMessages,
+            tokensBefore,
+            tokensAfter,
+            messagesCompacted: toCompact.length,
+            summary,
+        };
+
+        // Notify via callback if provided
+        if (callbacks.onContextCompacted) {
+            callbacks.onContextCompacted(result);
+        }
+
+        return compactedMessages;
+    }
+
+    /**
+     * Summarize a list of messages using the LLM.
+     */
+    private async summarizeMessages(
+        messages: ChatMessage[],
+        config: CompactionConfig,
+        currentModel: string
+    ): Promise<string> {
+        const model = config.summarizeModel || currentModel;
+        const prompt = buildSummarizationPrompt(messages, config);
+
+        const response = await this.client.chat.send({
+            model,
+            messages: [
+                {
+                    role: 'system',
+                    content:
+                        'You are a conversation summarizer. Be concise but preserve key information, decisions, and context.',
+                },
+                { role: 'user', content: prompt },
+            ],
+        });
+
+        const choice = response.choices?.[0];
+        if (!choice) {
+            return '';
+        }
+
+        // Handle different response formats
+        const message = choice.message;
+        if (typeof message?.content === 'string') {
+            return message.content;
+        }
+
+        // If content is an array (multimodal), extract text parts
+        if (Array.isArray(message?.content)) {
+            return message.content
+                .filter(
+                    (part: unknown) =>
+                        typeof part === 'object' &&
+                        part !== null &&
+                        (part as Record<string, unknown>).type === 'text'
+                )
+                .map((part: unknown) => (part as { text: string }).text)
+                .join('');
+        }
+
+        return '';
+    }
+
     /**
      * Execute an agent node by calling the LLM.
      */
@@ -1180,12 +1350,29 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             model
         );
 
-        // Build messages
-        const chatMessages: ChatMessageParam[] = [
-            { role: 'system', content: systemPrompt + contextInfo },
-            ...context.session.messages.map((h) => ({
+        // Build session messages for context
+        let sessionMessages: ChatMessage[] = context.session.messages.map(
+            (h) => ({
                 role: h.role,
                 content: h.content,
+            })
+        );
+
+        // Apply context compaction if configured
+        if (this.options.compaction && sessionMessages.length > 0) {
+            sessionMessages = await this.compactContextIfNeeded(
+                sessionMessages,
+                model,
+                callbacks
+            );
+        }
+
+        // Build final messages
+        const chatMessages: ChatMessageParam[] = [
+            { role: 'system', content: systemPrompt + contextInfo },
+            ...sessionMessages.map((m) => ({
+                role: m.role,
+                content: m.content,
             })),
             { role: 'user', content: userContent },
         ];
