@@ -10,6 +10,8 @@ export {
   type ParallelNodeData,
   type ToolNodeData,
   type MemoryNodeData,
+  type WhileLoopNodeData,
+  type LoopState,
   type StartNodeData,
   type ExecutionInput,
   type ExecutionResult,

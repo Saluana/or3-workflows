@@ -49,6 +49,19 @@ const nodeTypes = [
       fallback: 'No memories found.',
     }
   },
+  {
+    type: 'whileLoop',
+    label: 'While Loop',
+    description: 'Iterate until condition met',
+    colorVar: '--or3-color-info',
+    defaultData: {
+      label: 'While Loop',
+      conditionPrompt:
+        'Should we continue iterating? Respond with "continue" or "done".',
+      maxIterations: 10,
+      onMaxIterations: 'warning',
+    },
+  },
 ];
 
 const onDragStart = (event: DragEvent, nodeType: string, defaultData: Record<string, unknown>) => {
@@ -98,6 +111,11 @@ const onDragStart = (event: DragEvent, nodeType: string, defaultData: Record<str
           <svg v-else-if="node.type === 'memory'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="4" y="4" width="16" height="16" rx="3"></rect>
             <path d="M8 9h8M8 12h8M8 15h6"></path>
+          </svg>
+          <svg v-else-if="node.type === 'whileLoop'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 12h4"></path>
+            <path d="M15 12h4"></path>
+            <path d="M9 12c0-4 6-4 6 0s-6 4-6 0Z"></path>
           </svg>
         </div>
         <div class="node-info">

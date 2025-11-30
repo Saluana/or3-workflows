@@ -172,13 +172,18 @@ watchEffect((onCleanup) => {
 const isAgentNode = computed(() => selectedNode.value?.type === 'agent');
 const isRouterNode = computed(() => selectedNode.value?.type === 'router');
 const isParallelNode = computed(() => selectedNode.value?.type === 'parallel');
+const isWhileNode = computed(() => selectedNode.value?.type === 'whileLoop');
 const isToolNode = computed(() => selectedNode.value?.type === 'tool');
 const isStartNode = computed(() => selectedNode.value?.type === 'start');
 const canDelete = computed(
     () => selectedNode.value && selectedNode.value.type !== 'start'
 );
 const isConfigurable = computed(
-    () => isAgentNode.value || isRouterNode.value || isParallelNode.value
+    () =>
+        isAgentNode.value ||
+        isRouterNode.value ||
+        isParallelNode.value ||
+        isWhileNode.value
 );
 const hasErrorHandling = computed(
     () => isAgentNode.value || isRouterNode.value || isToolNode.value
@@ -187,6 +192,11 @@ const hasErrorHandling = computed(
 const nodeData = computed<ConfigurableNodeData>(() => {
     const data = selectedNode.value?.data;
     return isConfigurableData(data) ? data : { label: 'Unknown' };
+});
+
+const whileData = computed(() => {
+    const data = selectedNode.value?.data as any;
+    return data || {};
 });
 
 const errorHandling = computed<NodeErrorConfig>(() => {
@@ -232,12 +242,14 @@ const updateLabel = (event: Event) => {
 const updateModel = (event: Event) => {
     const value = (event.target as HTMLSelectElement).value;
     props.editor.commands.updateNodeData(selectedNode.value!.id, {
-        model: value,
+        ...(isWhileNode.value ? { conditionModel: value } : { model: value }),
     });
 };
 
 const updatePrompt = (event: Event) => {
-    debouncedUpdate('prompt', (event.target as HTMLTextAreaElement).value);
+    const value = (event.target as HTMLTextAreaElement).value;
+    const field = isWhileNode.value ? 'conditionPrompt' : 'prompt';
+    debouncedUpdate(field, value);
 };
 
 // Toggle tool selection
@@ -294,6 +306,19 @@ const onRetryNumberChange = (
     updateRetryConfig({
         [field]: Number.isFinite(value) ? value : undefined,
     } as Partial<NodeRetryConfig>);
+};
+
+const updateMaxIterations = (event: Event) => {
+    const value = Number((event.target as HTMLInputElement).value);
+    debouncedUpdate('maxIterations', Number.isFinite(value) ? value : 1);
+};
+
+const updateOnMaxBehavior = (event: Event) => {
+    debouncedUpdate('onMaxIterations', (event.target as HTMLSelectElement).value);
+};
+
+const updateCustomEvaluator = (event: Event) => {
+    debouncedUpdate('customEvaluator', (event.target as HTMLInputElement).value);
 };
 
 const handleDelete = () => {
@@ -413,7 +438,13 @@ const handleDelete = () => {
                     <circle cx="12" cy="5" r="2"></circle>
                     <path d="M12 7v4"></path>
                 </svg>
-                {{ isRouterNode ? 'Instructions' : 'Prompt' }}
+                {{
+                    isRouterNode
+                        ? 'Instructions'
+                        : isWhileNode
+                        ? 'Condition'
+                        : 'Prompt'
+                }}
             </button>
             <button
                 class="tab"
@@ -494,44 +525,98 @@ const handleDelete = () => {
         <div v-if="isConfigurable || hasErrorHandling" class="tab-content">
             <!-- Prompt Tab -->
             <div v-if="activeTab === 'prompt' && isConfigurable" class="prompt-tab">
-                <label class="field-label">
-                    {{
-                        isRouterNode
-                            ? 'Routing Instructions'
-                            : isParallelNode
-                            ? 'Merge Prompt'
-                            : 'System Prompt'
-                    }}
-                </label>
-                <textarea
-                    :value="nodeData.prompt || ''"
-                    class="prompt-textarea"
-                    :placeholder="
-                        isRouterNode
-                            ? 'Instructions for routing decisions...\n\nExample:\nRoute to Technical if the user mentions bugs, errors, or technical issues.\nRoute to Sales for pricing or product inquiries.'
-                            : isParallelNode
-                            ? 'Instructions for merging parallel outputs...'
-                            : 'Enter the system prompt for this agent...\n\nExample:\nYou are a helpful technical support specialist. Help users troubleshoot issues with their software.'
-                    "
-                    @input="updatePrompt"
-                ></textarea>
-                <p class="field-hint">
-                    {{
-                        isRouterNode
-                            ? 'These instructions help the router decide which branch to take. Edge labels are used to make decisions.'
-                            : isParallelNode
-                            ? 'This prompt is used to merge/summarize outputs from all parallel branches.'
-                            : "This prompt defines the agent's behavior and personality."
-                    }}
-                </p>
+                <template v-if="isWhileNode">
+                    <label class="field-label">Condition Prompt</label>
+                    <textarea
+                        :value="whileData.conditionPrompt || ''"
+                        class="prompt-textarea"
+                        placeholder='Describe when to continue. Example: "If quality is low, respond continue; otherwise respond done."'
+                        @input="updatePrompt"
+                    ></textarea>
+                    <div class="grid">
+                        <div class="field-group">
+                            <label class="field-label">Max iterations</label>
+                            <input
+                                type="number"
+                                min="1"
+                                class="text-input"
+                                :value="whileData.maxIterations ?? 10"
+                                @input="updateMaxIterations"
+                            />
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">On max behavior</label>
+                            <select
+                                class="model-select"
+                                :value="whileData.onMaxIterations || 'warning'"
+                                @change="updateOnMaxBehavior"
+                            >
+                                <option value="warning">Warning then exit</option>
+                                <option value="continue">Exit silently</option>
+                                <option value="error">Throw error</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="field-group">
+                        <label class="field-label">Custom evaluator (optional)</label>
+                        <input
+                            type="text"
+                            class="text-input"
+                            :value="whileData.customEvaluator || ''"
+                            placeholder="Name of custom evaluator"
+                            @input="updateCustomEvaluator"
+                        />
+                    </div>
+                    <p class="field-hint">
+                        Loops run at least once. Provide a custom evaluator name to use an injected function instead of an LLM.
+                    </p>
+                </template>
+                <template v-else>
+                    <label class="field-label">
+                        {{
+                            isRouterNode
+                                ? 'Routing Instructions'
+                                : isParallelNode
+                                ? 'Merge Prompt'
+                                : 'System Prompt'
+                        }}
+                    </label>
+                    <textarea
+                        :value="nodeData.prompt || ''"
+                        class="prompt-textarea"
+                        :placeholder="
+                            isRouterNode
+                                ? 'Instructions for routing decisions...\n\nExample:\nRoute to Technical if the user mentions bugs, errors, or technical issues.\nRoute to Sales for pricing or product inquiries.'
+                                : isParallelNode
+                                ? 'Instructions for merging parallel outputs...'
+                                : 'Enter the system prompt for this agent...\n\nExample:\nYou are a helpful technical support specialist. Help users troubleshoot issues with their software.'
+                        "
+                        @input="updatePrompt"
+                    ></textarea>
+                    <p class="field-hint">
+                        {{
+                            isRouterNode
+                                ? 'These instructions help the router decide which branch to take. Edge labels are used to make decisions.'
+                                : isParallelNode
+                                ? 'This prompt is used to merge/summarize outputs from all parallel branches.'
+                                : "This prompt defines the agent's behavior and personality."
+                        }}
+                    </p>
+                </template>
             </div>
 
             <!-- Model Tab -->
             <div v-if="activeTab === 'model'" class="model-tab">
-                <label class="field-label">Select Model</label>
+                <label class="field-label">
+                    {{ isWhileNode ? 'Condition Model' : 'Select Model' }}
+                </label>
                 <select
                     class="model-select"
-                    :value="nodeData.model || 'openai/gpt-4o-mini'"
+                    :value="
+                        isWhileNode
+                            ? whileData.conditionModel || 'openai/gpt-4o-mini'
+                            : nodeData.model || 'openai/gpt-4o-mini'
+                    "
                     @change="updateModel"
                 >
                     <option
@@ -544,7 +629,13 @@ const handleDelete = () => {
                 </select>
                 <div class="model-id">
                     <span class="model-id-label">Model ID:</span>
-                    <code>{{ nodeData.model || 'openai/gpt-4o-mini' }}</code>
+                    <code>
+                        {{
+                            isWhileNode
+                                ? whileData.conditionModel || 'openai/gpt-4o-mini'
+                                : nodeData.model || 'openai/gpt-4o-mini'
+                        }}
+                    </code>
                 </div>
             </div>
 
@@ -892,6 +983,12 @@ const handleDelete = () => {
 .tab-content {
     flex: 1;
     overflow-y: auto;
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: var(--or3-spacing-sm, 8px);
 }
 
 .field-label {

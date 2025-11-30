@@ -322,6 +322,14 @@ export interface WhileLoopNodeData extends BaseNodeData {
   customEvaluator?: string;
 }
 
+export interface LoopState {
+  iteration: number;
+  outputs: string[];
+  lastOutput: string | null;
+  totalIterations?: number;
+  isActive: boolean;
+}
+
 /**
  * Represents a connection between two nodes.
  */
@@ -567,6 +575,14 @@ export interface ExecutionOptions {
   memory?: MemoryAdapter;
   /** Provide an existing session ID to reuse */
   sessionId?: string;
+  /** Custom evaluators available to while loop nodes */
+  customEvaluators?: Record<
+    string,
+    (
+      context: { currentInput: string; session: Session; memory: MemoryAdapter; outputs: Record<string, string> },
+      loopState: { iteration: number; outputs: string[]; lastOutput: string | null }
+    ) => Promise<boolean> | boolean
+  >;
 }
 
 /** Tool definition in OpenRouter/OpenAI format */

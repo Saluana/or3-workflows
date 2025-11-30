@@ -489,3 +489,81 @@ describe('OpenRouterExecutionAdapter - Error Handling', () => {
     expect(callbacks.onNodeError).not.toHaveBeenCalled();
   });
 });
+
+describe('OpenRouterExecutionAdapter - While Loop', () => {
+  let adapter: OpenRouterExecutionAdapter;
+  let mockClient: ReturnType<typeof createMockClient>;
+  let callbacks: ExecutionCallbacks;
+
+  beforeEach(() => {
+    mockClient = createMockClient();
+    callbacks = {
+      onNodeStart: vi.fn(),
+      onNodeFinish: vi.fn(),
+      onNodeError: vi.fn(),
+      onToken: vi.fn(),
+      onRouteSelected: vi.fn(),
+    };
+  });
+
+  it('executes loop with custom evaluator and body subgraph', async () => {
+    let bodyRuns = 0;
+    adapter = new OpenRouterExecutionAdapter(mockClient as any, {
+      onToolCall: async (toolId: string, args: any) => {
+        if (toolId === 'body') {
+          bodyRuns++;
+          return `body-${bodyRuns}`;
+        }
+        if (toolId === 'done') {
+          return `done:${args.input}`;
+        }
+        return '';
+      },
+      customEvaluators: {
+        loopEval: (_ctx, loopState) => loopState.iteration < 2,
+      },
+    });
+
+    const workflow: WorkflowData = {
+      meta: { version: '2.0.0', name: 'While Loop' },
+      nodes: [
+        { id: 'start-1', type: 'start', position: { x: 0, y: 0 }, data: { label: 'Start' } },
+        {
+          id: 'loop-1',
+          type: 'whileLoop',
+          position: { x: 200, y: 0 },
+          data: {
+            label: 'Loop',
+            conditionPrompt: 'test',
+            maxIterations: 5,
+            onMaxIterations: 'warning',
+            customEvaluator: 'loopEval',
+          },
+        },
+        {
+          id: 'body-1',
+          type: 'tool',
+          position: { x: 400, y: 0 },
+          data: { label: 'Body', toolId: 'body' },
+        },
+        {
+          id: 'done-1',
+          type: 'tool',
+          position: { x: 600, y: 0 },
+          data: { label: 'Done', toolId: 'done' },
+        },
+      ],
+      edges: [
+        { id: 'e1', source: 'start-1', target: 'loop-1' },
+        { id: 'e2', source: 'loop-1', target: 'body-1', sourceHandle: 'body' },
+        { id: 'e3', source: 'loop-1', target: 'done-1', sourceHandle: 'done' },
+      ],
+    };
+
+    const result = await adapter.execute(workflow, { text: 'go' }, callbacks);
+
+    expect(bodyRuns).toBe(2);
+    expect(result.success).toBe(true);
+    expect(result.output).toBe('done:body-2');
+  });
+});

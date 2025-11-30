@@ -5,6 +5,7 @@ import {
   RouterNodeExtension,
   ParallelNodeExtension,
   ToolNodeExtension,
+  WhileLoopExtension,
 } from '../extensions/index.js';
 import type { WorkflowNode, WorkflowEdge } from '../types';
 
@@ -81,6 +82,33 @@ describe('StartNodeExtension', () => {
 
       expect(result.output).toBe('Hello world');
     });
+  });
+});
+
+describe('WhileLoopExtension', () => {
+  it('should expose body and exit outputs', () => {
+    const outputs = WhileLoopExtension.outputs || [];
+    expect(outputs.map(o => o.id)).toEqual(expect.arrayContaining(['body', 'done']));
+  });
+
+  it('validates missing prompt and invalid iterations', () => {
+    const node = createNode('whileLoop', 'loop-1', {
+      label: 'Loop',
+      conditionPrompt: '',
+      maxIterations: 0,
+      onMaxIterations: 'warning',
+    });
+    const edges: WorkflowEdge[] = [];
+    const errors = WhileLoopExtension.validate!(node, edges);
+
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'MISSING_CONDITION_PROMPT' }),
+        expect.objectContaining({ code: 'INVALID_MAX_ITERATIONS' }),
+        expect.objectContaining({ code: 'MISSING_BODY' }),
+        expect.objectContaining({ code: 'MISSING_EXIT' }),
+      ])
+    );
   });
 });
 

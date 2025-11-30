@@ -18,6 +18,7 @@ import RouterNode from './nodes/RouterNode.vue';
 import ParallelNode from './nodes/ParallelNode.vue';
 import ToolNode from './nodes/ToolNode.vue';
 import MemoryNode from './nodes/MemoryNode.vue';
+import WhileLoopNode from './nodes/WhileLoopNode.vue';
 
 const props = defineProps<{
     editor: WorkflowEditor;
@@ -269,6 +270,14 @@ defineExpose({
 
             <template #node-memory="nodeProps">
                 <MemoryNode
+                    :id="nodeProps.id"
+                    :data="nodeProps.data"
+                    :selected="nodeProps.selected"
+                />
+            </template>
+
+            <template #node-whileLoop="nodeProps">
+                <WhileLoopNode
                     :id="nodeProps.id"
                     :data="nodeProps.data"
                     :selected="nodeProps.selected"

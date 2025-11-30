@@ -20,6 +20,8 @@ import type {
   BranchDefinition,
   ToolNodeData,
   MemoryNodeData,
+  WhileLoopNodeData,
+  LoopState,
 } from './types';
 import { toolRegistry } from './extensions/ToolNodeExtension';
 import { InMemoryAdapter, type MemoryAdapter, type MemoryEntry } from './memory';
@@ -124,6 +126,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
   private running = false;
   private modelCapabilitiesCache: Map<string, ModelCapabilities | null> = new Map();
   private memory: MemoryAdapter;
+  private loopStates: Map<string, LoopState> = new Map();
 
   /**
    * Create a new OpenRouterExecutionAdapter.
@@ -274,19 +277,27 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         nodeOutputs[currentId] = result.output;
         finalOutput = result.output;
 
-        // Handle skipped nodes (children not in nextNodes)
-        const allChildren = graph.children[currentId] || [];
-        for (const child of allChildren) {
-          if (!result.nextNodes.includes(child.nodeId)) {
-            propagateSkip(child.nodeId);
+        // Handle skipped nodes (children not in nextNodes) - except while loops which manage their own control flow
+        const currentNode = graph.nodeMap.get(currentId);
+        if (currentNode?.type !== 'whileLoop') {
+          const allChildren = graph.children[currentId] || [];
+          for (const child of allChildren) {
+            if (!result.nextNodes.includes(child.nodeId)) {
+              propagateSkip(child.nodeId);
+            }
           }
         }
 
         // Queue next nodes
         for (const nextId of result.nextNodes) {
-          if (!executed.has(nextId)) {
+          if (!executed.has(nextId) || nextId === currentId) {
             queue.push(nextId);
           }
+        }
+
+        // Allow re-entry for loop nodes that intentionally re-queue themselves
+        if (result.nextNodes.includes(currentId)) {
+          executed.delete(currentId);
         }
         
         // Also check children of skipped nodes - they might be ready now if they have multiple parents
@@ -534,6 +545,21 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
       case 'memory':
         output = await this.executeMemoryNode(node, context);
         nextNodes = childEdges.map(c => c.nodeId);
+        context.outputs[nodeId] = output;
+        context.nodeChain.push(nodeId);
+        context.currentInput = output;
+        break;
+
+      case 'whileLoop':
+        const loopResult = await this.executeWhileLoopNode(
+          node,
+          context,
+          graph,
+          edges,
+          callbacks
+        );
+        output = loopResult.output;
+        nextNodes = loopResult.nextNodes;
         context.outputs[nodeId] = output;
         context.nodeChain.push(nodeId);
         context.currentInput = output;
@@ -795,6 +821,180 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         return `${time}${label}${r.content}`;
       })
       .join('\n');
+  }
+
+  /**
+   * Execute a while loop node with loop state tracking and condition evaluation.
+   */
+  private async executeWhileLoopNode(
+    node: WorkflowNode,
+    context: InternalExecutionContext,
+    graph: WorkflowGraph,
+    edges: WorkflowEdge[],
+    callbacks: ExecutionCallbacks
+  ): Promise<{ output: string; nextNodes: string[] }> {
+    const data = node.data as WhileLoopNodeData;
+    const bodyEdge = edges.find(e => e.source === node.id && e.sourceHandle === 'body');
+    const exitEdge = edges.find(e => e.source === node.id && e.sourceHandle === 'done');
+
+    let loopState = this.loopStates.get(node.id);
+    if (!loopState) {
+      loopState = {
+        iteration: 0,
+        outputs: [],
+        lastOutput: null,
+        isActive: true,
+      };
+      this.loopStates.set(node.id, loopState);
+    }
+
+    if (loopState.iteration >= data.maxIterations) {
+      this.loopStates.delete(node.id);
+      const message = `While loop reached max iterations (${data.maxIterations})`;
+      if (data.onMaxIterations === 'error') {
+        throw new Error(message);
+      }
+      if (data.onMaxIterations === 'warning') {
+        callbacks.onNodeError(node.id, new Error(message));
+      }
+      return {
+        output: loopState.lastOutput || context.currentInput,
+        nextNodes: exitEdge ? [exitEdge.target] : [],
+      };
+    }
+
+    const shouldContinue = await this.evaluateLoopCondition(
+      data,
+      context,
+      loopState
+    );
+
+    if (shouldContinue) {
+      if (!bodyEdge) {
+        throw new Error('While loop body is not connected');
+      }
+
+      const bodyResult = await this.executeSubgraph(
+        bodyEdge.target,
+        context,
+        graph,
+        edges,
+        callbacks,
+        new Set([node.id])
+      );
+
+      loopState.outputs.push(bodyResult.output);
+      loopState.lastOutput = bodyResult.output;
+      loopState.iteration += 1;
+      context.currentInput = bodyResult.output;
+
+      return {
+        output: bodyResult.output,
+        nextNodes: [node.id], // Re-queue loop node
+      };
+    }
+
+    loopState.totalIterations = loopState.iteration;
+    this.loopStates.delete(node.id);
+
+    return {
+      output: loopState.lastOutput || context.currentInput,
+      nextNodes: exitEdge ? [exitEdge.target] : [],
+    };
+  }
+
+  private async evaluateLoopCondition(
+    data: WhileLoopNodeData,
+    context: InternalExecutionContext,
+    loopState: LoopState
+  ): Promise<boolean> {
+    if (loopState.iteration === 0) {
+      return true;
+    }
+
+    if (data.customEvaluator && this.options.customEvaluators?.[data.customEvaluator]) {
+      return await this.options.customEvaluators[data.customEvaluator](context, loopState);
+    }
+
+    const model = data.conditionModel || this.options.defaultModel || DEFAULT_MODEL;
+    const prompt = `${data.conditionPrompt}
+
+Current iteration: ${loopState.iteration}
+Last output: ${loopState.lastOutput}
+${loopState.outputs.length > 1 ? `Previous outputs: ${loopState.outputs.length} iterations` : '' }
+
+Respond with only "continue" or "done".`;
+
+    const response = await this.client.chat.send({
+      model,
+      messages: [
+        { role: 'system', content: 'You are a loop controller. Respond with only "continue" or "done".' },
+        { role: 'user', content: prompt },
+      ],
+    });
+
+    const decision =
+      (response as any)?.choices?.[0]?.message?.content ||
+      (response as any)?.choices?.[0]?.delta?.content ||
+      '';
+    const normalized = (typeof decision === 'string' ? decision : '').toLowerCase().trim();
+    return normalized === 'continue';
+  }
+
+  /**
+   * Execute a subgraph starting from a node ID, returning the last output.
+   */
+  private async executeSubgraph(
+    startNodeId: string,
+    context: InternalExecutionContext,
+    graph: WorkflowGraph,
+    edges: WorkflowEdge[],
+    callbacks: ExecutionCallbacks,
+    preExecuted: Set<string> = new Set()
+  ): Promise<{ output: string; nextNodes: string[] }> {
+    const queue: string[] = [startNodeId];
+    const executed = new Set<string>(preExecuted);
+    let output = '';
+    let nextNodes: string[] = [];
+    let iterations = 0;
+    const maxIterations = this.options.maxIterations ?? graph.nodeMap.size * MAX_ITERATIONS_MULTIPLIER;
+
+    while (queue.length > 0 && iterations < maxIterations) {
+      iterations++;
+      const currentId = queue.shift()!;
+      if (executed.has(currentId)) continue;
+
+      const parents = graph.parents[currentId] || [];
+      const allParentsExecuted = parents.every(p => executed.has(p));
+      if (!allParentsExecuted) {
+        queue.push(currentId);
+        continue;
+      }
+
+      const result = await this.executeNodeWithErrorHandling(
+        currentId,
+        context,
+        graph,
+        edges,
+        callbacks
+      );
+
+      executed.add(currentId);
+      output = result.output;
+      nextNodes = result.nextNodes;
+
+      for (const nextId of result.nextNodes) {
+        if (!executed.has(nextId)) {
+          queue.push(nextId);
+        }
+      }
+
+      if (result.nextNodes.length === 0) {
+        break;
+      }
+    }
+
+    return { output, nextNodes };
   }
 
   /**

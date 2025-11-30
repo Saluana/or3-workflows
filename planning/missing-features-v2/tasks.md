@@ -150,61 +150,61 @@ _Requirements: 2.1, 2.2, 2.3_
         -   [x] `isActive: boolean`
     -   [x] Implement node extension with body/exit outputs
     -   [x] Add validation (maxIterations required, > 0)
-    -   [ ] Write unit tests
+    -   [x] Write unit tests
 
 ### 3.2 Loop Execution Logic
 
 _Requirements: 2.1, 2.2_
 
--   [ ] Add loop state management to adapter
+-   [x] Add loop state management to adapter
 
-    -   [ ] Add `loopStates: Map<string, LoopState>` to adapter
-    -   [ ] Initialize loop state on first visit
-    -   [ ] Clean up loop state on exit
+    -   [x] Add `loopStates: Map<string, LoopState>` to adapter
+    -   [x] Initialize loop state on first visit
+    -   [x] Clean up loop state on exit
 
--   [ ] Implement `executeWhileLoopNode()`
+-   [x] Implement `executeWhileLoopNode()`
 
-    -   [ ] Check maxIterations limit
-    -   [ ] Call `evaluateLoopCondition()` for continue/done decision
-    -   [ ] Execute body subgraph on continue
-    -   [ ] Update loop state after each iteration
-    -   [ ] Re-queue self for next iteration
-    -   [ ] Route to exit on done
-    -   [ ] Handle `onMaxIterations` behavior
+    -   [x] Check maxIterations limit
+    -   [x] Call `evaluateLoopCondition()` for continue/done decision
+    -   [x] Execute body subgraph on continue
+    -   [x] Update loop state after each iteration
+    -   [x] Re-queue self for next iteration
+    -   [x] Route to exit on done
+    -   [x] Handle `onMaxIterations` behavior
 
--   [ ] Implement `evaluateLoopCondition()`
+-   [x] Implement `evaluateLoopCondition()`
 
-    -   [ ] First iteration always continues (run at least once)
-    -   [ ] Check for custom evaluator function
-    -   [ ] Build LLM prompt with loop context
-    -   [ ] Parse "continue" or "done" response
-    -   [ ] Write unit tests
+    -   [x] First iteration always continues (run at least once)
+    -   [x] Check for custom evaluator function
+    -   [x] Build LLM prompt with loop context
+    -   [x] Parse "continue" or "done" response
+    -   [x] Write unit tests
 
--   [ ] Implement subgraph execution
-    -   [ ] Add `executeSubgraph()` helper for loop bodies
-    -   [ ] Handle nested loops (recursion limit)
-    -   [ ] Write integration tests
+-   [x] Implement subgraph execution
+    -   [x] Add `executeSubgraph()` helper for loop bodies
+    -   [x] Handle nested loops (recursion limit)
+    -   [x] Write integration tests
 
 ### 3.3 While Loop Vue Component
 
 _Requirements: 2.1_
 
--   [ ] Create `packages/workflow-vue/src/components/nodes/WhileLoopNode.vue`
+-   [x] Create `packages/workflow-vue/src/components/nodes/WhileLoopNode.vue`
 
-    -   [ ] Display loop body and exit handles
-    -   [ ] Show current iteration during execution
-    -   [ ] Style similar to Parallel node (grouping visual)
+    -   [x] Display loop body and exit handles
+    -   [x] Show current iteration during execution
+    -   [x] Style similar to Parallel node (grouping visual)
 
--   [ ] Add While Loop inspector UI
+-   [x] Add While Loop inspector UI
 
-    -   [ ] Condition prompt textarea
-    -   [ ] Model selector (optional)
-    -   [ ] Max iterations input
-    -   [ ] onMaxIterations behavior selector
-    -   [ ] Custom evaluator input (advanced)
+    -   [x] Condition prompt textarea
+    -   [x] Model selector (optional)
+    -   [x] Max iterations input
+    -   [x] onMaxIterations behavior selector
+    -   [x] Custom evaluator input (advanced)
 
--   [ ] Add to NodePalette
-    -   [ ] Add WhileLoop to available nodes
+-   [x] Add to NodePalette
+    -   [x] Add WhileLoop to available nodes
 
 ---
 
