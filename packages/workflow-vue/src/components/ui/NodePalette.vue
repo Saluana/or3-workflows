@@ -9,7 +9,7 @@ const nodeTypes = [
     {
         type: 'agent',
         label: 'Agent Node',
-        description: 'LLM-powered agent',
+        description: 'Connect to any LLM model to process and respond to messages',
         colorVar: '--or3-color-accent',
         defaultData: {
             label: 'New Agent',
@@ -20,7 +20,7 @@ const nodeTypes = [
     {
         type: 'router',
         label: 'Router Node',
-        description: 'Route based on intent',
+        description: 'Intelligently route messages to different paths based on intent',
         colorVar: '--or3-color-warning',
         defaultData: {
             label: 'Router',
@@ -30,7 +30,7 @@ const nodeTypes = [
     {
         type: 'parallel',
         label: 'Parallel Node',
-        description: 'Run branches concurrently',
+        description: 'Execute multiple branches simultaneously and combine results',
         colorVar: '--or3-color-info',
         defaultData: {
             label: 'Parallel',
@@ -41,7 +41,7 @@ const nodeTypes = [
     {
         type: 'tool',
         label: 'Tool Node',
-        description: 'Execute external tool',
+        description: 'Call external APIs, functions, or custom tools',
         colorVar: '--or3-color-secondary',
         defaultData: {
             label: 'Tool',
@@ -51,7 +51,7 @@ const nodeTypes = [
     {
         type: 'memory',
         label: 'Memory Node',
-        description: 'Store or query long-term memory',
+        description: 'Store and retrieve long-term context across conversations',
         colorVar: '--or3-color-info',
         defaultData: {
             label: 'Memory',
@@ -63,7 +63,7 @@ const nodeTypes = [
     {
         type: 'whileLoop',
         label: 'While Loop',
-        description: 'Iterate until condition met',
+        description: 'Repeat a sequence until a condition is met',
         colorVar: '--or3-color-info',
         defaultData: {
             label: 'While Loop',
@@ -76,7 +76,7 @@ const nodeTypes = [
     {
         type: 'subflow',
         label: 'Subflow',
-        description: 'Embed reusable workflow',
+        description: 'Embed and reuse another workflow as a single node',
         colorVar: '--or3-color-secondary',
         defaultData: {
             label: 'Subflow',
@@ -88,7 +88,7 @@ const nodeTypes = [
     {
         type: 'output',
         label: 'Output Node',
-        description: 'Terminal workflow output',
+        description: 'Define the final output format and structure',
         colorVar: '--or3-color-success',
         defaultData: {
             label: 'Output',
@@ -242,11 +242,24 @@ const onDragStart = (
                     <span class="node-name">{{ node.label }}</span>
                     <span class="node-desc">{{ node.description }}</span>
                 </div>
+                <svg class="drag-handle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="9" cy="5" r="1"></circle>
+                    <circle cx="9" cy="12" r="1"></circle>
+                    <circle cx="9" cy="19" r="1"></circle>
+                    <circle cx="15" cy="5" r="1"></circle>
+                    <circle cx="15" cy="12" r="1"></circle>
+                    <circle cx="15" cy="19" r="1"></circle>
+                </svg>
             </div>
         </div>
 
         <div class="palette-hint">
-            <p>Drag nodes onto the canvas to add them to your workflow.</p>
+            <svg class="hint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="16" x2="12" y2="12"></line>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+            </svg>
+            <p>Drag nodes onto the canvas to build your workflow. Connect nodes by dragging from output to input handles.</p>
         </div>
     </div>
 </template>
@@ -255,24 +268,25 @@ const onDragStart = (
 .node-palette {
     display: flex;
     flex-direction: column;
-    gap: var(--or3-spacing-sm, 8px);
+    gap: var(--or3-spacing-md, 12px);
 }
 
 .palette-header {
     display: flex;
     align-items: center;
     gap: var(--or3-spacing-sm, 8px);
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+    font-size: var(--or3-text-xs, 11px);
+    font-weight: var(--or3-font-semibold, 600);
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
     text-transform: uppercase;
     letter-spacing: 0.5px;
     padding: 0 var(--or3-spacing-xs, 4px);
 }
 
 .plus-icon {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
+    color: var(--or3-color-accent, #8b5cf6);
 }
 
 .palette-nodes {
@@ -284,18 +298,23 @@ const onDragStart = (
 .palette-node {
     display: flex;
     align-items: center;
-    gap: var(--or3-spacing-sm, 8px);
-    padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 16px);
-    background: var(--or3-color-bg-tertiary, #1a1a24);
-    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
-    border-radius: var(--or3-radius-md, 10px);
+    gap: var(--or3-spacing-md, 12px);
+    padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 12px);
+    background: var(--or3-color-bg-tertiary, #18181d);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
+    border-radius: var(--or3-radius-md, 8px);
     cursor: grab;
-    transition: all 0.15s ease;
+    transition: all var(--or3-transition-fast, 120ms);
 }
 
 .palette-node:hover {
-    border-color: var(--or3-color-border-hover, rgba(255, 255, 255, 0.15));
-    background: var(--or3-color-surface-hover, rgba(34, 34, 46, 0.9));
+    border-color: var(--or3-color-border-hover, rgba(255, 255, 255, 0.12));
+    background: var(--or3-color-surface-hover, rgba(31, 31, 38, 0.95));
+    transform: translateX(2px);
+}
+
+.palette-node:hover .drag-handle {
+    opacity: 0.5;
 }
 
 .palette-node:active {
@@ -307,12 +326,18 @@ const onDragStart = (
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
     border-radius: var(--or3-radius-sm, 6px);
     flex-shrink: 0;
-    background: color-mix(in srgb, var(--node-color) 20%, transparent);
+    background: color-mix(in srgb, var(--node-color) 12%, transparent);
     color: var(--node-color);
+    transition: all var(--or3-transition-fast, 120ms);
+}
+
+.palette-node:hover .node-icon {
+    background: color-mix(in srgb, var(--node-color) 20%, transparent);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--node-color) 25%, transparent);
 }
 
 .node-icon svg {
@@ -323,32 +348,55 @@ const onDragStart = (
 .node-info {
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 2px;
     min-width: 0;
+    flex: 1;
 }
 
 .node-name {
-    font-weight: 600;
-    font-size: 13px;
+    font-weight: var(--or3-font-medium, 500);
+    font-size: var(--or3-text-sm, 12px);
     color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
 }
 
 .node-desc {
-    font-size: 11px;
-    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+    font-size: var(--or3-text-xs, 11px);
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
+    line-height: var(--or3-leading-normal, 1.5);
+}
+
+.drag-handle {
+    width: 14px;
+    height: 14px;
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
+    flex-shrink: 0;
+    opacity: 0;
+    transition: opacity var(--or3-transition-fast, 120ms);
 }
 
 .palette-hint {
-    padding: var(--or3-spacing-sm, 8px);
-    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.03));
-    border-radius: var(--or3-radius-md, 10px);
+    display: flex;
+    align-items: flex-start;
+    gap: var(--or3-spacing-sm, 8px);
+    padding: var(--or3-spacing-md, 12px);
+    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.06));
+    border: 1px solid var(--or3-color-border-subtle, rgba(255, 255, 255, 0.03));
+    border-radius: var(--or3-radius-md, 8px);
     margin-top: var(--or3-spacing-sm, 8px);
+}
+
+.hint-icon {
+    width: 14px;
+    height: 14px;
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
+    flex-shrink: 0;
+    margin-top: 1px;
 }
 
 .palette-hint p {
     margin: 0;
-    font-size: 11px;
-    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
-    line-height: 1.4;
+    font-size: var(--or3-text-xs, 11px);
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
+    line-height: var(--or3-leading-relaxed, 1.65);
 }
 </style>

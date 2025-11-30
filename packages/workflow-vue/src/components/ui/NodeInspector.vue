@@ -2400,7 +2400,7 @@ const handleDelete = () => {
 }
 
 .schema-textarea::placeholder {
-    color: var(--or3-color-text-tertiary, rgba(255, 255, 255, 0.35));
+    color: var(--or3-color-text-tertiary, rgba(255, 255, 255, 0.5));
 }
 
 .schema-error {

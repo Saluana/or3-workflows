@@ -1,0 +1,33 @@
+{
+  "meta": {
+    "version": "2.0.0",
+    "name": "Headless Demo Workflow",
+    "description": "Simple headless demo workflow using a single agent node."
+  },
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 0, "y": 0 },
+      "data": { "label": "Start" }
+    },
+    {
+      "id": "agent-1",
+      "type": "agent",
+      "position": { "x": 200, "y": 0 },
+      "data": {
+        "label": "Test Agent",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "You are a helpful assistant. Use the input to respond clearly and concisely."
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-1",
+      "source": "start-1",
+      "target": "agent-1"
+    }
+  ]
+}
+

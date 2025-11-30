@@ -147,7 +147,7 @@ const lastRunLabel = computed(() =>
     height: 10px;
     border-radius: 50%;
     display: inline-block;
-    background: var(--or3-color-border, rgba(255, 255, 255, 0.35));
+    background: var(--or3-color-border, rgba(255, 255, 255, 0.5));
     box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.08);
 }
 
