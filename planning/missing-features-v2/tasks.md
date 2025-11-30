@@ -280,74 +280,74 @@ _Requirements: 4.1_
 
 ---
 
-## Phase 5: Subflows
+## Phase 5: Subflows ✅
 
-### 5.1 Subflow Core Types
+### 5.1 Subflow Core Types ✅
 
 _Requirements: 5.1, 5.2, 5.3_
 
--   [ ] Create `packages/workflow-core/src/subflow.ts`
-    -   [ ] Define `SubflowDefinition` interface
-        -   [ ] `id: string`
-        -   [ ] `name: string`
-        -   [ ] `inputs: Array<{ id, name, type, required, default }>`
-        -   [ ] `outputs: Array<{ id, name, type }>`
-        -   [ ] `workflow: WorkflowData`
-    -   [ ] Define `SubflowNodeData` interface
-        -   [ ] `subflowId: string`
-        -   [ ] `inputMappings: Record<string, string | unknown>`
-        -   [ ] `shareSession?: boolean`
-    -   [ ] Define `SubflowRegistry` interface
-    -   [ ] Implement `DefaultSubflowRegistry`
-    -   [ ] Write unit tests
+-   [x] Create `packages/workflow-core/src/subflow.ts`
+    -   [x] Define `SubflowDefinition` interface
+        -   [x] `id: string`
+        -   [x] `name: string`
+        -   [x] `inputs: Array<{ id, name, type, required, default }>`
+        -   [x] `outputs: Array<{ id, name, type }>`
+        -   [x] `workflow: WorkflowData`
+    -   [x] Define `SubflowNodeData` interface
+        -   [x] `subflowId: string`
+        -   [x] `inputMappings: Record<string, string | unknown>`
+        -   [x] `shareSession?: boolean`
+    -   [x] Define `SubflowRegistry` interface
+    -   [x] Implement `DefaultSubflowRegistry`
+    -   [x] Write unit tests
 
-### 5.2 Subflow Node Extension
+### 5.2 Subflow Node Extension ✅
 
 _Requirements: 5.2_
 
--   [ ] Create `packages/workflow-core/src/extensions/SubflowExtension.ts`
-    -   [ ] Implement node extension with input/output/error handles
-    -   [ ] Add configuration for registry and maxNestingDepth
-    -   [ ] Add validation (subflowId required, exists in registry)
-    -   [ ] Write unit tests
+-   [x] Create `packages/workflow-core/src/extensions/SubflowExtension.ts`
+    -   [x] Implement node extension with input/output/error handles
+    -   [x] Add configuration for registry and maxNestingDepth
+    -   [x] Add validation (subflowId required, exists in registry)
+    -   [x] Write unit tests
 
-### 5.3 Subflow Execution
+### 5.3 Subflow Execution ✅
 
 _Requirements: 5.2, 5.3_
 
--   [ ] Add subflow registry to adapter
+-   [x] Add subflow registry to adapter
 
-    -   [ ] Add `subflowRegistry: SubflowRegistry` to adapter
-    -   [ ] Accept registry in constructor options
+    -   [x] Add `subflowRegistry: SubflowRegistry` to adapter
+    -   [x] Accept registry in constructor options
 
--   [ ] Implement `executeSubflowNode()`
-    -   [ ] Resolve subflow from registry
-    -   [ ] Build subflow inputs from mappings
-    -   [ ] Create isolated execution context
-    -   [ ] Share session if configured
-    -   [ ] Execute subflow workflow recursively
-    -   [ ] Handle subflow errors (route to error branch)
-    -   [ ] Return subflow output
-    -   [ ] Track nesting depth (prevent infinite recursion)
-    -   [ ] Write integration tests
+-   [x] Implement `executeSubflowNode()`
+    -   [x] Resolve subflow from registry
+    -   [x] Build subflow inputs from mappings
+    -   [x] Create isolated execution context
+    -   [x] Share session if configured
+    -   [x] Execute subflow workflow recursively
+    -   [x] Handle subflow errors (route to error branch)
+    -   [x] Return subflow output
+    -   [x] Track nesting depth (prevent infinite recursion)
+    -   [x] Write integration tests
 
-### 5.4 Subflow Vue Components
+### 5.4 Subflow Vue Components ✅
 
 _Requirements: 5.2, 5.4_
 
--   [ ] Create `packages/workflow-vue/src/components/nodes/SubflowNode.vue`
+-   [x] Create `packages/workflow-vue/src/components/nodes/SubflowNode.vue`
 
-    -   [ ] Display subflow name
-    -   [ ] Show input/output ports based on subflow definition
-    -   [ ] Allow double-click to view subflow
+    -   [x] Display subflow name
+    -   [x] Show input/output ports based on subflow definition
+    -   [x] Allow double-click to view subflow
 
--   [ ] Add Subflow inspector UI
+-   [x] Add Subflow inspector UI
 
-    -   [ ] Subflow selector dropdown
-    -   [ ] Input mappings editor
-    -   [ ] shareSession toggle
+    -   [x] Subflow selector dropdown
+    -   [x] Input mappings editor
+    -   [x] shareSession toggle
 
--   [ ] Add to NodePalette
+-   [x] Add to NodePalette
     -   [ ] Add Subflow to available nodes
 
 ---

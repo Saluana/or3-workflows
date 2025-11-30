@@ -31,6 +31,7 @@ export {
     isToolNodeData,
     isMemoryNodeData,
     isWhileLoopNodeData,
+    isSubflowNodeData,
     isStartNodeData,
     // Utility functions
     generateWorkflowId,
@@ -84,6 +85,22 @@ export {
 export { type ExecutionAdapter } from './types';
 export { OpenRouterExecutionAdapter } from './execution';
 
+// Subflows
+export {
+    type SubflowPortType,
+    type SubflowInput,
+    type SubflowOutput,
+    type SubflowDefinition,
+    type SubflowNodeData,
+    type SubflowRegistry,
+    DefaultSubflowRegistry,
+    isSubflowInput,
+    isSubflowOutput,
+    isSubflowDefinition,
+    createSubflowDefinition,
+    validateInputMappings,
+} from './subflow';
+
 // Storage adapters
 export { LocalStorageAdapter, IndexedDBAdapter } from './storage';
 
@@ -99,4 +116,7 @@ export {
     type RegisteredTool,
     MemoryNodeExtension,
     WhileLoopExtension,
+    SubflowExtension,
+    getSubflowPorts,
+    createDefaultInputMappings,
 } from './extensions';

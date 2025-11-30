@@ -6,3 +6,4 @@ export * from './ParallelNodeExtension.js';
 export * from './ToolNodeExtension.js';
 export * from './MemoryNodeExtension.js';
 export * from './WhileLoopExtension.js';
+export * from './SubflowExtension.js';

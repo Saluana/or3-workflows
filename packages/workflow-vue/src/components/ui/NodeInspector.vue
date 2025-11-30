@@ -43,9 +43,9 @@ const emit = defineEmits<{
 }>();
 
 const selectedNode = ref<WorkflowNode | null>(null);
-const activeTab = ref<'prompt' | 'model' | 'tools' | 'errors' | 'hitl'>(
-    'prompt'
-);
+const activeTab = ref<
+    'prompt' | 'model' | 'tools' | 'errors' | 'hitl' | 'subflow'
+>('prompt');
 
 // Available models
 const availableModels = [
@@ -179,6 +179,7 @@ const isParallelNode = computed(() => selectedNode.value?.type === 'parallel');
 const isWhileNode = computed(() => selectedNode.value?.type === 'whileLoop');
 const isToolNode = computed(() => selectedNode.value?.type === 'tool');
 const isStartNode = computed(() => selectedNode.value?.type === 'start');
+const isSubflowNode = computed(() => selectedNode.value?.type === 'subflow');
 const canDelete = computed(
     () => selectedNode.value && selectedNode.value.type !== 'start'
 );
@@ -187,7 +188,8 @@ const isConfigurable = computed(
         isAgentNode.value ||
         isRouterNode.value ||
         isParallelNode.value ||
-        isWhileNode.value
+        isWhileNode.value ||
+        isSubflowNode.value
 );
 const hasErrorHandling = computed(
     () => isAgentNode.value || isRouterNode.value || isToolNode.value
@@ -204,6 +206,15 @@ const nodeData = computed<ConfigurableNodeData>(() => {
 const whileData = computed(() => {
     const data = selectedNode.value?.data as any;
     return data || {};
+});
+
+const subflowData = computed(() => {
+    const data = selectedNode.value?.data as any;
+    return {
+        subflowId: data?.subflowId ?? '',
+        inputMappings: data?.inputMappings ?? {},
+        shareSession: data?.shareSession ?? true,
+    };
 });
 
 const errorHandling = computed<NodeErrorConfig>(() => {
@@ -405,6 +416,38 @@ const updateHITLDefaultAction = (event: Event) => {
     const value = (event.target as HTMLSelectElement)
         .value as HITLConfig['defaultAction'];
     updateHITL({ defaultAction: value });
+};
+
+// Subflow update handlers
+const updateSubflowId = (event: Event) => {
+    debouncedUpdate('subflowId', (event.target as HTMLInputElement).value);
+};
+
+const toggleShareSession = () => {
+    if (!selectedNode.value) return;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        shareSession: !subflowData.value.shareSession,
+    });
+};
+
+const updateInputMapping = (inputId: string, value: string) => {
+    if (!selectedNode.value) return;
+    const current = subflowData.value.inputMappings || {};
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        inputMappings: {
+            ...current,
+            [inputId]: value,
+        },
+    });
+};
+
+const removeInputMapping = (inputId: string) => {
+    if (!selectedNode.value) return;
+    const current = { ...subflowData.value.inputMappings };
+    delete current[inputId];
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        inputMappings: current,
+    });
 };
 
 const handleDelete = () => {
@@ -623,11 +666,33 @@ const handleDelete = () => {
                 HITL
                 <span v-if="hitlConfig.enabled" class="hitl-badge">ON</span>
             </button>
+            <button
+                v-if="isSubflowNode"
+                class="tab"
+                :class="{ active: activeTab === 'subflow' }"
+                @click="activeTab = 'subflow'"
+            >
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                >
+                    <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+                    <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+                    <rect x="8.5" y="14" width="7" height="7" rx="1"></rect>
+                    <path d="M6.5 10v2a2 2 0 002 2h1"></path>
+                    <path d="M17.5 10v2a2 2 0 01-2 2h-1"></path>
+                </svg>
+                Subflow
+            </button>
         </div>
 
         <!-- Tab Content -->
         <div
-            v-if="isConfigurable || hasErrorHandling || hasHITL"
+            v-if="
+                isConfigurable || hasErrorHandling || hasHITL || isSubflowNode
+            "
             class="tab-content"
         >
             <!-- Prompt Tab -->
@@ -992,6 +1057,85 @@ const handleDelete = () => {
                         rejected items.
                     </p>
                 </template>
+            </div>
+
+            <!-- Subflow Tab -->
+            <div
+                v-if="activeTab === 'subflow' && isSubflowNode"
+                class="subflow-tab"
+            >
+                <div class="field-group">
+                    <label class="field-label">Subflow ID</label>
+                    <input
+                        type="text"
+                        class="text-input"
+                        :value="subflowData.subflowId"
+                        placeholder="e.g., email-composer"
+                        @input="updateSubflowId"
+                    />
+                    <p class="field-hint">
+                        ID of the subflow to execute. Must be registered in the
+                        subflow registry.
+                    </p>
+                </div>
+
+                <div class="subflow-toggle">
+                    <label class="toggle-label">
+                        <input
+                            type="checkbox"
+                            :checked="subflowData.shareSession"
+                            @change="toggleShareSession"
+                        />
+                        <span class="toggle-text">Share Session</span>
+                    </label>
+                    <p class="field-hint" style="margin-top: 4px">
+                        When enabled, the subflow shares conversation history
+                        with the parent workflow.
+                    </p>
+                </div>
+
+                <div
+                    class="input-mappings-section"
+                    v-if="Object.keys(subflowData.inputMappings).length > 0"
+                >
+                    <label class="field-label">Input Mappings</label>
+                    <div class="mappings-list">
+                        <div
+                            v-for="(value, key) in subflowData.inputMappings"
+                            :key="key"
+                            class="mapping-item"
+                        >
+                            <span class="mapping-key">{{ key }}</span>
+                            <input
+                                type="text"
+                                class="text-input mapping-value"
+                                :value="String(value)"
+                                @input="(e) => updateInputMapping(String(key), (e.target as HTMLInputElement).value)"
+                            />
+                            <button
+                                class="remove-mapping-btn"
+                                @click="removeInputMapping(String(key))"
+                                title="Remove mapping"
+                            >
+                                ×
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="info-box">
+                    <p><strong>Expressions:</strong></p>
+                    <ul class="expression-hints">
+                        <li>
+                            <code>{{ output }}</code> - Current input/output
+                        </li>
+                        <li>
+                            <code>{{ outputs.nodeId }}</code> - Output from a
+                            specific node
+                        </li>
+                        <li><code>"literal"</code> - Static value</li>
+                    </ul>
+                </div>
             </div>
         </div>
 
@@ -1526,5 +1670,88 @@ const handleDelete = () => {
         var(--or3-color-info, #3b82f6) 12%,
         transparent
     );
+}
+
+/* Subflow Tab */
+.subflow-tab {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-md, 16px);
+}
+
+.subflow-toggle {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-xs, 4px);
+}
+
+.input-mappings-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-sm, 8px);
+}
+
+.mappings-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-xs, 4px);
+}
+
+.mapping-item {
+    display: flex;
+    align-items: center;
+    gap: var(--or3-spacing-sm, 8px);
+    background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
+    padding: 8px 10px;
+    border-radius: var(--or3-radius-sm, 6px);
+}
+
+.mapping-key {
+    font-family: monospace;
+    font-size: 12px;
+    color: var(--or3-color-secondary, #64748b);
+    min-width: 80px;
+}
+
+.mapping-value {
+    flex: 1;
+}
+
+.remove-mapping-btn {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+.remove-mapping-btn:hover {
+    background: var(--or3-color-error, #ef4444);
+    color: white;
+}
+
+.expression-hints {
+    margin: 8px 0 0;
+    padding-left: 16px;
+    font-size: 12px;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+}
+
+.expression-hints li {
+    margin-bottom: 4px;
+}
+
+.expression-hints code {
+    font-family: monospace;
+    background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
+    padding: 1px 4px;
+    border-radius: 3px;
 }
 </style>

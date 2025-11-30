@@ -3,6 +3,7 @@ import type { MemoryAdapter } from './memory';
 import type { Session } from './session';
 import type { NodeErrorConfig } from './errors';
 import type { HITLConfig, HITLCallback } from './hitl';
+import type { SubflowNodeData, SubflowRegistry } from './subflow';
 
 export const SCHEMA_VERSION = '2.0.0';
 
@@ -141,7 +142,8 @@ export type NodeData =
     | ParallelNodeData
     | ToolNodeData
     | MemoryNodeData
-    | WhileLoopNodeData;
+    | WhileLoopNodeData
+    | SubflowNodeData;
 
 // ============================================================================
 // Type Guards for Node Data
@@ -196,6 +198,11 @@ export function isWhileLoopNodeData(data: NodeData): data is WhileLoopNodeData {
     return 'maxIterations' in data && 'conditionPrompt' in data;
 }
 
+/**
+ * Type guard to check if node data is SubflowNodeData.
+ * This is a re-export from subflow.ts for convenience.
+ */
+export { isSubflowNodeData } from './subflow';
 /**
  * Type guard to check if node data is StartNodeData.
  * Start nodes have minimal data - only label and optional status.
@@ -616,6 +623,16 @@ export interface ExecutionOptions {
      * If not provided, HITL will be skipped even for nodes with hitl.enabled = true.
      */
     onHITLRequest?: HITLCallback;
+    /**
+     * Registry of available subflows for subflow node execution.
+     * Required if any subflow nodes exist in the workflow.
+     */
+    subflowRegistry?: SubflowRegistry;
+    /**
+     * Maximum nesting depth for subflows (default: 10).
+     * Prevents infinite recursion if subflows call each other.
+     */
+    maxSubflowDepth?: number;
 }
 
 /** Tool definition in OpenRouter/OpenAI format */

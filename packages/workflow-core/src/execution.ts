@@ -23,6 +23,8 @@ import type {
     WhileLoopNodeData,
     LoopState,
 } from './types';
+import type { SubflowNodeData, SubflowRegistry } from './subflow';
+import { validateInputMappings } from './subflow';
 import { toolRegistry } from './extensions/ToolNodeExtension';
 import {
     InMemoryAdapter,
@@ -664,6 +666,23 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 });
                 break;
 
+            case 'subflow':
+                const subflowResult = await this.executeSubflowNode(
+                    node,
+                    context,
+                    callbacks
+                );
+                output = subflowResult.output;
+                nextNodes = subflowResult.success
+                    ? childEdges.map((c) => c.nodeId)
+                    : childEdges
+                          .filter((c) => c.handleId === 'error')
+                          .map((c) => c.nodeId);
+                context.outputs[nodeId] = output;
+                context.nodeChain.push(nodeId);
+                context.currentInput = output;
+                break;
+
             default:
                 nextNodes = childEdges.map((c) => c.nodeId);
         }
@@ -1267,6 +1286,138 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 return `${time}${label}${r.content}`;
             })
             .join('\n');
+    }
+
+    /**
+     * Execute a subflow node by running a nested workflow.
+     */
+    private async executeSubflowNode(
+        node: WorkflowNode,
+        context: InternalExecutionContext,
+        callbacks: ExecutionCallbacks
+    ): Promise<{ output: string; success: boolean }> {
+        const data = node.data as SubflowNodeData;
+        const registry = this.options.subflowRegistry;
+
+        // Check if registry is available
+        if (!registry) {
+            throw new Error(
+                `Subflow node "${node.id}" requires a subflowRegistry in ExecutionOptions`
+            );
+        }
+
+        // Get subflow definition
+        const subflow = registry.get(data.subflowId);
+        if (!subflow) {
+            throw new Error(
+                `Subflow "${data.subflowId}" not found in registry`
+            );
+        }
+
+        // Check nesting depth
+        const maxDepth = this.options.maxSubflowDepth ?? 10;
+        const currentDepth = (context as any).__subflowDepth ?? 0;
+        if (currentDepth >= maxDepth) {
+            throw new Error(
+                `Maximum subflow nesting depth (${maxDepth}) exceeded`
+            );
+        }
+
+        // Validate input mappings
+        const mappingValidation = validateInputMappings(
+            subflow,
+            data.inputMappings || {}
+        );
+        if (!mappingValidation.valid) {
+            throw new Error(
+                `Missing required inputs for subflow "${
+                    data.subflowId
+                }": ${mappingValidation.missing.join(', ')}`
+            );
+        }
+
+        // Resolve input values
+        const resolvedInputs: Record<string, unknown> = {};
+        for (const input of subflow.inputs) {
+            const mapping = data.inputMappings?.[input.id];
+            if (mapping !== undefined) {
+                // Handle expression syntax {{...}}
+                if (
+                    typeof mapping === 'string' &&
+                    mapping.startsWith('{{') &&
+                    mapping.endsWith('}}')
+                ) {
+                    const expr = mapping.slice(2, -2).trim();
+                    // Simple expression resolution
+                    if (expr === 'output' || expr === 'input') {
+                        resolvedInputs[input.id] = context.currentInput;
+                    } else if (expr.startsWith('outputs.')) {
+                        const nodeId = expr.slice(8);
+                        resolvedInputs[input.id] =
+                            context.outputs[nodeId] ?? '';
+                    } else if (expr.startsWith('context.')) {
+                        const key = expr.slice(8);
+                        resolvedInputs[input.id] = (context as any)[key] ?? '';
+                    } else {
+                        resolvedInputs[input.id] =
+                            context.outputs[expr] ?? mapping;
+                    }
+                } else {
+                    resolvedInputs[input.id] = mapping;
+                }
+            } else if (input.default !== undefined) {
+                resolvedInputs[input.id] = input.default;
+            }
+        }
+
+        // Prepare subflow input
+        const primaryInput = subflow.inputs[0];
+        const subflowInput = primaryInput
+            ? String(resolvedInputs[primaryInput.id] ?? context.currentInput)
+            : context.currentInput;
+
+        try {
+            // Execute subflow with isolated or shared session
+            const subflowResult = await this.execute(
+                subflow.workflow,
+                {
+                    text: subflowInput,
+                    attachments: context.attachments,
+                },
+                {
+                    ...callbacks,
+                    // Wrap callbacks to indicate subflow context
+                    onNodeStart: (nodeId) => {
+                        callbacks.onNodeStart(`${node.id}/${nodeId}`);
+                    },
+                    onNodeFinish: (nodeId, output) => {
+                        callbacks.onNodeFinish(`${node.id}/${nodeId}`, output);
+                    },
+                    onNodeError: (nodeId, error) => {
+                        callbacks.onNodeError(`${node.id}/${nodeId}`, error);
+                    },
+                },
+                {
+                    // Share session if configured
+                    sessionId:
+                        data.shareSession !== false
+                            ? context.session.id
+                            : undefined,
+                    // Pass along memory adapter
+                    memory: context.memory,
+                    // Track nesting depth
+                    __subflowDepth: currentDepth + 1,
+                } as any
+            );
+
+            // Get output from subflow
+            const output = subflowResult.output ?? '';
+            return { output, success: true };
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : String(error);
+            return { output: `Subflow error: ${message}`, success: false };
+        }
     }
 
     /**

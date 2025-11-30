@@ -19,6 +19,7 @@ import ParallelNode from './nodes/ParallelNode.vue';
 import ToolNode from './nodes/ToolNode.vue';
 import MemoryNode from './nodes/MemoryNode.vue';
 import WhileLoopNode from './nodes/WhileLoopNode.vue';
+import SubflowNode from './nodes/SubflowNode.vue';
 
 const props = defineProps<{
     editor: WorkflowEditor;
@@ -278,6 +279,14 @@ defineExpose({
 
             <template #node-whileLoop="nodeProps">
                 <WhileLoopNode
+                    :id="nodeProps.id"
+                    :data="nodeProps.data"
+                    :selected="nodeProps.selected"
+                />
+            </template>
+
+            <template #node-subflow="nodeProps">
+                <SubflowNode
                     :id="nodeProps.id"
                     :data="nodeProps.data"
                     :selected="nodeProps.selected"
