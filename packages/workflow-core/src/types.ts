@@ -696,6 +696,11 @@ export interface ExecutionCallbacks {
     /**
      * Called when context compaction occurs.
      * Optional - use this to log or display compaction events.
+     * 
+     * Note: This callback is currently defined but not yet wired up in the
+     * OpenRouterExecutionAdapter. It will be called once compaction integration
+     * is implemented.
+     * 
      * @param result - Details about the compaction operation.
      */
     onContextCompacted?: (result: CompactionResult) => void;
@@ -809,6 +814,11 @@ export interface ExecutionOptions {
      * Defaults to ApproximateTokenCounter (4 chars ≈ 1 token).
      */
     tokenCounter?: TokenCounter;
+    /**
+     * Enable debug logging for LLM calls and routing decisions.
+     * When false (default), noisy logs are suppressed to reduce console output and PII exposure.
+     */
+    debug?: boolean;
 }
 
 /** Tool definition in OpenRouter/OpenAI format */
@@ -879,6 +889,8 @@ export interface ExecutionContext {
             }
         ) => Promise<boolean> | boolean
     >;
+    /** Enable debug logging for LLM calls and routing decisions */
+    debug?: boolean;
 }
 
 /** Chat message for conversation history */
@@ -989,9 +1001,12 @@ export interface StorageAdapter {
 
     /**
      * Save a workflow to storage.
-     * Creates a new workflow or updates an existing one.
+     * Note: The default LocalStorageAdapter and IndexedDBAdapter implementations
+     * always generate a new ID based on the workflow name. This means repeated saves
+     * of the same workflow will create multiple entries. For upsert behavior,
+     * implement a custom adapter that tracks workflow IDs in meta.
      * @param workflow - The workflow data to save.
-     * @returns The ID of the saved workflow.
+     * @returns The generated ID of the saved workflow.
      */
     save(workflow: WorkflowData): Promise<string>;
 

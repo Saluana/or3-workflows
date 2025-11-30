@@ -13,7 +13,6 @@ import type {
     InputModality,
     NodeExtension,
     LLMProvider,
-    LoopState,
     ExecutionContext,
 } from './types';
 import {
@@ -130,7 +129,6 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     private abortController: AbortController | null = null;
     private running = false;
     private memory: MemoryAdapter;
-    private loopStates: Map<string, LoopState> = new Map();
 
     /**
      * Create a new OpenRouterExecutionAdapter.
@@ -151,7 +149,9 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         if (this.isLLMProvider(clientOrProvider)) {
             this.provider = clientOrProvider;
         } else {
-            this.provider = new OpenRouterLLMProvider(clientOrProvider);
+            this.provider = new OpenRouterLLMProvider(clientOrProvider, {
+                debug: options.debug,
+            });
         }
 
         this.options = {
@@ -368,8 +368,6 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             };
         } finally {
             this.running = false;
-            // Clear loop states to prevent stale state on re-execution
-            this.loopStates.clear();
         }
     }
 
@@ -493,6 +491,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             signal: context.signal,
             sessionId: context.session.id,
             customEvaluators: this.options.customEvaluators,
+            debug: this.options.debug,
 
             onToken: (token: string) => {
                 callbacks.onToken(nodeId, token);

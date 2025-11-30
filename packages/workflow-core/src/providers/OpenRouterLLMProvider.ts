@@ -33,8 +33,11 @@ interface StreamChunk {
 export class OpenRouterLLMProvider implements LLMProvider {
     private modelCapabilitiesCache: Map<string, ModelCapabilities | null> =
         new Map();
+    private debug: boolean;
 
-    constructor(private client: OpenRouter) {}
+    constructor(private client: OpenRouter, options?: { debug?: boolean }) {
+        this.debug = options?.debug ?? false;
+    }
 
     async chat(
         model: string,
@@ -76,7 +79,9 @@ export class OpenRouterLLMProvider implements LLMProvider {
         // But we can check signal in the loop.
 
         for await (const chunk of stream) {
-            console.log('[OpenRouter] Chunk:', JSON.stringify(chunk));
+            if (this.debug) {
+                console.log('[OpenRouter] Chunk:', JSON.stringify(chunk));
+            }
 
             if (options?.signal?.aborted) {
                 throw new Error('Request cancelled');

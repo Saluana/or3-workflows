@@ -22,11 +22,24 @@ const AUTOSAVE_KEY = 'or3-workflow-autosave';
 /**
  * Storage adapter that persists workflows to browser localStorage.
  * Suitable for development and single-user applications.
+ * 
+ * Note: This adapter is browser-only. Using it in Node.js/SSR will throw an error.
+ * For server-side storage, implement a custom StorageAdapter using a database.
  */
 export class LocalStorageAdapter implements StorageAdapter {
   private storageKey: string;
 
   constructor(storageKey: string = DEFAULT_STORAGE_KEY) {
+    // Check for localStorage availability - works in browser and when mocked in tests
+    try {
+      if (typeof localStorage === 'undefined') {
+        throw new Error('localStorage is not available');
+      }
+    } catch {
+      throw new Error(
+        'LocalStorageAdapter is browser-only. For Node.js/SSR, implement a custom StorageAdapter.'
+      );
+    }
     this.storageKey = storageKey;
   }
 
@@ -56,12 +69,15 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   /**
    * Save a workflow, returns the ID.
+   * Note: Always generates a new ID from the workflow name.
+   * Repeated saves of the same workflow will create multiple entries.
+   * For upsert behavior, implement a custom adapter that tracks IDs in meta.
    */
   async save(workflow: WorkflowData): Promise<string> {
     // Validate before saving
     const validated = WorkflowDataSchema.parse(workflow) as WorkflowData;
     
-    // Generate ID from workflow name
+    // Generate ID from workflow name (always creates a new entry)
     const id = generateWorkflowId(validated.meta.name);
     
     // Update timestamps
@@ -75,7 +91,7 @@ export class LocalStorageAdapter implements StorageAdapter {
       },
     };
 
-    // Get existing workflows and add/update
+    // Get existing workflows and add new entry
     const stored = this.getStoredWorkflows();
     stored[id] = workflowToSave;
     
@@ -255,6 +271,9 @@ export class LocalStorageAdapter implements StorageAdapter {
 /**
  * Storage adapter that uses IndexedDB for larger workflow storage.
  * Provides better performance for workflows with many nodes.
+ * 
+ * Note: This adapter is browser-only. Using it in Node.js/SSR will throw an error.
+ * For server-side storage, implement a custom StorageAdapter using a database.
  */
 export class IndexedDBAdapter implements StorageAdapter {
   private dbName: string;
@@ -262,6 +281,16 @@ export class IndexedDBAdapter implements StorageAdapter {
   private db: IDBDatabase | null = null;
 
   constructor(dbName: string = 'or3-workflows', storeName: string = 'workflows') {
+    // Check for indexedDB availability - works in browser and when mocked in tests
+    try {
+      if (typeof indexedDB === 'undefined') {
+        throw new Error('indexedDB is not available');
+      }
+    } catch {
+      throw new Error(
+        'IndexedDBAdapter is browser-only. For Node.js/SSR, implement a custom StorageAdapter.'
+      );
+    }
     this.dbName = dbName;
     this.storeName = storeName;
   }
@@ -326,11 +355,15 @@ export class IndexedDBAdapter implements StorageAdapter {
 
   /**
    * Save a workflow, returns the ID.
+   * Note: Always generates a new ID from the workflow name.
+   * Repeated saves of the same workflow will create multiple entries.
+   * For upsert behavior, implement a custom adapter that tracks IDs in meta.
    */
   async save(workflow: WorkflowData): Promise<string> {
     const db = await this.getDB();
     const validated = WorkflowDataSchema.parse(workflow) as WorkflowData;
     
+    // Generate ID from workflow name (always creates a new entry)
     const id = generateWorkflowId(validated.meta.name);
     const now = new Date().toISOString();
 

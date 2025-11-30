@@ -14,7 +14,8 @@ const DEFAULT_MODEL = 'openai/gpt-4o-mini';
 
 /**
  * While Loop node extension definition.
- * Execution is handled by the adapter; this provides shape, defaults, and validation.
+ * Provides loop execution logic, including LLM-based condition evaluation,
+ * subgraph body execution, and max iteration handling.
  */
 export const WhileLoopExtension: NodeExtension = {
     name: 'whileLoop',

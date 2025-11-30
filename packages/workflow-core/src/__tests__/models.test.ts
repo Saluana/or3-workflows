@@ -430,8 +430,10 @@ describe('DEFAULT_MODELS', () => {
     it('should contain common models', () => {
         expect(DEFAULT_MODELS.length).toBeGreaterThan(0);
         const modelIds = DEFAULT_MODELS.map((m) => m.id);
-        expect(modelIds).toContain('openai/gpt-5.1');
-        expect(modelIds).toContain('google/gemini-3-pro-preview');
+        expect(modelIds).toContain('openai/gpt-4o');
+        expect(modelIds).toContain('openai/gpt-4o-mini');
+        expect(modelIds).toContain('anthropic/claude-3.5-sonnet');
+        expect(modelIds).toContain('google/gemini-1.5-pro');
     });
 
     it('should have valid model structure', () => {
@@ -455,7 +457,7 @@ describe('registerDefaultModels', () => {
     it('should register all default models to global registry', () => {
         registerDefaultModels();
         expect(modelRegistry.size).toBe(DEFAULT_MODELS.length);
-        expect(modelRegistry.has('openai/gpt-5.1')).toBe(true);
+        expect(modelRegistry.has('openai/gpt-4o')).toBe(true);
     });
 });
 
