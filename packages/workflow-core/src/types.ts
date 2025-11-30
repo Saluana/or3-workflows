@@ -209,13 +209,16 @@ export function isWhileLoopNodeData(data: NodeData): data is WhileLoopNodeData {
  * Type guard to check if node data is SubflowNodeData.
  * This is a re-export from subflow.ts for convenience.
  */
-export { isSubflowNodeData } from './subflow';
+export { isSubflowNodeData, type SubflowNodeData } from './subflow';
 
 /**
  * Type guard to check if node data is OutputNodeData.
  * This is a re-export from OutputNodeExtension.ts for convenience.
  */
-export { isOutputNodeData } from './extensions/OutputNodeExtension';
+export {
+    isOutputNodeData,
+    type OutputNodeData,
+} from './extensions/OutputNodeExtension';
 
 /**
  * Type guard to check if node data is StartNodeData.
@@ -433,6 +436,8 @@ export interface LLMProvider {
             maxTokens?: number;
             tools?: any[]; // TODO: Define strict tool types
             responseFormat?: { type: 'json_object' | 'text' };
+            onToken?: (token: string) => void;
+            signal?: AbortSignal;
         }
     ): Promise<{
         content: string | null;
@@ -462,6 +467,60 @@ export interface NodeExecutionResult {
     metadata?: Record<string, any>;
 }
 
+export interface ValidationResult {
+    isValid: boolean;
+    errors: ValidationError[];
+    warnings: ValidationWarning[];
+}
+
+export interface ValidationError {
+    type: 'error';
+    code: ValidationErrorCode;
+    message: string;
+    nodeId?: string;
+    edgeId?: string;
+}
+
+export interface ValidationWarning {
+    type: 'warning';
+    code: ValidationWarningCode;
+    message: string;
+    nodeId?: string;
+    edgeId?: string;
+}
+
+export type ValidationErrorCode =
+    | 'NO_START_NODE'
+    | 'MULTIPLE_START_NODES'
+    | 'DISCONNECTED_NODE'
+    | 'CYCLE_DETECTED'
+    | 'MISSING_REQUIRED_PORT'
+    | 'INVALID_CONNECTION'
+    | 'MISSING_MODEL'
+    | 'MISSING_PROMPT'
+    | 'MISSING_SUBFLOW_ID'
+    | 'SUBFLOW_NOT_FOUND'
+    | 'MISSING_INPUT_MAPPING'
+    | 'MISSING_OPERATION'
+    | 'INVALID_LIMIT'
+    | 'MISSING_CONDITION_PROMPT'
+    | 'INVALID_MAX_ITERATIONS'
+    | 'MISSING_BODY'
+    | 'MISSING_EXIT';
+
+export type ValidationWarningCode =
+    | 'EMPTY_PROMPT'
+    | 'UNREACHABLE_NODE'
+    | 'DEAD_END_NODE'
+    | 'MISSING_EDGE_LABEL'
+    | 'NO_SUBFLOW_OUTPUTS'
+    | 'NO_REGISTRY'
+    | 'NO_INPUT'
+    | 'NO_OUTPUT'
+    | 'MISSING_BODY'
+    | 'MISSING_EXIT'
+    | 'DISCONNECTED_COMPONENTS';
+
 /**
  * Extension definition for a custom node type.
  */
@@ -479,9 +538,9 @@ export interface NodeExtension {
     /** Icon to display (lucide icon name) */
     icon?: string;
     /** Input handles definition */
-    inputs: NodeHandleDefinition[];
+    inputs: PortDefinition[];
     /** Output handles definition */
-    outputs: NodeHandleDefinition[];
+    outputs: PortDefinition[];
     /** Default data when creating a new node */
     defaultData: Record<string, any>;
 
@@ -755,26 +814,61 @@ export interface ToolDefinition {
 
 /** Context passed to node executors during execution */
 export interface ExecutionContext {
-    /** The node being executed */
-    node: WorkflowNode;
-    /** Current text input (from user or previous node) */
+    /** Input text for the current execution step */
     input: string;
-    /** Original user text input */
-    originalInput: string;
-    /** Multimodal attachments for this execution */
-    attachments: Attachment[];
     /** Conversation history */
     history: ChatMessage[];
-    /** Outputs from executed nodes */
-    outputs: Record<string, string>;
-    /** Ordered list of executed node IDs */
-    nodeChain: string[];
-    /** Abort signal for cancellation */
-    signal: AbortSignal;
-    /** Current session (in-memory conversation history) */
-    session: Session;
     /** Long-term memory adapter (developer-provided or default) */
     memory: MemoryAdapter;
+    /** Multimodal attachments for this execution */
+    attachments?: Attachment[];
+    /** Callback for streaming tokens */
+    onToken?: (token: string) => void;
+    /** Outputs from previous nodes, keyed by node ID */
+    outputs: Record<string, string>;
+    /** Chain of executed node IDs leading to this point */
+    nodeChain: string[];
+    /** Abort signal for cancellation */
+    signal?: AbortSignal;
+    /** Get a node by ID to access its metadata/label */
+    getNode: (id: string) => WorkflowNode | undefined;
+    /** Get outgoing edges from a specific node and handle */
+    getOutgoingEdges: (nodeId: string, sourceHandle?: string) => WorkflowEdge[];
+    /** Global tool call handler */
+    onToolCall?: (name: string, args: any) => Promise<string>;
+    /** Session ID for the current execution */
+    sessionId?: string;
+    /** Execute a subgraph (e.g., for loops) */
+    executeSubgraph?: (
+        startNodeId: string,
+        input: string,
+        options?: { nodeOverrides?: Record<string, any> }
+    ) => Promise<{ output: string }>;
+    /** Execute a complete workflow (for subflows) */
+    executeWorkflow?: (
+        workflow: WorkflowData,
+        input: ExecutionInput,
+        options?: Partial<ExecutionOptions>
+    ) => Promise<ExecutionResult>;
+    /** Registry for subflows */
+    subflowRegistry?: SubflowRegistry;
+    /** Custom evaluators for while loops */
+    customEvaluators?: Record<
+        string,
+        (
+            context: {
+                currentInput: string;
+                session: Session;
+                memory: MemoryAdapter;
+                outputs: Record<string, string>;
+            },
+            loopState: {
+                iteration: number;
+                outputs: string[];
+                lastOutput: string | null;
+            }
+        ) => Promise<boolean> | boolean
+    >;
 }
 
 /** Chat message for conversation history */

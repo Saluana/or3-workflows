@@ -40,31 +40,157 @@ const { onConnect, onNodeDragStop, screenToFlowCoordinate, fitView } =
 const nodes = ref<Node[]>([]);
 const edges = ref<Edge[]>([]);
 
-// Sync from editor, injecting status from props
-const syncFromEditor = () => {
-    nodes.value = props.editor.getNodes().map((n) => ({
-        id: n.id,
+// Cache for comparing changes
+let lastNodeMap = new Map<string, string>();
+let lastEdgeMap = new Map<string, string>();
+
+/**
+ * Create a fingerprint of a node for comparison.
+ * Only includes properties that affect rendering.
+ */
+const getNodeFingerprint = (n: any, status: string): string => {
+    return JSON.stringify({
         type: n.type,
         position: n.position,
-        data: {
-            ...n.data,
-            status: props.nodeStatuses?.[n.id] || 'idle',
-        },
+        data: n.data,
         selected: n.selected,
-    }));
+        status,
+    });
+};
 
-    edges.value = props.editor.getEdges().map((e) => ({
-        id: e.id,
+/**
+ * Create a fingerprint of an edge for comparison.
+ */
+const getEdgeFingerprint = (e: any, animated: boolean): string => {
+    return JSON.stringify({
         source: e.source,
         target: e.target,
         sourceHandle: e.sourceHandle,
         targetHandle: e.targetHandle,
         label: e.label,
         data: e.data,
-        animated:
-            props.nodeStatuses?.[e.source] === 'active' ||
-            props.nodeStatuses?.[e.target] === 'active',
-    }));
+        animated,
+    });
+};
+
+/**
+ * Sync from editor using diffing to minimize re-renders.
+ * Only updates nodes/edges that have actually changed.
+ */
+const syncFromEditor = () => {
+    const editorNodes = props.editor.getNodes();
+    const editorEdges = props.editor.getEdges();
+
+    const newNodeMap = new Map<string, string>();
+    const newEdgeMap = new Map<string, string>();
+
+    // Check which nodes have changed
+    let nodesChanged = false;
+    const currentNodeIds = new Set(nodes.value.map((n) => n.id));
+    const editorNodeIds = new Set(editorNodes.map((n) => n.id));
+
+    // Check for added/removed nodes
+    if (currentNodeIds.size !== editorNodeIds.size) {
+        nodesChanged = true;
+    } else {
+        for (const id of editorNodeIds) {
+            if (!currentNodeIds.has(id)) {
+                nodesChanged = true;
+                break;
+            }
+        }
+    }
+
+    // Check for changed nodes
+    if (!nodesChanged) {
+        for (const n of editorNodes) {
+            const status = props.nodeStatuses?.[n.id] || 'idle';
+            const fingerprint = getNodeFingerprint(n, status);
+            newNodeMap.set(n.id, fingerprint);
+
+            if (lastNodeMap.get(n.id) !== fingerprint) {
+                nodesChanged = true;
+            }
+        }
+    }
+
+    // Only update nodes if something changed
+    if (nodesChanged) {
+        nodes.value = editorNodes.map((n) => ({
+            id: n.id,
+            type: n.type,
+            position: n.position,
+            data: {
+                ...n.data,
+                status: props.nodeStatuses?.[n.id] || 'idle',
+            },
+            selected: n.selected,
+        }));
+
+        // Update cache
+        lastNodeMap = new Map();
+        for (const n of editorNodes) {
+            const status = props.nodeStatuses?.[n.id] || 'idle';
+            lastNodeMap.set(n.id, getNodeFingerprint(n, status));
+        }
+    }
+
+    // Check which edges have changed
+    let edgesChanged = false;
+    const currentEdgeIds = new Set(edges.value.map((e) => e.id));
+    const editorEdgeIds = new Set(editorEdges.map((e) => e.id));
+
+    // Check for added/removed edges
+    if (currentEdgeIds.size !== editorEdgeIds.size) {
+        edgesChanged = true;
+    } else {
+        for (const id of editorEdgeIds) {
+            if (!currentEdgeIds.has(id)) {
+                edgesChanged = true;
+                break;
+            }
+        }
+    }
+
+    // Check for changed edges
+    if (!edgesChanged) {
+        for (const e of editorEdges) {
+            const animated =
+                props.nodeStatuses?.[e.source] === 'active' ||
+                props.nodeStatuses?.[e.target] === 'active';
+            const fingerprint = getEdgeFingerprint(e, animated);
+            newEdgeMap.set(e.id, fingerprint);
+
+            if (lastEdgeMap.get(e.id) !== fingerprint) {
+                edgesChanged = true;
+            }
+        }
+    }
+
+    // Only update edges if something changed
+    if (edgesChanged) {
+        edges.value = editorEdges.map((e) => ({
+            id: e.id,
+            source: e.source,
+            target: e.target,
+            sourceHandle: e.sourceHandle,
+            targetHandle: e.targetHandle,
+            label: e.label,
+            data: e.data,
+            animated:
+                props.nodeStatuses?.[e.source] === 'active' ||
+                props.nodeStatuses?.[e.target] === 'active',
+        }));
+
+        // Update cache
+        lastEdgeMap = new Map();
+        for (const e of editorEdges) {
+            const animated =
+                props.nodeStatuses?.[e.source] === 'active' ||
+                props.nodeStatuses?.[e.target] === 'active';
+            lastEdgeMap.set(e.id, getEdgeFingerprint(e, animated));
+        }
+    }
 };
 
 let unsubUpdate: (() => void) | null = null;

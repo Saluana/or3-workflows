@@ -280,15 +280,8 @@ export const StarterKit = {
         if (opts.subflow !== false) {
             if (typeof opts.subflow === 'object') {
                 // Subflow options are used by the execution adapter, not the extension
-                // We include the extension and store options for later use
-                const subflowExt = {
-                    ...SubflowExtension,
-                    storage: {
-                        ...SubflowExtension.storage,
-                        maxNestingDepth: opts.subflow.maxNestingDepth || 10,
-                    },
-                };
-                extensions.push(subflowExt);
+                // We include the extension - execution options handled at runtime
+                extensions.push(SubflowExtension);
             } else {
                 extensions.push(SubflowExtension);
             }

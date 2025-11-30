@@ -5,8 +5,14 @@ import type {
   ExecutionContext,
   ParallelNodeData,
   BranchDefinition,
+  LLMProvider,
+  NodeExecutionResult,
+  ChatMessage,
+  ValidationError,
+  ValidationWarning
 } from '../types';
-import type { ValidationError, ValidationWarning } from '../validation';
+
+const DEFAULT_MODEL = 'openai/gpt-4o-mini';
 
 /**
  * Parallel Node Extension
@@ -64,15 +70,120 @@ export const ParallelNodeExtension: NodeExtension = {
 
   /**
    * Execute the parallel node.
-   * Actual concurrent execution is handled by OpenRouterExecutionAdapter.
    */
-  async execute(context: ExecutionContext): Promise<{ output: string; branchOutputs: Record<string, string>; nextNodes: string[] }> {
-    const data = context.node.data as ParallelNodeData;
+  async execute(
+      context: ExecutionContext,
+      node: WorkflowNode,
+      provider?: LLMProvider
+  ): Promise<NodeExecutionResult> {
+    const data = node.data as ParallelNodeData;
     const branches = data.branches || [];
-    throw new Error(
-      `ParallelNodeExtension.execute is handled by OpenRouterExecutionAdapter (${branches.length} branches configured). ` +
-      'Use the adapter to run workflows instead of calling the extension directly.'
-    );
+    
+    if (branches.length === 0) {
+        throw new Error('Parallel node has no branches configured');
+    }
+    
+    if (!context.executeSubgraph) {
+        throw new Error('Parallel execution requires executeSubgraph capability in context');
+    }
+    
+    const outgoingEdges = context.getOutgoingEdges(node.id);
+    
+    // Map branches to start nodes
+    const branchExecutions = branches.map(branch => {
+        const edge = outgoingEdges.find(e => e.sourceHandle === branch.id);
+        if (!edge) return null;
+        
+        const startNodeId = edge.target;
+        
+        // Apply overrides if configured
+        const overrides: Record<string, any> = {};
+        if (branch.model) overrides.model = branch.model;
+        if (branch.prompt) overrides.prompt = branch.prompt;
+        
+        const nodeOverrides = Object.keys(overrides).length > 0 
+            ? { [startNodeId]: { data: overrides } } 
+            : undefined;
+            
+        return {
+            branchId: branch.id,
+            label: branch.label,
+            promise: context.executeSubgraph!(startNodeId, context.input, { nodeOverrides })
+                .then(result => ({ status: 'fulfilled' as const, value: result, branchId: branch.id, label: branch.label }))
+                .catch(error => ({ status: 'rejected' as const, reason: error, branchId: branch.id, label: branch.label }))
+        };
+    }).filter(Boolean);
+    
+    if (branchExecutions.length === 0) {
+        return {
+            output: 'No connected branches executed.',
+            nextNodes: [], // Or route to 'merged' if present but nothing to merge?
+        };
+    }
+    
+    // Execute all branches
+    const results = await Promise.all(branchExecutions.map(b => b!.promise));
+    
+    // Collect outputs
+    const outputs: Record<string, string> = {};
+    const errors: string[] = [];
+    
+    results.forEach(result => {
+        if (result.status === 'fulfilled') {
+            outputs[result.branchId] = result.value.output;
+        } else {
+            errors.push(`${result.label}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+        }
+    });
+    
+    // Format outputs for merge
+    let formattedOutputs = Object.entries(outputs)
+        .map(([id, out]) => {
+            const branch = branches.find(b => b.id === id);
+            return `## ${branch?.label || id}\n${out}`;
+        })
+        .join('\n\n');
+
+    if (errors.length > 0) {
+        formattedOutputs += `\n\n## Errors\n${errors.join('\n')}`;
+    }
+    
+    let output = formattedOutputs;
+    
+    // Merge if prompt provided
+    if (data.prompt) {
+        if (!provider) {
+             throw new Error('Parallel node requires LLM provider for merging results');
+        }
+        
+        const mergeModel = data.model || DEFAULT_MODEL;
+        const mergePrompt = data.prompt;
+        
+        const mergeMessages: ChatMessage[] = [
+            { role: 'system', content: mergePrompt },
+            {
+                role: 'user',
+                content: `Here are the outputs from parallel agents:\n\n${formattedOutputs}\n\nPlease merge/summarize these outputs according to your instructions.`,
+            },
+        ];
+        
+        const result = await provider.chat(mergeModel, mergeMessages, {
+            onToken: context.onToken
+        });
+        
+        output = result.content || '';
+    }
+    
+    // Determine next nodes (connected to 'merged' handle)
+    const mergeEdges = outgoingEdges.filter(e => e.sourceHandle === 'merged');
+    
+    return {
+        output,
+        nextNodes: mergeEdges.map(e => e.target),
+        metadata: {
+            branchOutputs: outputs
+        }
+    };
   },
 
   /**

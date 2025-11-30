@@ -62,6 +62,12 @@ export interface ConfigurableExtension<
      * @returns A new extension instance with the merged options
      */
     configure(options?: Partial<TOptions>): ConfigurableExtension<TOptions>;
+
+    /** Lifecycle: called when extension is created */
+    onCreate?: () => void;
+
+    /** Lifecycle: called when extension is destroyed */
+    onDestroy?: () => void;
 }
 
 /**
@@ -102,12 +108,6 @@ export interface ExtensionConfig<
 
     /** Storage for extension state */
     storage?: Record<string, unknown>;
-
-    /** Commands provided by this extension */
-    addCommands?: NodeExtension['addCommands'];
-
-    /** Keyboard shortcuts provided by this extension */
-    addKeyboardShortcuts?: NodeExtension['addKeyboardShortcuts'];
 }
 
 // ============================================================================
@@ -164,14 +164,13 @@ export function createConfigurableExtension<
             type: config.type as 'node',
             defaultOptions,
             options,
-            inputs: config.inputs,
-            outputs: config.outputs,
-            defaultData: config.defaultData,
-            validate: config.validate,
-            execute: config.execute,
-            storage: config.storage,
-            addCommands: config.addCommands,
-            addKeyboardShortcuts: config.addKeyboardShortcuts,
+            inputs: config.inputs || [],
+            outputs: config.outputs || [],
+            defaultData: config.defaultData || {},
+            validate: config.validate || (() => []),
+            execute:
+                config.execute ||
+                (async () => ({ content: '', output: '', nextNodes: [] })),
 
             onCreate: config.onCreate
                 ? () => config.onCreate!(options)

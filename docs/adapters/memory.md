@@ -6,6 +6,14 @@ Integrate vector memory and RAG with workflow execution.
 
 Memory adapters provide vector storage for semantic search, enabling workflows to retrieve relevant context during execution.
 
+## Requirements
+
+> **Note:** Examples in this documentation use `crypto.randomUUID()` for ID generation, which requires:
+>
+> -   **Node.js** 19+ (or 15.6+ with `--experimental-global-webcrypto`)
+> -   **Modern browsers** (Chrome 92+, Firefox 95+, Safari 15.4+)
+> -   **Edge runtimes** may need a polyfill (see [ID Generation](#id-generation) below)
+
 ## Interface
 
 ```typescript
@@ -251,6 +259,87 @@ const embeddingProvider = new RateLimitedEmbeddingProvider(cachedProvider, {
 
 ---
 
+## ID Generation
+
+The examples use `crypto.randomUUID()`, but this isn't available everywhere. For maximum compatibility, inject an ID generator:
+
+### IdGenerator Interface
+
+```typescript
+type IdGenerator = () => string;
+```
+
+### Implementations
+
+```typescript
+// Modern environments (Node 19+, modern browsers)
+const cryptoUUID: IdGenerator = () => crypto.randomUUID();
+
+// Fallback using crypto.getRandomValues (wider support)
+const fallbackUUID: IdGenerator = () => {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // Version 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // Variant 1
+    const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(
+        12,
+        16
+    )}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
+
+// Using uuid package (works everywhere)
+import { v4 as uuidv4 } from 'uuid';
+const packageUUID: IdGenerator = () => uuidv4();
+
+// Simple nanoid alternative (smaller, fast)
+import { nanoid } from 'nanoid';
+const nanoidGenerator: IdGenerator = () => nanoid();
+```
+
+### Auto-Detect Best Available
+
+```typescript
+function createIdGenerator(): IdGenerator {
+    // Prefer native crypto.randomUUID
+    if (
+        typeof crypto !== 'undefined' &&
+        typeof crypto.randomUUID === 'function'
+    ) {
+        return () => crypto.randomUUID();
+    }
+
+    // Fallback to crypto.getRandomValues
+    if (
+        typeof crypto !== 'undefined' &&
+        typeof crypto.getRandomValues === 'function'
+    ) {
+        return () => {
+            const bytes = new Uint8Array(16);
+            crypto.getRandomValues(bytes);
+            bytes[6] = (bytes[6] & 0x0f) | 0x40;
+            bytes[8] = (bytes[8] & 0x3f) | 0x80;
+            const hex = [...bytes]
+                .map((b) => b.toString(16).padStart(2, '0'))
+                .join('');
+            return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(
+                12,
+                16
+            )}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+        };
+    }
+
+    // Last resort: timestamp + random (not cryptographically secure)
+    console.warn('No crypto API available, using weak ID generation');
+    return () =>
+        `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+const generateId = createIdGenerator();
+```
+
+---
+
 ## Memory Adapters (Production Pattern)
 
 With the embedding provider abstraction, memory adapters focus solely on storage:
@@ -266,25 +355,29 @@ import type {
     MemoryResult,
 } from '@or3/workflow-core';
 import type { EmbeddingProvider } from './embedding-provider';
+import type { IdGenerator } from './id-generator';
 
 export class PineconeMemoryAdapter implements MemoryAdapter {
     private pinecone: Pinecone;
     private indexName: string;
+    private generateId: IdGenerator;
 
     constructor(
         private embeddings: EmbeddingProvider,
         options: {
             pineconeApiKey: string;
             indexName: string;
+            generateId?: IdGenerator; // Optional: inject custom ID generator
         }
     ) {
         this.pinecone = new Pinecone({ apiKey: options.pineconeApiKey });
         this.indexName = options.indexName;
+        this.generateId = options.generateId ?? (() => crypto.randomUUID());
     }
 
     async store(content: MemoryContent): Promise<string> {
         const index = this.pinecone.index(this.indexName);
-        const id = crypto.randomUUID();
+        const id = this.generateId();
         const embedding = await this.embeddings.embed(content.text);
 
         await index.upsert([
@@ -352,14 +445,21 @@ import type {
     SearchOptions,
     MemoryResult,
 } from '@or3/workflow-core';
+import type { IdGenerator } from './id-generator';
 
 export class ChromaMemoryAdapter implements MemoryAdapter {
     private client: ChromaClient;
     private collectionName: string;
+    private generateId: IdGenerator;
 
-    constructor(options: { path?: string; collectionName: string }) {
+    constructor(options: {
+        path?: string;
+        collectionName: string;
+        generateId?: IdGenerator;
+    }) {
         this.client = new ChromaClient({ path: options.path });
         this.collectionName = options.collectionName;
+        this.generateId = options.generateId ?? (() => crypto.randomUUID());
     }
 
     private async getCollection() {
@@ -370,7 +470,7 @@ export class ChromaMemoryAdapter implements MemoryAdapter {
 
     async store(content: MemoryContent): Promise<string> {
         const collection = await this.getCollection();
-        const id = crypto.randomUUID();
+        const id = this.generateId();
 
         await collection.add({
             ids: [id],
@@ -425,22 +525,26 @@ import type {
     MemoryResult,
 } from '@or3/workflow-core';
 import type { EmbeddingProvider } from './embedding-provider';
+import type { IdGenerator } from './id-generator';
 
 export class SupabaseMemoryAdapter implements MemoryAdapter {
     private supabase;
+    private generateId: IdGenerator;
 
     constructor(
         private embeddings: EmbeddingProvider,
         options: {
             supabaseUrl: string;
             supabaseKey: string;
+            generateId?: IdGenerator;
         }
     ) {
         this.supabase = createClient(options.supabaseUrl, options.supabaseKey);
+        this.generateId = options.generateId ?? (() => crypto.randomUUID());
     }
 
     async store(content: MemoryContent): Promise<string> {
-        const id = crypto.randomUUID();
+        const id = this.generateId();
         const embedding = await this.embeddings.embed(content.text);
 
         const { error } = await this.supabase.from('memories').insert({
@@ -595,7 +699,59 @@ const result = await executor.execute(workflow, {
 
 ## In-Memory Adapter (Testing)
 
-For testing and development:
+For testing and development. The `InMemoryAdapter` provides a feature-rich implementation suitable for development and testing scenarios.
+
+### Basic Usage
+
+```typescript
+import { InMemoryAdapter } from '@or3/workflow-core';
+
+const memory = new InMemoryAdapter();
+
+// Store memories
+const id = await memory.store({
+    text: 'TypeScript is a typed superset of JavaScript',
+    namespace: 'docs',
+    metadata: { category: 'languages' },
+});
+
+// Search with token-based relevance
+const results = await memory.search('typescript javascript');
+```
+
+### Enhanced Search Algorithm
+
+The `InMemoryAdapter` uses a sophisticated token-based relevance scoring algorithm:
+
+1. **Tokenization with Stop Word Filtering**: Common words like "the", "is", "and" are filtered out to focus on meaningful terms.
+
+2. **Jaccard Similarity with TF Weighting**:
+
+    - Calculates token overlap between query and document
+    - Applies term frequency weighting for tokens appearing multiple times
+    - Formula: `intersection / union` where tokens are weighted by frequency
+
+3. **Exact Match Bonus**: An exact substring match adds 10 points to the base score.
+
+4. **Recency Bonus**: More recent memories receive a slight scoring boost based on their insertion order.
+
+```typescript
+// Scoring formula (simplified):
+// baseScore = (exactMatch ? 10 : 0) + tokenRelevance
+// finalScore = baseScore * recencyBonus
+
+// Example: Query "machine learning"
+await memory.store({ text: 'Machine learning is a subset of AI' });
+await memory.store({ text: 'Deep learning uses neural networks' });
+await memory.store({ text: 'Machine learning models require training data' });
+
+// Third result scores highest:
+// - Has both "machine" and "learning" tokens
+// - Multiple occurrences boost score
+// - More recent = higher recency bonus
+```
+
+### Implementation Reference
 
 ```typescript
 import type {
@@ -607,10 +763,13 @@ import type {
 
 export class InMemoryAdapter implements MemoryAdapter {
     private memories: Map<string, MemoryContent & { id: string }> = new Map();
+    private insertionOrder: Map<string, number> = new Map();
+    private insertionCounter = 0;
 
     async store(content: MemoryContent): Promise<string> {
         const id = crypto.randomUUID();
         this.memories.set(id, { ...content, id });
+        this.insertionOrder.set(id, this.insertionCounter++);
         return id;
     }
 
@@ -618,7 +777,7 @@ export class InMemoryAdapter implements MemoryAdapter {
         query: string,
         options?: SearchOptions
     ): Promise<MemoryResult[]> {
-        const queryLower = query.toLowerCase();
+        const queryTokens = this.tokenize(query);
         const results: MemoryResult[] = [];
 
         for (const [id, memory] of this.memories) {
@@ -626,19 +785,20 @@ export class InMemoryAdapter implements MemoryAdapter {
                 continue;
             }
 
-            // Simple keyword matching (use embeddings in production)
-            const text = memory.text.toLowerCase();
-            const words = queryLower.split(/\s+/);
-            const matches = words.filter((w) => text.includes(w)).length;
-            const score = matches / words.length;
+            const textTokens = this.tokenize(memory.text);
+            const relevance = this.calculateRelevance(queryTokens, textTokens);
+
+            // Exact match bonus
+            const exactMatch = memory.text.toLowerCase().includes(query.toLowerCase());
+            const baseScore = (exactMatch ? 10 : 0) + relevance;
+
+            // Recency bonus
+            const order = this.insertionOrder.get(id) ?? 0;
+            const recencyBonus = 1 + (order / (this.insertionCounter + 1)) * 0.1;
+            const score = baseScore * recencyBonus;
 
             if (score >= (options?.threshold ?? 0)) {
-                results.push({
-                    id,
-                    text: memory.text,
-                    score,
-                    metadata: memory.metadata,
-                });
+                results.push({ id, text: memory.text, score, metadata: memory.metadata });
             }
         }
 
@@ -647,12 +807,44 @@ export class InMemoryAdapter implements MemoryAdapter {
             .slice(0, options?.limit ?? 5);
     }
 
+    private tokenize(text: string): string[] {
+        const STOP_WORDS = new Set(['the', 'a', 'an', 'is', 'are', 'was', ...]);
+        return text
+            .toLowerCase()
+            .split(/\W+/)
+            .filter(t => t.length > 1 && !STOP_WORDS.has(t));
+    }
+
+    private calculateRelevance(queryTokens: string[], textTokens: string[]): number {
+        // Jaccard similarity with TF weighting
+        const textFreq = new Map<string, number>();
+        for (const t of textTokens) {
+            textFreq.set(t, (textFreq.get(t) ?? 0) + 1);
+        }
+
+        const querySet = new Set(queryTokens);
+        const textSet = new Set(textTokens);
+
+        let intersection = 0;
+        for (const t of querySet) {
+            if (textSet.has(t)) {
+                intersection += textFreq.get(t) ?? 1;
+            }
+        }
+
+        const union = querySet.size + textSet.size - intersection;
+        return union > 0 ? intersection / union : 0;
+    }
+
     async delete(id: string): Promise<void> {
         this.memories.delete(id);
+        this.insertionOrder.delete(id);
     }
 
     async clear(): Promise<void> {
         this.memories.clear();
+        this.insertionOrder.clear();
+        this.insertionCounter = 0;
     }
 }
 ```

@@ -75,11 +75,11 @@ export {
     WorkflowEditor,
     type EditorOptions,
 } from './editor';
-export {
-    validateWorkflow,
-    type ValidationResult,
-    type ValidationError,
-    type ValidationWarning,
+export { validateWorkflow } from './validation';
+export type {
+    ValidationResult,
+    ValidationError,
+    ValidationWarning,
 } from './validation';
 
 // Execution adapters

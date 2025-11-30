@@ -3,8 +3,10 @@ import type {
     WorkflowNode,
     WorkflowEdge,
     BaseNodeData,
+    ExecutionContext,
+    ValidationError,
+    ValidationWarning
 } from '../types';
-import type { ValidationError, ValidationWarning } from '../validation';
 
 /**
  * Output format types.
@@ -193,11 +195,31 @@ export const OutputNodeExtension: NodeExtension = {
      * @internal Execution is handled by OpenRouterExecutionAdapter.
      * Calling this directly will raise to prevent confusing placeholder data.
      */
-    async execute(): Promise<{ output: string; nextNodes: string[] }> {
-        throw new Error(
-            'OutputNodeExtension.execute is handled by OpenRouterExecutionAdapter. ' +
-                'Use the execution adapter to run workflows instead of calling extensions directly.'
-        );
+    async execute(
+        context: ExecutionContext,
+        node: WorkflowNode
+    ): Promise<{ output: string; nextNodes: string[] }> {
+        const data = node.data as OutputNodeData;
+
+        let content: string;
+
+        // Apply template interpolation if template is provided
+        if (data.template) {
+            content = interpolateTemplate(data.template, context.outputs);
+        } else {
+            content = context.input;
+        }
+
+        // Format output based on format type
+        const output = formatOutput(content, data.format, {
+            includeMetadata: data.includeMetadata,
+            nodeChain: context.nodeChain,
+        });
+
+        return {
+            output,
+            nextNodes: [], // Terminal node - no next nodes
+        };
     },
 
     /**

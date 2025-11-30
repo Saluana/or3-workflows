@@ -73,20 +73,33 @@ describe('StartNodeExtension', () => {
 
     describe('execute', () => {
         it('should pass through input', async () => {
+            const node = createNode('start', 'start-1', { label: 'Start' });
+            const edge = createEdge('start-1', 'agent-1');
             const context = {
-                node: createNode('start', 'start-1', { label: 'Start' }),
                 input: 'Hello world',
-                originalInput: 'Hello world',
                 attachments: [],
                 history: [],
                 outputs: {},
                 nodeChain: [],
                 signal: new AbortController().signal,
+                getNode: (id: string) => (id === 'start-1' ? node : undefined),
+                getOutgoingEdges: (nodeId: string, _sourceHandle?: string) =>
+                    nodeId === 'start-1' ? [edge] : [],
+                memory: {
+                    store: async () => {},
+                    query: async () => [],
+                    delete: async () => {},
+                    clear: async () => {},
+                },
             };
 
-            const result = await StartNodeExtension.execute!(context);
+            const result = await StartNodeExtension.execute!(
+                context as any,
+                node
+            );
 
             expect(result.output).toBe('Hello world');
+            expect(result.nextNodes).toContain('agent-1');
         });
     });
 });
@@ -380,24 +393,31 @@ describe('ToolNodeExtension', () => {
     });
 
     describe('execute', () => {
-        it('should return error if no toolId', async () => {
+        it('should throw error if no toolId', async () => {
+            const node = createNode('tool', 'tool-1', {
+                label: 'Tool',
+                toolId: '',
+            });
             const context = {
-                node: createNode('tool', 'tool-1', {
-                    label: 'Tool',
-                    toolId: '',
-                }),
                 input: 'test',
-                originalInput: 'test',
                 attachments: [],
                 history: [],
                 outputs: {},
                 nodeChain: [],
                 signal: new AbortController().signal,
+                getNode: (id: string) => (id === 'tool-1' ? node : undefined),
+                getOutgoingEdges: () => [],
+                memory: {
+                    store: async () => {},
+                    query: async () => [],
+                    delete: async () => {},
+                    clear: async () => {},
+                },
             };
 
-            const result = await ToolNodeExtension.execute!(context);
-
-            expect(result.error).toBe('No tool configured');
+            await expect(
+                ToolNodeExtension.execute!(context as any, node)
+            ).rejects.toThrow('No tool configured');
         });
     });
 });
@@ -651,7 +671,7 @@ describe('StarterKit', () => {
             expect(loopExt?.defaultData?.onMaxIterations).toBe('error');
         });
 
-        it('should configure subflow with storage options', () => {
+        it('should include subflow extension with subflow options', () => {
             const extensions = StarterKit.configure({
                 subflow: {
                     maxNestingDepth: 5,
@@ -660,7 +680,7 @@ describe('StarterKit', () => {
 
             const subflowExt = extensions.find((ext) => ext.name === 'subflow');
             expect(subflowExt).toBeDefined();
-            expect(subflowExt?.storage?.maxNestingDepth).toBe(5);
+            // Note: maxNestingDepth is handled by the execution adapter at runtime
         });
 
         it('should work with empty options', () => {

@@ -4,8 +4,10 @@ import type {
     WorkflowEdge,
     ExecutionContext,
     ToolNodeData,
+    LLMProvider,
+    NodeExecutionResult,
+    ValidationError,
 } from '../types';
-import type { ValidationError } from '../validation';
 
 /**
  * Tool Node Extension
@@ -68,43 +70,53 @@ export const ToolNodeExtension: NodeExtension = {
      *
      * @internal Called by the execution adapter or manually for custom runtimes.
      */
+    /**
+     * Execute the tool node.
+     */
     async execute(
-        context: ExecutionContext
-    ): Promise<{ output: string; error?: string; nextNodes: string[] }> {
-        const data = context.node.data as ToolNodeData;
+        context: ExecutionContext,
+        node: WorkflowNode,
+        _provider?: LLMProvider
+    ): Promise<NodeExecutionResult> {
+        const data = node.data as ToolNodeData;
 
         // Validate tool configuration
         if (!data.toolId) {
+            throw new Error('No tool configured');
+        }
+
+        // Custom handler passed via execution context takes precedence
+        if (context.onToolCall) {
+            const output = await context.onToolCall(data.toolId, {
+                input: context.input,
+                config: data.config,
+                node,
+            });
+            
+            const outgoingEdges = context.getOutgoingEdges(node.id, 'output');
             return {
-                output: '',
-                error: 'No tool configured',
-                nextNodes: [],
+                output,
+                nextNodes: outgoingEdges.map(e => e.target),
             };
         }
 
         const tool = toolRegistry.get(data.toolId);
         if (!tool) {
-            return {
-                output: '',
-                error: `Tool not registered: ${data.toolId}`,
-                nextNodes: [],
-            };
+            throw new Error(`Tool not registered: ${data.toolId}`);
         }
 
         try {
             const output = await tool.handler(context.input, data.config);
+            const outgoingEdges = context.getOutgoingEdges(node.id, 'output');
             return {
                 output,
-                nextNodes: [],
+                nextNodes: outgoingEdges.map(e => e.target),
             };
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
-            return {
-                output: '',
-                error: message,
-                nextNodes: [],
-            };
+            // We throw here so the adapter can handle error routing/retries
+            throw new Error(message);
         }
     },
 

@@ -9,33 +9,26 @@ import type {
     ExecutionOptions,
     ExecutionInput,
     Attachment,
-    ChatMessage,
     ModelCapabilities,
     InputModality,
-    MessageContentPart,
-    AgentNodeData,
-    RouterNodeData,
-    ParallelNodeData,
-    RouteDefinition,
-    BranchDefinition,
-    ToolNodeData,
-    MemoryNodeData,
-    WhileLoopNodeData,
+    NodeExtension,
+    LLMProvider,
     LoopState,
+    ExecutionContext,
 } from './types';
-import type { SubflowNodeData } from './subflow';
-import { validateInputMappings } from './subflow';
-import { toolRegistry } from './extensions/ToolNodeExtension';
 import {
-    type OutputNodeData,
-    interpolateTemplate,
-    formatOutput,
-} from './extensions/OutputNodeExtension';
-import {
-    InMemoryAdapter,
-    type MemoryAdapter,
-    type MemoryEntry,
-} from './memory';
+    AgentNodeExtension,
+    RouterNodeExtension,
+    ParallelNodeExtension,
+    ToolNodeExtension,
+    MemoryNodeExtension,
+    WhileLoopExtension,
+    SubflowExtension,
+    OutputNodeExtension,
+    StartNodeExtension,
+} from './extensions';
+import { OpenRouterLLMProvider } from './providers/OpenRouterLLMProvider';
+import { InMemoryAdapter, type MemoryAdapter } from './memory';
 import { ExecutionSession, type Session } from './session';
 import {
     classifyError,
@@ -51,18 +44,6 @@ import {
     generateHITLRequestId,
     getDefaultApprovalOptions,
 } from './hitl';
-import {
-    type CompactionConfig,
-    type CompactionResult,
-    type TokenCounter,
-    ApproximateTokenCounter,
-    DEFAULT_COMPACTION_CONFIG,
-    countMessageTokens,
-    splitMessagesForCompaction,
-    buildSummarizationPrompt,
-    createSummaryMessage,
-    calculateThreshold,
-} from './compaction';
 
 // ============================================================================
 // Constants
@@ -84,34 +65,11 @@ const MAX_ITERATIONS_MULTIPLIER = 3;
 // Types
 // ============================================================================
 
-/** Message format for OpenRouter API */
-interface ChatMessageParam {
-    role: 'system' | 'user' | 'assistant';
-    content: string | MessageContentPart[];
-}
-
-/** Streaming response chunk from OpenRouter */
-interface StreamChunk {
-    choices: Array<{
-        delta?: { content?: string };
-        message?: { content?: string | unknown[] };
-    }>;
-}
-
 /** Graph structure for workflow traversal */
 interface WorkflowGraph {
     nodeMap: Map<string, WorkflowNode>;
     children: Record<string, Array<{ nodeId: string; handleId?: string }>>;
     parents: Record<string, string[]>;
-}
-
-/** Result from a parallel branch execution */
-interface BranchResult {
-    nodeId: string;
-    branchId?: string;
-    branchLabel: string;
-    output: string;
-    nextNodes: string[];
 }
 
 /** Internal execution state */
@@ -126,6 +84,23 @@ interface InternalExecutionContext {
     session: Session;
     memory: MemoryAdapter;
 }
+
+// ============================================================================
+// Extension Registry
+// ============================================================================
+
+const extensionRegistry = new Map<string, NodeExtension>([
+    ['agent', AgentNodeExtension],
+    ['router', RouterNodeExtension],
+    ['parallel', ParallelNodeExtension],
+    ['tool', ToolNodeExtension],
+    ['memory', MemoryNodeExtension],
+    ['whileLoop', WhileLoopExtension],
+    ['subflow', SubflowExtension],
+    ['output', OutputNodeExtension],
+    ['start', StartNodeExtension],
+    ['condition', RouterNodeExtension], // Legacy alias
+]);
 
 // ============================================================================
 // OpenRouterExecutionAdapter
@@ -150,39 +125,35 @@ interface InternalExecutionContext {
  * ```
  */
 export class OpenRouterExecutionAdapter implements ExecutionAdapter {
-    private client: OpenRouter;
+    private provider: LLMProvider;
     private options: ExecutionOptions;
     private abortController: AbortController | null = null;
     private running = false;
-    private modelCapabilitiesCache: Map<string, ModelCapabilities | null> =
-        new Map();
     private memory: MemoryAdapter;
     private loopStates: Map<string, LoopState> = new Map();
-    private tokenCounter: TokenCounter;
 
     /**
      * Create a new OpenRouterExecutionAdapter.
      *
-     * @param client - An initialized OpenRouter SDK client instance.
-     *                 Must be created with a valid API key.
+     * @param clientOrProvider - An OpenRouter client OR an LLMProvider instance.
      * @param options - Optional execution configuration.
-     * @throws {Error} If client is null or undefined.
-     *
-     * @example
-     * ```typescript
-     * const client = new OpenRouter({ apiKey: 'your-api-key' });
-     * const adapter = new OpenRouterExecutionAdapter(client);
-     * ```
      */
-    constructor(client: OpenRouter, options: ExecutionOptions = {}) {
-        if (!client) {
+    constructor(
+        clientOrProvider: OpenRouter | LLMProvider,
+        options: ExecutionOptions = {}
+    ) {
+        if (!clientOrProvider) {
             throw new Error(
-                'OpenRouterExecutionAdapter requires an OpenRouter client instance. ' +
-                    'Create one with: new OpenRouter({ apiKey: "your-api-key" })'
+                'OpenRouterExecutionAdapter requires an OpenRouter client or LLMProvider.'
             );
         }
 
-        this.client = client;
+        if (this.isLLMProvider(clientOrProvider)) {
+            this.provider = clientOrProvider;
+        } else {
+            this.provider = new OpenRouterLLMProvider(clientOrProvider);
+        }
+
         this.options = {
             defaultModel: DEFAULT_MODEL,
             maxRetries: DEFAULT_MAX_RETRIES,
@@ -190,8 +161,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             ...options,
         };
         this.memory = this.options.memory || new InMemoryAdapter();
-        this.tokenCounter =
-            this.options.tokenCounter || new ApproximateTokenCounter();
+    }
+
+    private isLLMProvider(obj: any): obj is LLMProvider {
+        return 'chat' in obj && typeof obj.chat === 'function';
     }
 
     // ==========================================================================
@@ -420,112 +393,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
     /**
      * Get model capabilities for a given model ID.
-     *
-     * Uses static capability detection based on known model patterns.
-     * The OpenRouter SDK does not expose a models API directly, so we infer
-     * capabilities from model naming conventions.
-     *
-     * @param modelId - The model identifier (e.g., 'openai/gpt-4o-mini').
-     * @returns Model capabilities or null if unknown.
      */
     async getModelCapabilities(
         modelId: string
     ): Promise<ModelCapabilities | null> {
-        // Check cache first
-        if (this.modelCapabilitiesCache.has(modelId)) {
-            return this.modelCapabilitiesCache.get(modelId) || null;
-        }
-
-        // Infer capabilities from model naming conventions
-        const capabilities = this.inferModelCapabilities(modelId);
-        this.modelCapabilitiesCache.set(modelId, capabilities);
-        return capabilities;
-    }
-
-    /**
-     * Infer model capabilities from model ID patterns.
-     * @internal
-     */
-    private inferModelCapabilities(modelId: string): ModelCapabilities {
-        const lowerModelId = modelId.toLowerCase();
-
-        // Default capabilities
-        const capabilities: ModelCapabilities = {
-            id: modelId,
-            name: modelId.split('/').pop() || modelId,
-            inputModalities: ['text'],
-            outputModalities: ['text'],
-            contextLength: 4096,
-            supportedParameters: ['temperature', 'max_tokens', 'top_p'],
-        };
-
-        // Vision models (GPT-4V, Claude 3, Gemini with vision)
-        const visionPatterns = [
-            'gpt-4o',
-            'gpt-4-vision',
-            'gpt-4-turbo',
-            'claude-3',
-            'claude-3.5',
-            'gemini-pro-vision',
-            'gemini-1.5',
-            'gemini-2',
-            'llava',
-            'vision',
-        ];
-        if (visionPatterns.some((p) => lowerModelId.includes(p))) {
-            capabilities.inputModalities = ['text', 'image'];
-        }
-
-        // Audio models
-        const audioPatterns = ['whisper', 'audio', 'gpt-4o-audio'];
-        if (audioPatterns.some((p) => lowerModelId.includes(p))) {
-            capabilities.inputModalities = [
-                ...capabilities.inputModalities,
-                'audio',
-            ];
-        }
-
-        // Large context models
-        const largeContextPatterns: Array<{
-            pattern: string;
-            context: number;
-        }> = [
-            { pattern: 'claude-3', context: 200000 },
-            { pattern: 'claude-2.1', context: 200000 },
-            { pattern: 'gpt-4-turbo', context: 128000 },
-            { pattern: 'gpt-4o', context: 128000 },
-            { pattern: 'gemini-1.5-pro', context: 1000000 },
-            { pattern: 'gemini-1.5-flash', context: 1000000 },
-            { pattern: 'gemini-2', context: 1000000 },
-            { pattern: 'mistral-large', context: 128000 },
-            { pattern: 'command-r', context: 128000 },
-        ];
-
-        for (const { pattern, context } of largeContextPatterns) {
-            if (lowerModelId.includes(pattern)) {
-                capabilities.contextLength = context;
-                break;
-            }
-        }
-
-        // Image generation models
-        const imageGenPatterns = [
-            'dall-e',
-            'stable-diffusion',
-            'midjourney',
-            'imagen',
-        ];
-        if (imageGenPatterns.some((p) => lowerModelId.includes(p))) {
-            capabilities.outputModalities = ['image'];
-        }
-
-        // Embedding models
-        const embeddingPatterns = ['embed', 'embedding', 'text-embedding'];
-        if (embeddingPatterns.some((p) => lowerModelId.includes(p))) {
-            capabilities.outputModalities = ['embeddings'];
-        }
-
-        return capabilities;
+        return this.provider.getModelCapabilities(modelId);
     }
 
     /**
@@ -596,129 +468,183 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         const node = graph.nodeMap.get(nodeId);
         if (!node) return { output: '', nextNodes: [] };
 
-        const childEdges = graph.children[nodeId] || [];
-
         callbacks.onNodeStart(nodeId);
 
-        let output = '';
-        let nextNodes: string[] = [];
-
-        switch (node.type) {
-            case 'start':
-                output = context.currentInput;
-                nextNodes = childEdges.map((c) => c.nodeId);
-                break;
-
-            case 'agent':
-                output = await this.executeAgentNode(
-                    node,
-                    context,
-                    graph.nodeMap,
-                    callbacks
-                );
-                nextNodes = childEdges.map((c) => c.nodeId);
-                context.outputs[nodeId] = output;
-                context.nodeChain.push(nodeId);
-                context.currentInput = output;
-                context.session.addMessage({
-                    role: 'assistant',
-                    content: output,
-                });
-                break;
-
-            case 'tool':
-                output = await this.executeToolNode(node, context);
-                nextNodes = childEdges.map((c) => c.nodeId);
-                context.outputs[nodeId] = output;
-                context.nodeChain.push(nodeId);
-                context.currentInput = output;
-                break;
-
-            case 'memory':
-                output = await this.executeMemoryNode(node, context);
-                nextNodes = childEdges.map((c) => c.nodeId);
-                context.outputs[nodeId] = output;
-                context.nodeChain.push(nodeId);
-                context.currentInput = output;
-                break;
-
-            case 'whileLoop':
-                const loopResult = await this.executeWhileLoopNode(
-                    node,
-                    context,
-                    graph,
-                    edges,
-                    callbacks
-                );
-                output = loopResult.output;
-                nextNodes = loopResult.nextNodes;
-                context.outputs[nodeId] = output;
-                context.nodeChain.push(nodeId);
-                context.currentInput = output;
-                break;
-
-            case 'router':
-            case 'condition': // Support legacy name
-                const routeResult = await this.executeRouterNode(
-                    node,
-                    childEdges,
-                    context,
-                    graph.nodeMap,
-                    edges,
-                    callbacks
-                );
-                output = `Routed to: ${routeResult.selectedRoute}`;
-                nextNodes = routeResult.nextNodes;
-                break;
-
-            case 'parallel':
-                const parallelResult = await this.executeParallelNode(
-                    node,
-                    childEdges,
-                    context,
-                    graph,
-                    edges,
-                    callbacks
-                );
-                output = parallelResult.output;
-                nextNodes = parallelResult.nextNodes;
-                context.session.addMessage({
-                    role: 'assistant',
-                    content: output,
-                });
-                break;
-
-            case 'subflow':
-                const subflowResult = await this.executeSubflowNode(
-                    node,
-                    context,
-                    callbacks
-                );
-                output = subflowResult.output;
-                nextNodes = subflowResult.success
-                    ? childEdges.map((c) => c.nodeId)
-                    : childEdges
-                          .filter((c) => c.handleId === 'error')
-                          .map((c) => c.nodeId);
-                context.outputs[nodeId] = output;
-                context.nodeChain.push(nodeId);
-                context.currentInput = output;
-                break;
-
-            case 'output':
-                output = await this.executeOutputNode(node, context);
-                nextNodes = []; // Terminal node - no next nodes
-                context.outputs[nodeId] = output;
-                context.nodeChain.push(nodeId);
-                context.currentInput = output;
-                break;
-
-            default:
-                nextNodes = childEdges.map((c) => c.nodeId);
+        // Look up extension
+        const extension = extensionRegistry.get(node.type);
+        if (!extension) {
+            throw new Error(`No extension found for node type: ${node.type}`);
         }
 
-        callbacks.onNodeFinish(nodeId, output);
-        return { output, nextNodes };
+        if (!extension.execute) {
+            throw new Error(
+                `Extension for ${node.type} does not implement execute()`
+            );
+        }
+
+        // Construct ExecutionContext for extension
+        const executionContext: ExecutionContext = {
+            input: context.currentInput,
+            history: context.session.messages,
+            memory: this.memory,
+            attachments: context.attachments,
+            outputs: context.outputs,
+            nodeChain: context.nodeChain,
+            signal: context.signal,
+            sessionId: context.session.id,
+            customEvaluators: this.options.customEvaluators,
+
+            onToken: (token: string) => {
+                callbacks.onToken(nodeId, token);
+            },
+
+            getNode: (id: string) => graph.nodeMap.get(id),
+
+            getOutgoingEdges: (id: string, sourceHandle?: string) => {
+                const outgoing = edges.filter((e) => e.source === id);
+                if (sourceHandle) {
+                    // If looking for a specific handle, match edges with that handle
+                    // OR edges without a handle (which are considered default/output)
+                    return outgoing.filter(
+                        (e) =>
+                            e.sourceHandle === sourceHandle || !e.sourceHandle
+                    );
+                }
+                return outgoing;
+            },
+
+            onToolCall: this.options.onToolCall,
+
+            executeSubgraph: async (
+                startNodeId: string,
+                input: string,
+                options?: { nodeOverrides?: Record<string, any> }
+            ) => {
+                // Create isolated context for subgraph
+                const subContext: InternalExecutionContext = {
+                    ...context,
+                    currentInput: input,
+                    // inherit outputs/history/memory?
+                    // Usually subgraphs share context but operate on new input.
+                };
+
+                // Handle node overrides for subgraph execution
+                let subgraph = graph;
+                if (options?.nodeOverrides) {
+                    const modifiedNodeMap = new Map(graph.nodeMap);
+                    for (const [id, overrides] of Object.entries(
+                        options.nodeOverrides
+                    )) {
+                        const original = modifiedNodeMap.get(id);
+                        if (original) {
+                            modifiedNodeMap.set(id, {
+                                ...original,
+                                data: { ...original.data, ...overrides },
+                            });
+                        }
+                    }
+                    subgraph = { ...graph, nodeMap: modifiedNodeMap };
+                }
+
+                // Find the parent node that is calling executeSubgraph
+                // We need to mark parent nodes as "executed" so their children can run
+                // Start node is available via subgraph.nodeMap.get(startNodeId) if needed
+                const preExecuted = new Set<string>();
+
+                // Mark parent nodes of startNodeId as executed
+                const parents = subgraph.parents[startNodeId] || [];
+                for (const parentId of parents) {
+                    preExecuted.add(parentId);
+                }
+
+                const result = await this.executeSubgraph(
+                    startNodeId,
+                    subContext,
+                    subgraph,
+                    edges,
+                    callbacks,
+                    preExecuted
+                );
+                return { output: result.output };
+            },
+
+            executeWorkflow: async (
+                wf: WorkflowData,
+                input: ExecutionInput,
+                options?: Partial<ExecutionOptions>
+            ) => {
+                // Execute sub-workflow
+                // We need to instantiate a new adapter or reuse current?
+                // Reusing current is better to share state/cache/provider
+                // But options might differ.
+                // Creating a new adapter instance allows separate configuration.
+                // But we want to share memory if configured.
+
+                // For now, let's call `this.execute` recursively?
+                // `this.execute` resets state (abortController, etc) which breaks parent execution if running on same instance!
+                // `this.execute` calls `this.abortController = new AbortController()`.
+                // So we MUST create a NEW adapter instance or refactor `execute` to not reset if it's a child.
+                // Creating a new adapter is safer.
+
+                // NOTE: provider is shared.
+                // BUT provider in this class is LLMProvider. The constructor expects OpenRouter | LLMProvider.
+                // So we can pass `this.provider`.
+
+                const subAdapter = new OpenRouterExecutionAdapter(
+                    this.provider,
+                    {
+                        ...this.options,
+                        ...options,
+                        // Pass subflow registry
+                        subflowRegistry: this.options.subflowRegistry,
+                    }
+                );
+
+                return subAdapter.execute(wf, input, callbacks); // Use same callbacks?
+                // SubflowExtension wraps callbacks to namespace them.
+                // But `execute` signature takes `callbacks`.
+                // So yes, passing callbacks is correct.
+            },
+        };
+
+        const result = await extension.execute(
+            executionContext,
+            node,
+            this.provider
+        );
+
+        // Handle metadata/side-effects
+        if (result.metadata?.selectedRoute) {
+            if (callbacks.onRouteSelected) {
+                callbacks.onRouteSelected(
+                    nodeId,
+                    result.metadata.selectedRoute
+                );
+            }
+        }
+
+        // Update context
+        context.outputs[nodeId] = result.output;
+        if (!context.nodeChain.includes(nodeId)) {
+            context.nodeChain.push(nodeId);
+        }
+        context.currentInput = result.output;
+
+        // Add assistant message for certain node types?
+        // AgentNode logic was: "context.session.addMessage({ role: 'assistant', content: output });"
+        // Should we move this to extension or keep it here?
+        // Ideally extension manages history?
+        // But `session` is internal.
+        // If `node.type === 'agent'`, add message?
+        if (node.type === 'agent') {
+            context.session.addMessage({
+                role: 'assistant',
+                content: result.output,
+            });
+        }
+
+        callbacks.onNodeFinish(nodeId, result.output);
+        return { output: result.output, nextNodes: result.nextNodes };
     }
 
     /**
@@ -1179,626 +1105,6 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         return Promise.race(promises);
     }
 
-    // ==========================================================================
-    // Context Compaction
-    // ==========================================================================
-
-    /**
-     * Compact conversation context if it exceeds the threshold.
-     * Uses the configured compaction strategy (summarize, truncate, or custom).
-     */
-    private async compactContextIfNeeded(
-        messages: ChatMessage[],
-        model: string,
-        callbacks: ExecutionCallbacks
-    ): Promise<ChatMessage[]> {
-        // If no compaction config, return messages unchanged
-        if (!this.options.compaction) {
-            return messages;
-        }
-
-        const config = {
-            ...DEFAULT_COMPACTION_CONFIG,
-            ...this.options.compaction,
-        };
-
-        // Calculate current token count
-        const tokensBefore = countMessageTokens(messages, this.tokenCounter);
-
-        // Calculate threshold
-        const threshold = calculateThreshold(config, model, this.tokenCounter);
-
-        // Check if compaction is needed
-        if (tokensBefore < threshold) {
-            return messages;
-        }
-
-        // Split messages into preserve and compact sections
-        const { toPreserve, toCompact } = splitMessagesForCompaction(
-            messages,
-            config.preserveRecent
-        );
-
-        // Nothing to compact - already at minimum
-        if (toCompact.length === 0) {
-            return messages;
-        }
-
-        let compactedMessages: ChatMessage[];
-        let summary: string | undefined;
-
-        switch (config.strategy) {
-            case 'summarize':
-                summary = await this.summarizeMessages(
-                    toCompact,
-                    config,
-                    model
-                );
-                compactedMessages = [
-                    createSummaryMessage(summary),
-                    ...toPreserve,
-                ];
-                break;
-
-            case 'truncate':
-                // Just drop old messages
-                compactedMessages = toPreserve;
-                break;
-
-            case 'custom':
-                if (!config.customCompactor) {
-                    throw new Error(
-                        'Custom compaction strategy requires customCompactor function'
-                    );
-                }
-                compactedMessages = await config.customCompactor(
-                    messages,
-                    threshold
-                );
-                break;
-
-            default:
-                compactedMessages = messages;
-        }
-
-        const tokensAfter = countMessageTokens(
-            compactedMessages,
-            this.tokenCounter
-        );
-
-        // Create result for callback
-        const result: CompactionResult = {
-            compacted: true,
-            messages: compactedMessages,
-            tokensBefore,
-            tokensAfter,
-            messagesCompacted: toCompact.length,
-            summary,
-        };
-
-        // Notify via callback if provided
-        if (callbacks.onContextCompacted) {
-            callbacks.onContextCompacted(result);
-        }
-
-        return compactedMessages;
-    }
-
-    /**
-     * Summarize a list of messages using the LLM.
-     */
-    private async summarizeMessages(
-        messages: ChatMessage[],
-        config: CompactionConfig,
-        currentModel: string
-    ): Promise<string> {
-        const model = config.summarizeModel || currentModel;
-        const prompt = buildSummarizationPrompt(messages, config);
-
-        const response = await this.client.chat.send({
-            model,
-            messages: [
-                {
-                    role: 'system',
-                    content:
-                        'You are a conversation summarizer. Be concise but preserve key information, decisions, and context.',
-                },
-                { role: 'user', content: prompt },
-            ],
-        });
-
-        const choice = response.choices?.[0];
-        if (!choice) {
-            return '';
-        }
-
-        // Handle different response formats
-        const message = choice.message;
-        if (typeof message?.content === 'string') {
-            return message.content;
-        }
-
-        // If content is an array (multimodal), extract text parts
-        if (Array.isArray(message?.content)) {
-            return message.content
-                .filter(
-                    (part: unknown) =>
-                        typeof part === 'object' &&
-                        part !== null &&
-                        (part as Record<string, unknown>).type === 'text'
-                )
-                .map((part: unknown) => (part as { text: string }).text)
-                .join('');
-        }
-
-        return '';
-    }
-
-    /**
-     * Execute an agent node by calling the LLM.
-     */
-    private async executeAgentNode(
-        node: WorkflowNode,
-        context: InternalExecutionContext,
-        nodeMap: Map<string, WorkflowNode>,
-        callbacks: ExecutionCallbacks
-    ): Promise<string> {
-        const data = node.data as AgentNodeData;
-        const model = data.model || this.options.defaultModel || DEFAULT_MODEL;
-        const systemPrompt =
-            data.prompt || `You are a helpful assistant named ${data.label}.`;
-
-        // Build context from previous nodes
-        let contextInfo = '';
-        if (context.nodeChain.length > 0) {
-            const previousOutputs = context.nodeChain
-                .filter((id) => context.outputs[id])
-                .map((id) => {
-                    const prevNode = nodeMap.get(id);
-                    return `[${prevNode?.data.label || id}]: ${
-                        context.outputs[id]
-                    }`;
-                });
-
-            if (previousOutputs.length > 0) {
-                contextInfo = `\n\nContext from previous agents:\n${previousOutputs.join(
-                    '\n\n'
-                )}`;
-            }
-        }
-
-        // Build message content (with multimodal support)
-        const userContent = await this.buildMessageContent(
-            context.currentInput,
-            context.attachments,
-            model
-        );
-
-        // Build session messages for context
-        let sessionMessages: ChatMessage[] = context.session.messages.map(
-            (h) => ({
-                role: h.role,
-                content: h.content,
-            })
-        );
-
-        // Apply context compaction if configured
-        if (this.options.compaction && sessionMessages.length > 0) {
-            sessionMessages = await this.compactContextIfNeeded(
-                sessionMessages,
-                model,
-                callbacks
-            );
-        }
-
-        // Build final messages
-        const chatMessages: ChatMessageParam[] = [
-            { role: 'system', content: systemPrompt + contextInfo },
-            ...sessionMessages.map((m) => ({
-                role: m.role,
-                content: m.content,
-            })),
-            { role: 'user', content: userContent },
-        ];
-
-        // Stream the response
-        const stream = (await this.client.chat.send({
-            model,
-            messages: chatMessages as any,
-            stream: true,
-        })) as AsyncIterable<StreamChunk>;
-
-        let output = '';
-        for await (const chunk of stream) {
-            if (context.signal.aborted) {
-                throw new Error('Workflow cancelled');
-            }
-            const content = chunk.choices[0]?.delta?.content;
-            if (content) {
-                output += content;
-                callbacks.onToken(node.id, content);
-            }
-        }
-
-        return output;
-    }
-
-    /**
-     * Execute a tool node using the registered tool handler.
-     */
-    private async executeToolNode(
-        node: WorkflowNode,
-        context: InternalExecutionContext
-    ): Promise<string> {
-        const data = node.data as ToolNodeData;
-        if (!data.toolId) {
-            throw new Error('Tool node requires a tool to run');
-        }
-
-        // Custom handler passed via execution options takes precedence
-        if (this.options.onToolCall) {
-            return await this.options.onToolCall(data.toolId, {
-                input: context.currentInput,
-                config: data.config,
-                node,
-            });
-        }
-
-        const tool = toolRegistry.get(data.toolId);
-        if (!tool) {
-            throw new Error(`Tool not registered: ${data.toolId}`);
-        }
-
-        return tool.handler(context.currentInput, data.config);
-    }
-
-    /**
-     * Execute a memory node using the configured memory adapter.
-     */
-    private async executeMemoryNode(
-        node: WorkflowNode,
-        context: InternalExecutionContext
-    ): Promise<string> {
-        const data = node.data as MemoryNodeData;
-        const operation = data.operation || 'query';
-        const content = data.text ?? context.currentInput;
-
-        if (operation === 'store') {
-            const source =
-                (data.metadata?.[
-                    'source'
-                ] as MemoryEntry['metadata']['source']) || 'agent';
-            const entry: MemoryEntry = {
-                id:
-                    typeof crypto !== 'undefined' &&
-                    typeof crypto.randomUUID === 'function'
-                        ? crypto.randomUUID()
-                        : `mem-${Date.now()}`,
-                content,
-                metadata: {
-                    timestamp: new Date().toISOString(),
-                    source,
-                    nodeId: node.id,
-                    sessionId: context.session.id,
-                    ...data.metadata,
-                },
-            };
-
-            await context.memory.store(entry);
-            return content;
-        }
-
-        const results = await context.memory.query({
-            text: data.text || context.currentInput,
-            limit: data.limit,
-            filter: data.filter,
-            sessionId: context.session.id,
-        });
-
-        if (!results.length) {
-            return data.fallback || 'No memories found.';
-        }
-
-        return results
-            .map((r) => {
-                const time = r.metadata.timestamp
-                    ? `[${r.metadata.timestamp}] `
-                    : '';
-                const label = r.metadata.nodeId
-                    ? `[${r.metadata.nodeId}] `
-                    : '';
-                return `${time}${label}${r.content}`;
-            })
-            .join('\n');
-    }
-
-    /**
-     * Execute a subflow node by running a nested workflow.
-     */
-    private async executeSubflowNode(
-        node: WorkflowNode,
-        context: InternalExecutionContext,
-        callbacks: ExecutionCallbacks
-    ): Promise<{ output: string; success: boolean }> {
-        const data = node.data as SubflowNodeData;
-        const registry = this.options.subflowRegistry;
-
-        // Check if registry is available
-        if (!registry) {
-            throw new Error(
-                `Subflow node "${node.id}" requires a subflowRegistry in ExecutionOptions`
-            );
-        }
-
-        // Get subflow definition
-        const subflow = registry.get(data.subflowId);
-        if (!subflow) {
-            throw new Error(
-                `Subflow "${data.subflowId}" not found in registry`
-            );
-        }
-
-        // Check nesting depth
-        const maxDepth = this.options.maxSubflowDepth ?? 10;
-        const currentDepth = (context as any).__subflowDepth ?? 0;
-        if (currentDepth >= maxDepth) {
-            throw new Error(
-                `Maximum subflow nesting depth (${maxDepth}) exceeded`
-            );
-        }
-
-        // Validate input mappings
-        const mappingValidation = validateInputMappings(
-            subflow,
-            data.inputMappings || {}
-        );
-        if (!mappingValidation.valid) {
-            throw new Error(
-                `Missing required inputs for subflow "${
-                    data.subflowId
-                }": ${mappingValidation.missing.join(', ')}`
-            );
-        }
-
-        // Resolve input values
-        const resolvedInputs: Record<string, unknown> = {};
-        for (const input of subflow.inputs) {
-            const mapping = data.inputMappings?.[input.id];
-            if (mapping !== undefined) {
-                // Handle expression syntax {{...}}
-                if (
-                    typeof mapping === 'string' &&
-                    mapping.startsWith('{{') &&
-                    mapping.endsWith('}}')
-                ) {
-                    const expr = mapping.slice(2, -2).trim();
-                    // Simple expression resolution
-                    if (expr === 'output' || expr === 'input') {
-                        resolvedInputs[input.id] = context.currentInput;
-                    } else if (expr.startsWith('outputs.')) {
-                        const nodeId = expr.slice(8);
-                        resolvedInputs[input.id] =
-                            context.outputs[nodeId] ?? '';
-                    } else if (expr.startsWith('context.')) {
-                        const key = expr.slice(8);
-                        resolvedInputs[input.id] = (context as any)[key] ?? '';
-                    } else {
-                        resolvedInputs[input.id] =
-                            context.outputs[expr] ?? mapping;
-                    }
-                } else {
-                    resolvedInputs[input.id] = mapping;
-                }
-            } else if (input.default !== undefined) {
-                resolvedInputs[input.id] = input.default;
-            }
-        }
-
-        // Prepare subflow input
-        const primaryInput = subflow.inputs[0];
-        const subflowInput = primaryInput
-            ? String(resolvedInputs[primaryInput.id] ?? context.currentInput)
-            : context.currentInput;
-
-        try {
-            // Execute subflow with isolated or shared session
-            const subflowResult = await this.execute(
-                subflow.workflow,
-                {
-                    text: subflowInput,
-                    attachments: context.attachments,
-                },
-                {
-                    ...callbacks,
-                    // Wrap callbacks to indicate subflow context
-                    onNodeStart: (nodeId) => {
-                        callbacks.onNodeStart(`${node.id}/${nodeId}`);
-                    },
-                    onNodeFinish: (nodeId, output) => {
-                        callbacks.onNodeFinish(`${node.id}/${nodeId}`, output);
-                    },
-                    onNodeError: (nodeId, error) => {
-                        callbacks.onNodeError(`${node.id}/${nodeId}`, error);
-                    },
-                }
-            );
-
-            // Get output from subflow
-            const output = subflowResult.output ?? '';
-            return { output, success: true };
-        } catch (error) {
-            const message =
-                error instanceof Error ? error.message : String(error);
-            return { output: `Subflow error: ${message}`, success: false };
-        }
-    }
-
-    /**
-     * Execute an output node - terminal node that formats the final result.
-     */
-    private async executeOutputNode(
-        node: WorkflowNode,
-        context: InternalExecutionContext
-    ): Promise<string> {
-        const data = node.data as OutputNodeData;
-
-        let content: string;
-
-        // Apply template interpolation if template is provided
-        if (data.template) {
-            content = interpolateTemplate(data.template, context.outputs);
-        } else {
-            content = context.currentInput;
-        }
-
-        // Format output based on format type
-        const output = formatOutput(content, data.format, {
-            includeMetadata: data.includeMetadata,
-            nodeChain: context.nodeChain,
-        });
-
-        return output;
-    }
-
-    /**
-     * Execute a while loop node with loop state tracking and condition evaluation.
-     */
-    private async executeWhileLoopNode(
-        node: WorkflowNode,
-        context: InternalExecutionContext,
-        graph: WorkflowGraph,
-        edges: WorkflowEdge[],
-        callbacks: ExecutionCallbacks
-    ): Promise<{ output: string; nextNodes: string[] }> {
-        const data = node.data as WhileLoopNodeData;
-        const bodyEdge = edges.find(
-            (e) => e.source === node.id && e.sourceHandle === 'body'
-        );
-        const exitEdge = edges.find(
-            (e) => e.source === node.id && e.sourceHandle === 'done'
-        );
-
-        let loopState = this.loopStates.get(node.id);
-        if (!loopState) {
-            loopState = {
-                iteration: 0,
-                outputs: [],
-                lastOutput: null,
-                isActive: true,
-            };
-            this.loopStates.set(node.id, loopState);
-        }
-
-        if (loopState.iteration >= data.maxIterations) {
-            this.loopStates.delete(node.id);
-            const message = `While loop reached max iterations (${data.maxIterations})`;
-            if (data.onMaxIterations === 'error') {
-                throw new Error(message);
-            }
-            if (data.onMaxIterations === 'warning') {
-                callbacks.onNodeError(node.id, new Error(message));
-            }
-            return {
-                output: loopState.lastOutput || context.currentInput,
-                nextNodes: exitEdge ? [exitEdge.target] : [],
-            };
-        }
-
-        const shouldContinue = await this.evaluateLoopCondition(
-            data,
-            context,
-            loopState
-        );
-
-        if (shouldContinue) {
-            if (!bodyEdge) {
-                throw new Error('While loop body is not connected');
-            }
-
-            const bodyResult = await this.executeSubgraph(
-                bodyEdge.target,
-                context,
-                graph,
-                edges,
-                callbacks,
-                new Set([node.id])
-            );
-
-            loopState.outputs.push(bodyResult.output);
-            loopState.lastOutput = bodyResult.output;
-            loopState.iteration += 1;
-            context.currentInput = bodyResult.output;
-
-            return {
-                output: bodyResult.output,
-                nextNodes: [node.id], // Re-queue loop node
-            };
-        }
-
-        loopState.totalIterations = loopState.iteration;
-        this.loopStates.delete(node.id);
-
-        return {
-            output: loopState.lastOutput || context.currentInput,
-            nextNodes: exitEdge ? [exitEdge.target] : [],
-        };
-    }
-
-    private async evaluateLoopCondition(
-        data: WhileLoopNodeData,
-        context: InternalExecutionContext,
-        loopState: LoopState
-    ): Promise<boolean> {
-        if (loopState.iteration === 0) {
-            return true;
-        }
-
-        if (
-            data.customEvaluator &&
-            this.options.customEvaluators?.[data.customEvaluator]
-        ) {
-            return await this.options.customEvaluators[data.customEvaluator](
-                context,
-                loopState
-            );
-        }
-
-        const model =
-            data.conditionModel || this.options.defaultModel || DEFAULT_MODEL;
-        const prompt = `${data.conditionPrompt}
-
-Current iteration: ${loopState.iteration}
-Last output: ${loopState.lastOutput}
-${
-    loopState.outputs.length > 1
-        ? `Previous outputs: ${loopState.outputs.length} iterations`
-        : ''
-}
-
-Respond with only "continue" or "done".`;
-
-        const response = await this.client.chat.send({
-            model,
-            messages: [
-                {
-                    role: 'system',
-                    content:
-                        'You are a loop controller. Respond with only "continue" or "done".',
-                },
-                { role: 'user', content: prompt },
-            ],
-        });
-
-        const decision =
-            (response as any)?.choices?.[0]?.message?.content ||
-            (response as any)?.choices?.[0]?.delta?.content ||
-            '';
-        const normalized = (typeof decision === 'string' ? decision : '')
-            .toLowerCase()
-            .trim();
-        return normalized === 'continue';
-    }
-
     /**
      * Execute a subgraph starting from a node ID, returning the last output.
      */
@@ -1857,330 +1163,6 @@ Respond with only "continue" or "done".`;
         return { output, nextNodes };
     }
 
-    /**
-     * Execute a router node that classifies input and selects a branch.
-     */
-    private async executeRouterNode(
-        node: WorkflowNode,
-        childEdges: Array<{ nodeId: string; handleId?: string }>,
-        context: InternalExecutionContext,
-        nodeMap: Map<string, WorkflowNode>,
-        edges: WorkflowEdge[],
-        callbacks: ExecutionCallbacks
-    ): Promise<{ selectedRoute: string; nextNodes: string[] }> {
-        const data = node.data as RouterNodeData;
-        const configuredRoutes = data.routes || [];
-
-        // Build route options
-        const routeOptions = childEdges.map((child, index) => {
-            const childNode = nodeMap.get(child.nodeId);
-            const edge = edges.find(
-                (e) => e.source === node.id && e.target === child.nodeId
-            );
-            const edgeLabel = edge?.label;
-            const configuredRoute = configuredRoutes.find(
-                (r: RouteDefinition) => r.id === child.handleId
-            );
-
-            return {
-                index,
-                nodeId: child.nodeId,
-                label:
-                    configuredRoute?.label ||
-                    edgeLabel ||
-                    childNode?.data.label ||
-                    `Option ${index + 1}`,
-                description: childNode?.data.label || '',
-                handleId: child.handleId,
-            };
-        });
-
-        const routerModel =
-            data.model || this.options.defaultModel || DEFAULT_MODEL;
-        const customInstructions = data.prompt || '';
-
-        // Build classification prompt
-        const routeDescriptions = routeOptions
-            .map((opt, i) => {
-                const desc =
-                    opt.description && opt.description !== opt.label
-                        ? ` (connects to: ${opt.description})`
-                        : '';
-                return `${i + 1}. ${opt.label}${desc}`;
-            })
-            .join('\n');
-
-        const classificationPrompt = `You are a routing assistant. Based on the user's message, determine which route to take.
-
-Available routes:
-${routeDescriptions}
-${customInstructions ? `\nRouting instructions:\n${customInstructions}` : ''}
-
-User message: "${context.currentInput}"
-
-Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do not explain.`;
-
-        const routerMessages: ChatMessageParam[] = [
-            {
-                role: 'system',
-                content:
-                    'You are a routing classifier. Respond only with a number.',
-            },
-            { role: 'user', content: classificationPrompt },
-        ];
-
-        const response = await this.client.chat.send({
-            model: routerModel,
-            messages: routerMessages as any,
-        });
-
-        const messageContent = response.choices[0]?.message?.content;
-        const choice =
-            (typeof messageContent === 'string'
-                ? messageContent.trim()
-                : '1') || '1';
-        const selectedIndex = parseInt(choice, 10) - 1;
-
-        let selectedRoute: string;
-        let nextNodes: string[];
-
-        if (selectedIndex >= 0 && selectedIndex < routeOptions.length) {
-            const selected = routeOptions[selectedIndex]!;
-            selectedRoute = selected.label;
-            nextNodes = [selected.nodeId];
-
-            if (callbacks.onRouteSelected && selected.handleId) {
-                callbacks.onRouteSelected(node.id, selected.handleId);
-            }
-        } else {
-            // Default to first route
-            selectedRoute = routeOptions[0]?.label || 'default';
-            nextNodes =
-                routeOptions.length > 0 ? [routeOptions[0]!.nodeId] : [];
-        }
-
-        return { selectedRoute, nextNodes };
-    }
-
-    /**
-     * Execute a parallel node that runs multiple branches concurrently.
-     */
-    private async executeParallelNode(
-        node: WorkflowNode,
-        childEdges: Array<{ nodeId: string; handleId?: string }>,
-        context: InternalExecutionContext,
-        graph: WorkflowGraph,
-        edges: WorkflowEdge[],
-        callbacks: ExecutionCallbacks
-    ): Promise<{ output: string; nextNodes: string[] }> {
-        const data = node.data as ParallelNodeData;
-        const branches = data.branches || [];
-
-        // Execute all branches in parallel
-        const promises = childEdges.map(
-            async (child): Promise<BranchResult> => {
-                const branchConfig = branches.find(
-                    (b: BranchDefinition) => b.id === child.handleId
-                );
-
-                // Create isolated context for this branch
-                const branchContext: InternalExecutionContext = {
-                    ...context,
-                    outputs: { ...context.outputs },
-                    nodeChain: [...context.nodeChain],
-                };
-
-                // Create modified node map with branch-specific settings
-                const branchNodeMap = new Map(graph.nodeMap);
-                const childNode = branchNodeMap.get(child.nodeId);
-                if (childNode && branchConfig) {
-                    const modifiedNode = {
-                        ...childNode,
-                        data: {
-                            ...childNode.data,
-                            ...(branchConfig.model && {
-                                model: branchConfig.model,
-                            }),
-                            ...(branchConfig.prompt && {
-                                prompt: branchConfig.prompt,
-                            }),
-                        },
-                    };
-                    branchNodeMap.set(child.nodeId, modifiedNode);
-                }
-
-                // Execute the branch node
-                const result = await this.executeNodeWithErrorHandling(
-                    child.nodeId,
-                    branchContext,
-                    { ...graph, nodeMap: branchNodeMap },
-                    edges,
-                    callbacks
-                );
-
-                return {
-                    nodeId: child.nodeId,
-                    branchId: child.handleId,
-                    branchLabel: branchConfig?.label || child.nodeId,
-                    output: result.output,
-                    nextNodes: result.nextNodes,
-                };
-            }
-        );
-
-        // Use Promise.allSettled for partial failure handling
-        const settledResults = await Promise.allSettled(promises);
-
-        // Collect outputs and errors
-        const outputs: Record<string, string> = {};
-        const allNextNodes: string[] = [];
-        const errors: string[] = [];
-
-        settledResults.forEach((result, index) => {
-            const childEdge = childEdges[index];
-            if (result.status === 'fulfilled') {
-                outputs[result.value.nodeId] = result.value.output;
-                allNextNodes.push(...result.value.nextNodes);
-            } else {
-                const branchConfig = branches.find(
-                    (b: BranchDefinition) => b.id === childEdge?.handleId
-                );
-                const branchLabel =
-                    branchConfig?.label ||
-                    childEdge?.nodeId ||
-                    `Branch ${index + 1}`;
-                errors.push(
-                    `${branchLabel}: ${
-                        result.reason?.message || 'Unknown error'
-                    }`
-                );
-            }
-        });
-
-        // Format outputs
-        let formattedOutputs = Object.entries(outputs)
-            .map(
-                ([id, out]) =>
-                    `## ${graph.nodeMap.get(id)?.data.label || id}\n${out}`
-            )
-            .join('\n\n');
-
-        if (errors.length > 0) {
-            formattedOutputs += `\n\n## Errors\n${errors.join('\n')}`;
-        }
-
-        // Merge outputs if merge prompt is provided
-        let output: string;
-        const mergePrompt = data.prompt;
-        const mergeModel =
-            data.model || this.options.defaultModel || DEFAULT_MODEL;
-
-        if (mergePrompt) {
-            output = await this.withRetry(async () => {
-                const mergeMessages: ChatMessageParam[] = [
-                    { role: 'system', content: mergePrompt },
-                    {
-                        role: 'user',
-                        content: `Here are the outputs from parallel agents:\n\n${formattedOutputs}\n\nPlease merge/summarize these outputs according to your instructions.`,
-                    },
-                ];
-
-                const stream = (await this.client.chat.send({
-                    model: mergeModel,
-                    messages: mergeMessages as any,
-                    stream: true,
-                })) as AsyncIterable<StreamChunk>;
-
-                let mergedOutput = '';
-                for await (const chunk of stream) {
-                    if (context.signal.aborted) {
-                        throw new Error('Workflow cancelled');
-                    }
-                    const content = chunk.choices[0]?.delta?.content;
-                    if (content) {
-                        mergedOutput += content;
-                        callbacks.onToken(node.id, content);
-                    }
-                }
-                return mergedOutput;
-            });
-        } else {
-            output = formattedOutputs;
-        }
-
-        const uniqueNextNodes = [...new Set(allNextNodes)];
-        return { output, nextNodes: uniqueNextNodes };
-    }
-
-    // ==========================================================================
-    // Multimodal Support
-    // ==========================================================================
-
-    /**
-     * Build message content with multimodal attachments.
-     */
-    private async buildMessageContent(
-        text: string,
-        attachments: Attachment[],
-        modelId: string
-    ): Promise<string | MessageContentPart[]> {
-        if (!attachments || attachments.length === 0) {
-            return text;
-        }
-
-        // Check model capabilities
-        const capabilities = await this.getModelCapabilities(modelId);
-        const supportedModalities = capabilities?.inputModalities || ['text'];
-
-        const parts: MessageContentPart[] = [{ type: 'text', text }];
-
-        for (const attachment of attachments) {
-            // Skip unsupported modalities
-            if (!supportedModalities.includes(attachment.type)) {
-                console.warn(
-                    `Model ${modelId} does not support ${attachment.type} modality, skipping attachment`
-                );
-                continue;
-            }
-
-            const url =
-                attachment.url ||
-                (attachment.content
-                    ? `data:${attachment.mimeType};base64,${attachment.content}`
-                    : null);
-            if (!url) continue;
-
-            switch (attachment.type) {
-                case 'image':
-                    parts.push({
-                        type: 'image_url',
-                        imageUrl: { url, detail: 'auto' },
-                    });
-                    break;
-                case 'file':
-                    parts.push({
-                        type: 'file',
-                        file: { url, mimeType: attachment.mimeType },
-                    });
-                    break;
-                case 'audio':
-                    parts.push({
-                        type: 'audio',
-                        audio: { url },
-                    });
-                    break;
-                case 'video':
-                    parts.push({
-                        type: 'video',
-                        video: { url, mimeType: attachment.mimeType },
-                    });
-                    break;
-            }
-        }
-
-        return parts.length > 1 ? parts : text;
-    }
-
     // ==========================================================================
     // Retry Logic
     // ==========================================================================
@@ -2226,46 +1208,5 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
         } catch {
             return JSON.stringify({ message: error.message, code: error.code });
         }
-    }
-
-    /**
-     * Retry helper with exponential backoff.
-     */
-    private async withRetry<T>(
-        fn: () => Promise<T>,
-        maxRetries: number = this.options.maxRetries || DEFAULT_MAX_RETRIES,
-        delayMs: number = this.options.retryDelayMs || DEFAULT_RETRY_DELAY_MS
-    ): Promise<T> {
-        let lastError: Error | null = null;
-
-        for (let attempt = 0; attempt <= maxRetries; attempt++) {
-            try {
-                return await fn();
-            } catch (err) {
-                lastError = err instanceof Error ? err : new Error(String(err));
-
-                // Don't retry if cancelled
-                if (this.abortController?.signal.aborted) {
-                    throw lastError;
-                }
-
-                // Don't retry on auth errors
-                if (
-                    lastError.message.includes('API key') ||
-                    lastError.message.includes('401') ||
-                    lastError.message.includes('403')
-                ) {
-                    throw lastError;
-                }
-
-                if (attempt < maxRetries) {
-                    await new Promise((resolve) =>
-                        setTimeout(resolve, delayMs * (attempt + 1))
-                    );
-                }
-            }
-        }
-
-        throw lastError;
     }
 }

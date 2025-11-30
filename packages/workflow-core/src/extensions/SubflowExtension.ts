@@ -3,8 +3,10 @@ import type {
     WorkflowNode,
     WorkflowEdge,
     PortDefinition,
+    ExecutionContext,
+    ValidationError,
+    ValidationWarning,
 } from '../types';
-import type { ValidationError, ValidationWarning } from '../validation';
 import type {
     SubflowNodeData,
     SubflowRegistry,
@@ -91,15 +93,136 @@ export const SubflowExtension: NodeExtension = {
 
     /**
      * Execute the subflow node.
-     *
-     * @internal Execution is handled by OpenRouterExecutionAdapter.
-     * Calling this directly will raise to prevent confusing placeholder data.
      */
-    async execute(): Promise<{ output: unknown; nextNodes: string[] }> {
-        throw new Error(
-            'SubflowExtension.execute is handled by OpenRouterExecutionAdapter. ' +
-                'Use the execution adapter to run workflows instead of calling extensions directly.'
+    async execute(
+        context: ExecutionContext,
+        node: WorkflowNode
+    ): Promise<{ output: string; nextNodes: string[] }> {
+        const data = node.data as SubflowNodeData;
+
+        // 1. Get registry from context
+        const registry = context.subflowRegistry;
+        if (!registry) {
+            throw new Error(
+                `Subflow node "${node.id}" requires a subflowRegistry in ExecutionContext`
+            );
+        }
+
+        // 2. Get subflow definition
+        const subflow = registry.get(data.subflowId);
+        if (!subflow) {
+            throw new Error(
+                `Subflow "${data.subflowId}" not found in registry`
+            );
+        }
+
+        if (!context.executeWorkflow) {
+            throw new Error(
+                'Subflow execution requires executeWorkflow capability in context'
+            );
+        }
+
+        // 3. Validate input mappings
+        const mappingValidation = validateInputMappings(
+            subflow,
+            data.inputMappings || {}
         );
+        if (!mappingValidation.valid) {
+            throw new Error(
+                `Missing required inputs for subflow "${
+                    data.subflowId
+                }": ${mappingValidation.missing.join(', ')}`
+            );
+        }
+
+        // 4. Resolve input values
+        const resolvedInputs: Record<string, unknown> = {};
+        for (const input of subflow.inputs) {
+            const mapping = data.inputMappings?.[input.id];
+            if (mapping !== undefined) {
+                // Handle expression syntax {{...}}
+                if (
+                    typeof mapping === 'string' &&
+                    mapping.startsWith('{{') &&
+                    mapping.endsWith('}}')
+                ) {
+                    const expr = mapping.slice(2, -2).trim();
+                    // Simple expression resolution
+                    if (expr === 'output' || expr === 'input') {
+                        resolvedInputs[input.id] = context.input;
+                    } else if (expr.startsWith('outputs.')) {
+                        const nodeId = expr.slice(8);
+                        resolvedInputs[input.id] =
+                            context.outputs[nodeId] ?? '';
+                    } else if (expr.startsWith('context.')) {
+                        // This is tricky as context is strictly typed now.
+                        // But we can check known properties
+                        if (expr === 'context.sessionId') {
+                            resolvedInputs[input.id] = context.sessionId;
+                        } else {
+                            // Fallback or empty
+                            resolvedInputs[input.id] = '';
+                        }
+                    } else {
+                        resolvedInputs[input.id] =
+                            context.outputs[expr] ?? mapping;
+                    }
+                } else {
+                    resolvedInputs[input.id] = mapping;
+                }
+            } else if (input.default !== undefined) {
+                resolvedInputs[input.id] = input.default;
+            }
+        }
+
+        // 5. Prepare subflow input
+        const primaryInput = subflow.inputs[0];
+        const subflowInputText = primaryInput
+            ? String(resolvedInputs[primaryInput.id] ?? context.input)
+            : context.input;
+
+        // 6. Execute subflow
+        try {
+            const subflowResult = await context.executeWorkflow(
+                subflow.workflow,
+                {
+                    text: subflowInputText,
+                    attachments: context.attachments,
+                }
+                // We might want to pass options here, e.g., limiting depth
+            );
+
+            const output = subflowResult.output ?? '';
+            const outgoingEdges = context.getOutgoingEdges(node.id, 'output');
+
+            return {
+                output,
+                nextNodes: outgoingEdges.map((e) => e.target),
+            };
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : String(error);
+            const errorEdges = context.getOutgoingEdges(node.id, 'error');
+            if (errorEdges.length > 0) {
+                // If error output is connected, route there but return empty output
+                // Wait, if I throw, the adapter catches it.
+                // But if I want to route to 'error' handle, I should return nextNodes.
+                // BUT `execute` signature usually throws on critical failure.
+                // However, `executeNodeInternal` usually catches errors.
+                // If I return here, it is considered success?
+                // No, I should rethrow or let adapter handle it.
+                // But wait, the original logic routed to error handle if available.
+                // "return { output: ..., success: false }"
+                // My new signature just returns output/nextNodes.
+                // So I should return the error path.
+
+                return {
+                    output: `Subflow error: ${message}`,
+                    nextNodes: errorEdges.map((e) => e.target),
+                };
+            }
+            throw error;
+        }
     },
 
     /**

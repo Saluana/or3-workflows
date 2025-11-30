@@ -74,12 +74,13 @@ interface ValidationWarning {
 
 ## Warning Codes
 
-| Code                   | Description                                |
-| ---------------------- | ------------------------------------------ |
-| `EMPTY_PROMPT`         | Agent node has no prompt                   |
-| `DEAD_END_NODE`        | Node has no outgoing edges (except output) |
-| `MISSING_EDGE_LABEL`   | Router edge has no label                   |
-| `MISSING_MERGE_PROMPT` | Parallel node has no merge prompt          |
+| Code                      | Description                                |
+| ------------------------- | ------------------------------------------ |
+| `EMPTY_PROMPT`            | Agent node has no prompt                   |
+| `DEAD_END_NODE`           | Node has no outgoing edges (except output) |
+| `MISSING_EDGE_LABEL`      | Router edge has no label                   |
+| `MISSING_MERGE_PROMPT`    | Parallel node has no merge prompt          |
+| `DISCONNECTED_COMPONENTS` | Workflow has disconnected node groups      |
 
 ## Validation Rules
 
@@ -108,7 +109,8 @@ const edges = []; // No edges from start
 ### Connectivity
 
 -   All nodes must be reachable from start
--   Cycles are reported as warnings (loops are allowed)
+-   Cycles are reported with the full cycle path for debugging
+-   Disconnected components are detected and reported
 
 ```typescript
 // ❌ Error: Disconnected node
@@ -121,6 +123,32 @@ const edges = [
   { source: 'start', target: 'agent1' },
   // agent2 has no path from start
 ];
+```
+
+### Topological Sort
+
+The validator uses Kahn's algorithm to perform topological sorting, which:
+
+1. **Detects cycles**: Returns a cycle path like `"node1 → node2 → node3 → node1"`
+2. **Finds execution order**: Provides the correct order to execute nodes
+3. **Validates DAG structure**: Ensures the workflow is a directed acyclic graph
+
+```typescript
+// Cycle detection with path
+const result = validateWorkflow(nodes, edges);
+// If cycle exists: "Cycle detected: router → agent1 → agent2 → router"
+```
+
+### Connected Components
+
+The validator analyzes graph connectivity to detect:
+
+-   **Disconnected nodes**: Individual nodes not reachable from start
+-   **Disconnected components**: Groups of nodes that form their own subgraphs
+
+```typescript
+// ⚠️ Warning: Disconnected components
+// Workflow has 2 disconnected component(s) not reachable from start
 ```
 
 ### Agent Nodes

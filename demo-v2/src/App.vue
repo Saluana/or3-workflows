@@ -23,6 +23,17 @@ import {
 } from './composables';
 import type { WorkflowSummary } from '@or3/workflow-core';
 
+// Local components
+import {
+    HeaderBar,
+    ChatPanel,
+    ApiKeyModal,
+    SaveModal,
+    LoadModal,
+    ValidationModal,
+    HITLModal,
+} from './components';
+
 // ============================================================================
 // Editor Setup
 // ============================================================================
@@ -577,209 +588,23 @@ function syncMetaToEditor() {
 <template>
     <div class="app">
         <!-- Header -->
-        <header class="header">
-            <div class="header-left">
-                <h1 class="logo">or3-workflow</h1>
-                <span class="version">v2</span>
-                <div class="meta-inputs">
-                    <input
-                        v-model="workflowName"
-                        class="meta-input"
-                        placeholder="Workflow name"
-                        @change="syncMetaToEditor"
-                    />
-                    <input
-                        v-model="workflowDescription"
-                        class="meta-input"
-                        placeholder="Description (optional)"
-                        @change="syncMetaToEditor"
-                    />
-                </div>
-            </div>
-
-            <div class="header-center">
-                <button
-                    class="btn btn-ghost"
-                    :disabled="!canUndo"
-                    @click="handleUndo"
-                    title="Undo (Ctrl+Z)"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path d="M3 7v6h6"></path>
-                        <path
-                            d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"
-                        ></path>
-                    </svg>
-                </button>
-                <button
-                    class="btn btn-ghost"
-                    :disabled="!canRedo"
-                    @click="handleRedo"
-                    title="Redo (Ctrl+Shift+Z)"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path d="M21 7v6h-6"></path>
-                        <path
-                            d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"
-                        ></path>
-                    </svg>
-                </button>
-                <div class="divider"></div>
-                <button
-                    class="btn btn-ghost"
-                    @click="showSaveModal = true"
-                    title="Save"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path
-                            d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"
-                        ></path>
-                        <path
-                            d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"
-                        ></path>
-                        <path d="M7 3v4a1 1 0 0 0 1 1h7"></path>
-                    </svg>
-                </button>
-                <button
-                    class="btn btn-ghost"
-                    @click="showLoadModal = true"
-                    title="Load"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path
-                            d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"
-                        ></path>
-                    </svg>
-                </button>
-                <button
-                    class="btn btn-ghost"
-                    @click="handleExport"
-                    title="Export"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path
-                            d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
-                        ></path>
-                        <polyline points="7 10 12 15 17 10"></polyline>
-                        <line x1="12" x2="12" y1="15" y2="3"></line>
-                    </svg>
-                </button>
-                <label class="btn btn-ghost" title="Import">
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path
-                            d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
-                        ></path>
-                        <polyline points="17 8 12 3 7 8"></polyline>
-                        <line x1="12" x2="12" y1="3" y2="15"></line>
-                    </svg>
-                    <input
-                        type="file"
-                        accept=".json"
-                        class="hidden-input"
-                        @change="handleImport"
-                    />
-                </label>
-                <div class="divider"></div>
-                <button
-                    class="btn btn-ghost"
-                    @click="handleValidate"
-                    title="Validate"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                    </svg>
-                    <span class="btn-text">Validate</span>
-                </button>
-            </div>
-
-            <div class="header-right">
-                <button class="btn btn-ghost" @click="showApiKeyModal = true">
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path
-                            d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"
-                        ></path>
-                    </svg>
-                    <span class="btn-text">{{
-                        hasApiKey ? 'API Key Set' : 'Set API Key'
-                    }}</span>
-                </button>
-                <button
-                    class="btn btn-ghost"
-                    @click="showChatPanel = !showChatPanel"
-                    title="Toggle Chat"
-                >
-                    <svg
-                        v-if="showChatPanel"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path>
-                    </svg>
-                    <svg
-                        v-else
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path>
-                    </svg>
-                </button>
-            </div>
-        </header>
+        <HeaderBar
+            v-model:workflowName="workflowName"
+            v-model:workflowDescription="workflowDescription"
+            :can-undo="canUndo"
+            :can-redo="canRedo"
+            :has-api-key="hasApiKey"
+            :show-chat-panel="showChatPanel"
+            @update:show-chat-panel="showChatPanel = $event"
+            @undo="handleUndo"
+            @redo="handleRedo"
+            @save="showSaveModal = true"
+            @load="showLoadModal = true"
+            @export="handleExport"
+            @import="handleImport"
+            @validate="handleValidate"
+            @open-api-key-modal="showApiKeyModal = true"
+        />
 
         <!-- Main content -->
         <main class="main">
@@ -873,201 +698,16 @@ function syncMetaToEditor() {
             </div>
 
             <!-- Right sidebar - Chat -->
-            <aside v-if="showChatPanel" class="sidebar right-sidebar">
-                <div class="chat-wrapper">
-                    <div class="chat-header">
-                        <div class="chat-title">
-                            <svg
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                class="chat-icon"
-                            >
-                                <path
-                                    d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"
-                                ></path>
-                            </svg>
-                            <h3>Workflow Chat</h3>
-                        </div>
-                        <button
-                            class="btn btn-ghost btn-sm"
-                            @click="clearMessages"
-                        >
-                            Clear
-                        </button>
-                    </div>
-
-                    <!-- Process Flow -->
-                    <div
-                        v-if="Object.keys(nodeStatuses).length > 0"
-                        class="process-flow"
-                    >
-                        <div class="flow-header">Process Flow</div>
-                        <div class="flow-steps">
-                            <div
-                                v-for="(status, nodeId) in nodeStatuses"
-                                :key="nodeId"
-                                class="flow-step"
-                                :class="`status-${status}`"
-                            >
-                                <div class="step-indicator">
-                                    <svg
-                                        v-if="status === 'active'"
-                                        class="spinning"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                    >
-                                        <path
-                                            d="M21 12a9 9 0 1 1-6.219-8.56"
-                                        ></path>
-                                    </svg>
-                                    <div v-else class="step-dot" />
-                                </div>
-                                <span class="step-label">{{ nodeId }}</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="chat-messages">
-                        <div v-if="messages.length === 0" class="chat-empty">
-                            <svg
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                class="empty-icon"
-                            >
-                                <rect
-                                    x="3"
-                                    y="11"
-                                    width="18"
-                                    height="10"
-                                    rx="2"
-                                ></rect>
-                                <circle cx="12" cy="5" r="2"></circle>
-                                <path d="M12 7v4"></path>
-                            </svg>
-                            <p>Send a message to run the workflow</p>
-                        </div>
-                        <div
-                            v-for="msg in messages"
-                            :key="msg.id"
-                            class="chat-message"
-                            :class="msg.role"
-                        >
-                            <div class="message-avatar">
-                                <svg
-                                    v-if="msg.role === 'user'"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                >
-                                    <path
-                                        d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"
-                                    ></path>
-                                    <circle cx="12" cy="7" r="4"></circle>
-                                </svg>
-                                <svg
-                                    v-else
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                >
-                                    <rect
-                                        x="3"
-                                        y="11"
-                                        width="18"
-                                        height="10"
-                                        rx="2"
-                                    ></rect>
-                                    <circle cx="12" cy="5" r="2"></circle>
-                                    <path d="M12 7v4"></path>
-                                </svg>
-                            </div>
-                            <div class="message-body">
-                                <div class="message-content">
-                                    {{ msg.content }}
-                                </div>
-                                <div v-if="msg.nodeId" class="message-meta">
-                                    via {{ msg.nodeId }}
-                                </div>
-                            </div>
-                        </div>
-                        <div
-                            v-if="streamingContent"
-                            class="chat-message assistant streaming"
-                        >
-                            <div class="message-avatar">
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                >
-                                    <rect
-                                        x="3"
-                                        y="11"
-                                        width="18"
-                                        height="10"
-                                        rx="2"
-                                    ></rect>
-                                    <circle cx="12" cy="5" r="2"></circle>
-                                    <path d="M12 7v4"></path>
-                                </svg>
-                            </div>
-                            <div class="message-body">
-                                <div class="message-content">
-                                    {{ streamingContent
-                                    }}<span class="cursor">|</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="chat-input">
-                        <textarea
-                            v-model="chatInput"
-                            placeholder="Type a message..."
-                            :disabled="isRunning"
-                            @keydown.enter.prevent="handleSendMessage"
-                        ></textarea>
-                        <button
-                            class="btn btn-primary send-btn"
-                            :disabled="!chatInput?.trim() || isRunning"
-                            @click="handleSendMessage"
-                        >
-                            <svg
-                                v-if="isRunning"
-                                class="spinning"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                            >
-                                <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
-                            </svg>
-                            <svg
-                                v-else
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                class="icon"
-                            >
-                                <line x1="22" y1="2" x2="11" y2="13"></line>
-                                <polygon
-                                    points="22 2 15 22 11 13 2 9 22 2"
-                                ></polygon>
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-            </aside>
+            <ChatPanel
+                v-if="showChatPanel"
+                v-model:chat-input="chatInput"
+                :messages="messages"
+                :node-statuses="nodeStatuses"
+                :streaming-content="streamingContent"
+                :is-running="isRunning"
+                @send="handleSendMessage"
+                @clear="clearMessages"
+            />
 
             <!-- Mobile Bottom Navigation -->
             <nav v-if="isMobile" class="mobile-nav">
@@ -1292,316 +932,53 @@ function syncMetaToEditor() {
             </Transition>
         </main>
 
-        <!-- API Key Modal -->
-        <div
-            v-if="showApiKeyModal"
-            class="modal-overlay"
-            @click.self="hasApiKey && (showApiKeyModal = false)"
-        >
-            <div class="modal">
-                <h2>OpenRouter API Key</h2>
-                <p>
-                    Enter your OpenRouter API key to enable workflow execution.
-                    <a href="https://openrouter.ai/keys" target="_blank"
-                        >Get one here</a
-                    >
-                </p>
-                <input
-                    v-model="tempApiKey"
-                    type="password"
-                    placeholder="sk-or-v1-..."
-                    @keydown.enter="saveApiKey"
-                />
-                <div class="modal-actions">
-                    <button
-                        v-if="hasApiKey"
-                        class="btn btn-ghost"
-                        @click="clearApiKey"
-                    >
-                        Clear Key
-                    </button>
-                    <button
-                        v-if="hasApiKey"
-                        class="btn btn-ghost"
-                        @click="showApiKeyModal = false"
-                    >
-                        Cancel
-                    </button>
-                    <button class="btn btn-primary" @click="saveApiKey">
-                        Save
-                    </button>
-                </div>
-            </div>
-        </div>
+        <!-- Modals -->
+        <ApiKeyModal
+            :show="showApiKeyModal"
+            :has-api-key="hasApiKey"
+            v-model:temp-api-key="tempApiKey"
+            @close="showApiKeyModal = false"
+            @save="saveApiKey"
+            @clear="clearApiKey"
+        />
 
-        <!-- Save Modal -->
-        <div
-            v-if="showSaveModal"
-            class="modal-overlay"
-            @click.self="showSaveModal = false"
-        >
-            <div class="modal">
-                <h2>Save Workflow</h2>
-                <label class="form-label">Workflow Name</label>
-                <input
-                    v-model="workflowName"
-                    type="text"
-                    placeholder="My Workflow"
-                    @keydown.enter="handleSave"
-                />
-                <div class="modal-actions">
-                    <button
-                        class="btn btn-ghost"
-                        @click="showSaveModal = false"
-                    >
-                        Cancel
-                    </button>
-                    <button class="btn btn-primary" @click="handleSave">
-                        Save
-                    </button>
-                </div>
-            </div>
-        </div>
+        <SaveModal
+            :show="showSaveModal"
+            v-model:workflow-name="workflowName"
+            @close="showSaveModal = false"
+            @save="handleSave"
+        />
 
-        <!-- Load Modal -->
-        <div
-            v-if="showLoadModal"
-            class="modal-overlay"
-            @click.self="showLoadModal = false"
-        >
-            <div class="modal modal-lg">
-                <h2>Load Workflow</h2>
-                <div v-if="savedWorkflows.length > 0" class="workflow-list">
-                    <div
-                        v-for="workflow in savedWorkflows"
-                        :key="workflow.id"
-                        class="workflow-item"
-                    >
-                        <div class="workflow-info">
-                            <span class="workflow-name">{{
-                                workflow.name
-                            }}</span>
-                            <span class="workflow-date">{{
-                                new Date(
-                                    workflow.updatedAt
-                                ).toLocaleDateString()
-                            }}</span>
-                        </div>
-                        <div class="workflow-actions">
-                            <button
-                                class="btn btn-primary btn-sm"
-                                @click="handleLoad(workflow)"
-                            >
-                                Load
-                            </button>
-                            <button
-                                class="btn btn-ghost btn-sm"
-                                @click="deleteWorkflow(workflow.id)"
-                            >
-                                Delete
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                <div v-else class="empty-state">
-                    <p>No saved workflows yet.</p>
-                </div>
-                <div class="modal-actions">
-                    <button
-                        class="btn btn-ghost"
-                        @click="showLoadModal = false"
-                    >
-                        Close
-                    </button>
-                </div>
-            </div>
-        </div>
+        <LoadModal
+            :show="showLoadModal"
+            :workflows="savedWorkflows"
+            @close="showLoadModal = false"
+            @load="handleLoad"
+            @delete="deleteWorkflow"
+        />
 
-        <!-- Validation Modal -->
-        <div
-            v-if="showValidationModal"
-            class="modal-overlay"
-            @click.self="showValidationModal = false"
-        >
-            <div class="modal">
-                <h2>Workflow Validation</h2>
-                <div v-if="validationResult" class="validation-result">
-                    <div
-                        v-if="
-                            validationResult.isValid &&
-                            validationResult.warnings.length === 0
-                        "
-                        class="validation-success"
-                    >
-                        <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            class="success-icon"
-                        >
-                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                        </svg>
-                        <p>Workflow is valid and ready to run!</p>
-                    </div>
+        <ValidationModal
+            :show="showValidationModal"
+            :result="validationResult"
+            @close="showValidationModal = false"
+        />
 
-                    <div
-                        v-if="validationResult.errors.length > 0"
-                        class="validation-section errors"
-                    >
-                        <h3>Errors</h3>
-                        <ul>
-                            <li
-                                v-for="(err, i) in validationResult.errors"
-                                :key="'err-' + i"
-                            >
-                                {{ err.message }}
-                            </li>
-                        </ul>
-                    </div>
-
-                    <div
-                        v-if="validationResult.warnings.length > 0"
-                        class="validation-section warnings"
-                    >
-                        <h3>Warnings</h3>
-                        <ul>
-                            <li
-                                v-for="(warn, i) in validationResult.warnings"
-                                :key="'warn-' + i"
-                            >
-                                {{ warn.message }}
-                            </li>
-                        </ul>
-                    </div>
-                </div>
-                <div class="modal-actions">
-                    <button
-                        class="btn btn-primary"
-                        @click="showValidationModal = false"
-                    >
-                        Close
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- HITL (Human-in-the-Loop) Modal -->
-        <div
-            v-if="showHITLModal && pendingHITLRequest"
-            class="modal-overlay hitl-overlay"
-        >
-            <div class="modal hitl-modal">
-                <div class="hitl-header">
-                    <div class="hitl-icon">
-                        <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                        >
-                            <circle cx="12" cy="12" r="10"></circle>
-                            <path d="M12 16v-4"></path>
-                            <path d="M12 8h.01"></path>
-                        </svg>
-                    </div>
-                    <h2>Human Review Required</h2>
-                    <span class="hitl-mode-badge">{{
-                        pendingHITLRequest.mode
-                    }}</span>
-                </div>
-
-                <div class="hitl-content">
-                    <p class="hitl-node-info">
-                        <strong>Node:</strong> {{ pendingHITLRequest.nodeId }}
-                    </p>
-
-                    <div v-if="pendingHITLRequest.prompt" class="hitl-prompt">
-                        {{ pendingHITLRequest.prompt }}
-                    </div>
-
-                    <div v-if="pendingHITLRequest.context" class="hitl-context">
-                        <h4>Context</h4>
-                        <pre>{{
-                            typeof pendingHITLRequest.context === 'string'
-                                ? pendingHITLRequest.context
-                                : JSON.stringify(
-                                      pendingHITLRequest.context,
-                                      null,
-                                      2
-                                  )
-                        }}</pre>
-                    </div>
-
-                    <!-- Input mode: show text input -->
-                    <div
-                        v-if="pendingHITLRequest.mode === 'input'"
-                        class="hitl-input-section"
-                    >
-                        <label class="form-label">Your Input</label>
-                        <textarea
-                            v-model="hitlUserInput"
-                            class="hitl-textarea"
-                            placeholder="Enter your response..."
-                            rows="4"
-                        ></textarea>
-                    </div>
-
-                    <!-- Custom options if provided -->
-                    <div
-                        v-if="pendingHITLRequest.options?.length"
-                        class="hitl-options"
-                    >
-                        <button
-                            v-for="option in pendingHITLRequest.options"
-                            :key="option.id"
-                            class="btn hitl-option-btn"
-                            :class="{
-                                'btn-primary': option.action === 'approve',
-                                'btn-danger': option.action === 'reject',
-                                'btn-ghost': option.action === 'skip',
-                            }"
-                            @click="
-                                () => {
-                                    if (
-                                        resolveHITLPromise &&
-                                        pendingHITLRequest
-                                    ) {
-                                        resolveHITLPromise({
-                                            requestId: pendingHITLRequest.id,
-                                            action: option.action,
-                                            data: hitlUserInput || undefined,
-                                            respondedAt:
-                                                new Date().toISOString(),
-                                        });
-                                        closeHITLModal();
-                                    }
-                                }
-                            "
-                        >
-                            {{ option.label }}
-                        </button>
-                    </div>
-                </div>
-
-                <div class="modal-actions hitl-actions">
-                    <button class="btn btn-ghost" @click="handleHITLSkip">
-                        Skip
-                    </button>
-                    <button class="btn btn-danger" @click="handleHITLReject">
-                        Reject
-                    </button>
-                    <button class="btn btn-primary" @click="handleHITLApprove">
-                        {{
-                            pendingHITLRequest.mode === 'input'
-                                ? 'Submit'
-                                : 'Approve'
-                        }}
-                    </button>
-                </div>
-            </div>
-        </div>
+        <HITLModal
+            :show="showHITLModal"
+            :request="pendingHITLRequest"
+            v-model:user-input="hitlUserInput"
+            @approve="handleHITLApprove"
+            @reject="handleHITLReject"
+            @skip="handleHITLSkip"
+            @custom="
+                (response) => {
+                    if (resolveHITLPromise) {
+                        resolveHITLPromise(response);
+                        closeHITLModal();
+                    }
+                }
+            "
+        />
     </div>
 </template>
 

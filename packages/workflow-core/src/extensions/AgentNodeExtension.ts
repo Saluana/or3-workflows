@@ -4,8 +4,11 @@ import type {
     WorkflowEdge,
     ExecutionContext,
     AgentNodeData,
+    LLMProvider,
+    ValidationError,
+    ValidationWarning,
+    ChatMessage,
 } from '../types';
-import type { ValidationError, ValidationWarning } from '../validation';
 
 /** Default model for agent nodes */
 const DEFAULT_MODEL = 'openai/gpt-4o-mini';
@@ -68,13 +71,114 @@ export const AgentNodeExtension: NodeExtension = {
      * @internal Execution is handled by OpenRouterExecutionAdapter.
      * Calling this directly will raise to prevent confusing placeholder data.
      */
+    /**
+     * Execute the agent node.
+     */
     async execute(
-        _context: ExecutionContext
+        context: ExecutionContext,
+        node: WorkflowNode,
+        provider?: LLMProvider
     ): Promise<{ output: string; nextNodes: string[] }> {
-        throw new Error(
-            'AgentNodeExtension.execute is handled by OpenRouterExecutionAdapter. ' +
-                'Use the execution adapter to run workflows instead of calling extensions directly.'
-        );
+        if (!provider) {
+            throw new Error('Agent node requires an LLM provider');
+        }
+
+        const data = node.data as AgentNodeData;
+        const model = data.model || DEFAULT_MODEL;
+        const systemPrompt = data.prompt || `You are a helpful assistant named ${data.label}.`;
+
+        // Check model capabilities if provider available
+        let supportedModalities = ['text'];
+        if (model) {
+            const capabilities = await provider.getModelCapabilities(model);
+            if (capabilities) {
+                supportedModalities = capabilities.inputModalities;
+            }
+        }
+
+        // Build context from previous nodes
+        let contextInfo = '';
+        if (context.nodeChain && context.nodeChain.length > 0) {
+            const previousOutputs = context.nodeChain
+                .filter((id) => context.outputs[id])
+                .map((id) => {
+                    const prevNode = context.getNode(id);
+                    const label = prevNode?.data.label || id;
+                    return `[${label}]: ${context.outputs[id]}`;
+                });
+
+            if (previousOutputs.length > 0) {
+                contextInfo = `\n\nContext from previous agents:\n${previousOutputs.join(
+                    '\n\n'
+                )}`;
+            }
+        }
+
+        // Construct user content with attachments
+        let userContent: string | any[] = context.input;
+        if (context.attachments && context.attachments.length > 0) {
+            const contentParts: any[] = [{ type: 'text', text: context.input }];
+            
+            for (const attachment of context.attachments) {
+                // Skip unsupported modalities
+                if (!supportedModalities.includes(attachment.type)) {
+                    console.warn(
+                        `Model ${model} does not support ${attachment.type} modality, skipping attachment`
+                    );
+                    continue;
+                }
+
+                const url = attachment.url || 
+                    (attachment.content ? `data:${attachment.mimeType};base64,${attachment.content}` : null);
+                
+                if (!url) continue;
+
+                switch (attachment.type) {
+                    case 'image':
+                        contentParts.push({
+                            type: 'image_url',
+                            image_url: { url }, // OpenRouter/OpenAI format
+                        });
+                        break;
+                    // TODO: Add support for other modalities when OpenRouter standardizes them
+                }
+            }
+            
+            if (contentParts.length > 1) {
+                userContent = contentParts;
+            }
+        }
+
+        // Construct messages
+        const messages: ChatMessage[] = [
+            { role: 'system', content: systemPrompt + contextInfo },
+            ...context.history,
+            { role: 'user', content: userContent as any },
+        ];
+
+        // Call LLM with streaming
+        const result = await provider.chat(model, messages, {
+            temperature: data.temperature,
+            maxTokens: data.maxTokens,
+            tools: data.tools?.map((t) => ({ type: 'function', function: { name: t } })),
+            onToken: (token) => {
+                if (context.onToken) {
+                    context.onToken(token);
+                }
+            },
+            signal: context.signal,
+        });
+
+        const output = result.content || '';
+        
+        // Calculate next nodes
+        const outgoingEdges = context.getOutgoingEdges(node.id, 'output');
+        const nextNodes = outgoingEdges.map((e) => e.target);
+        
+        return {
+            output,
+            nextNodes,
+        };
     },
 
     /**
