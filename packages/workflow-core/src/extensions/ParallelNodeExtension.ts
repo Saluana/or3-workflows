@@ -243,24 +243,42 @@ export const ParallelNodeExtension: NodeExtension = {
             });
         }
 
-        // Check that each branch has an outgoing edge
+        // Check outgoing connections based on merge mode
         const outgoingEdges = edges.filter((e) => e.source === node.id);
-        branches.forEach((branch: BranchDefinition) => {
-            const hasEdge = outgoingEdges.some(
-                (e) => e.sourceHandle === branch.id
+        const mergeEnabled = data.mergeEnabled !== false;
+
+        if (mergeEnabled) {
+            // When merge enabled, check for merged output connection
+            const hasMergedEdge = outgoingEdges.some(
+                (e) => e.sourceHandle === 'merged'
             );
-            if (!hasEdge) {
+            if (!hasMergedEdge) {
                 errors.push({
                     type: 'warning',
-                    code: 'MISSING_EDGE_LABEL',
-                    message: `Branch "${branch.label}" has no connected node`,
+                    code: 'DEAD_END_NODE',
+                    message: 'Parallel node has no outgoing connection from merged output',
                     nodeId: node.id,
                 });
             }
-        });
+        } else {
+            // When merge disabled, check each branch has an outgoing edge
+            branches.forEach((branch: BranchDefinition) => {
+                const hasEdge = outgoingEdges.some(
+                    (e) => e.sourceHandle === branch.id
+                );
+                if (!hasEdge) {
+                    errors.push({
+                        type: 'warning',
+                        code: 'MISSING_EDGE_LABEL',
+                        message: `Branch "${branch.label}" has no connected node`,
+                        nodeId: node.id,
+                    });
+                }
+            });
+        }
 
-        // Warn if no merge prompt is configured
-        if (!data.prompt?.trim()) {
+        // Warn if merge enabled but no merge prompt is configured
+        if (mergeEnabled && !data.prompt?.trim()) {
             errors.push({
                 type: 'warning',
                 code: 'EMPTY_PROMPT',
@@ -274,12 +292,17 @@ export const ParallelNodeExtension: NodeExtension = {
     },
 
     /**
-     * Get dynamic outputs based on branches configuration.
+     * Get dynamic outputs based on merge configuration.
      */
     getDynamicOutputs(node: WorkflowNode): { id: string; label: string }[] {
         const data = node.data as ParallelNodeData;
-        const branches = data.branches || [];
+        const mergeEnabled = data.mergeEnabled !== false;
 
+        if (mergeEnabled) {
+            return [{ id: 'merged', label: 'Merged Output' }];
+        }
+
+        const branches = data.branches || [];
         return branches.map((branch: BranchDefinition) => ({
             id: branch.id,
             label: branch.label,
