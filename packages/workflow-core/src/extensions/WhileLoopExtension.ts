@@ -127,11 +127,15 @@ export const WhileLoopExtension: NodeExtension = {
                 }
 
                 const model = data.conditionModel || context.defaultModel || DEFAULT_MODEL;
+                const inputLabel = iteration > 0 ? 'Last output' : 'Initial input';
+                const previousOutputsInfo = outputs.length > 1 
+                    ? `Previous outputs: ${outputs.length} iterations` 
+                    : '';
                 const prompt = `${data.conditionPrompt}
 
 Current iteration: ${iteration}
-${iteration > 0 ? `Last output: ${currentInput}` : `Initial input: ${currentInput}`}
-${outputs.length > 1 ? `Previous outputs: ${outputs.length} iterations` : ''}
+${inputLabel}: ${currentInput}
+${previousOutputsInfo}
 
 Respond with only "continue" or "done".`;
 

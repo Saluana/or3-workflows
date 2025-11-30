@@ -17,6 +17,17 @@ const DEFAULT_MODEL = 'openai/gpt-4o-mini';
 const MAX_TOOL_ITERATIONS = 10;
 
 /**
+ * Convert message content to a string for comparison.
+ * Handles both string and array content formats.
+ */
+function contentToString(content: unknown): string {
+    if (typeof content === 'string') {
+        return content;
+    }
+    return JSON.stringify(content);
+}
+
+/**
  * Agent Node Extension
  *
  * Represents an LLM agent that processes input and generates output.
@@ -155,14 +166,8 @@ export const AgentNodeExtension: NodeExtension = {
         // Construct messages
         // Check if history already ends with the same user message to avoid duplication
         const lastMessage = context.history[context.history.length - 1];
-        const inputContentStr = typeof userContent === 'string' 
-            ? userContent 
-            : JSON.stringify(userContent);
-        const lastMessageContentStr = lastMessage 
-            ? (typeof lastMessage.content === 'string' 
-                ? lastMessage.content 
-                : JSON.stringify(lastMessage.content))
-            : '';
+        const inputContentStr = contentToString(userContent);
+        const lastMessageContentStr = lastMessage ? contentToString(lastMessage.content) : '';
         const isDuplicateUserMessage = 
             lastMessage?.role === 'user' && 
             lastMessageContentStr === inputContentStr;
@@ -273,11 +278,12 @@ export const AgentNodeExtension: NodeExtension = {
                     toolResult = `Tool ${toolName} not found or no handler registered`;
                 }
 
-                // Add tool result as a user message (simplified approach)
-                // Note: OpenAI format uses 'tool' role, but for compatibility we use 'user'
+                // Add tool result to conversation
+                // Using 'system' role with clear formatting to distinguish from user input
+                // Note: OpenAI's function calling uses 'tool' role, but this is more portable
                 currentMessages.push({
-                    role: 'user' as const,
-                    content: `Tool ${toolName} result: ${toolResult}`,
+                    role: 'system' as const,
+                    content: `[Tool Result: ${toolName}]\n${toolResult}`,
                 });
             }
 
