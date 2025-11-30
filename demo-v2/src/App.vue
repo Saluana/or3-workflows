@@ -675,7 +675,12 @@ function syncMetaToEditor() {
                 </div>
 
                 <div v-if="showLeftSidebar" class="sidebar-content">
-                    <NodePalette v-if="activePanel === 'palette'" />
+                    <div
+                        v-if="activePanel === 'palette'"
+                        class="palette-container"
+                    >
+                        <NodePalette />
+                    </div>
                     <NodeInspector
                         v-else-if="activePanel === 'inspector' && editor"
                         :editor="editor"
@@ -1157,6 +1162,13 @@ function syncMetaToEditor() {
 }
 
 .sidebar-content {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.palette-container {
     flex: 1;
     overflow-y: auto;
     padding: var(--or3-spacing-lg, 16px);

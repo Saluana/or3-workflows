@@ -56,6 +56,7 @@ const activeTab = ref<
     | 'subflow'
     | 'output'
     | 'routes'
+    | 'branches'
 >('prompt');
 
 // Available models from registry
@@ -244,6 +245,71 @@ const routerData = computed(() => {
         routes: Array.isArray(data?.routes) ? data.routes : [],
     };
 });
+
+// Parallel node data
+interface BranchConfig {
+    id: string;
+    label: string;
+    model?: string;
+    prompt?: string;
+}
+
+const parallelData = computed(() => {
+    const data = selectedNode.value?.data as any;
+    return {
+        branches: Array.isArray(data?.branches) ? data.branches : [],
+        mergeModel: data?.model || '',
+        mergePrompt: data?.prompt || '',
+    };
+});
+
+const addBranch = () => {
+    if (!selectedNode.value) return;
+    const branches = [...parallelData.value.branches];
+    const id = `branch-${Date.now()}`;
+    branches.push({ id, label: `Branch ${branches.length + 1}` });
+    props.editor.commands.updateNodeData(selectedNode.value.id, { branches });
+};
+
+const removeBranch = (branchId: string) => {
+    if (!selectedNode.value) return;
+    const branches = parallelData.value.branches.filter(
+        (b: BranchConfig) => b.id !== branchId
+    );
+    props.editor.commands.updateNodeData(selectedNode.value.id, { branches });
+};
+
+const updateBranchLabel = (branchId: string, label: string) => {
+    if (!selectedNode.value) return;
+    const branches = parallelData.value.branches.map((b: BranchConfig) =>
+        b.id === branchId ? { ...b, label } : b
+    );
+    props.editor.commands.updateNodeData(selectedNode.value.id, { branches });
+};
+
+const updateBranchModel = (branchId: string, model: string) => {
+    if (!selectedNode.value) return;
+    const branches = parallelData.value.branches.map((b: BranchConfig) =>
+        b.id === branchId ? { ...b, model: model || undefined } : b
+    );
+    props.editor.commands.updateNodeData(selectedNode.value.id, { branches });
+};
+
+const updateBranchPrompt = (branchId: string, prompt: string) => {
+    if (!selectedNode.value) return;
+    const branches = parallelData.value.branches.map((b: BranchConfig) =>
+        b.id === branchId ? { ...b, prompt: prompt || undefined } : b
+    );
+    props.editor.commands.updateNodeData(selectedNode.value.id, { branches });
+};
+
+// Track which branch is expanded for editing
+const expandedBranchId = ref<string | null>(null);
+
+const toggleBranchExpanded = (branchId: string) => {
+    expandedBranchId.value =
+        expandedBranchId.value === branchId ? null : branchId;
+};
 
 const addRoute = () => {
     if (!selectedNode.value) return;
@@ -808,6 +874,29 @@ const handleDelete = () => {
                 <span class="tool-count">{{ routerData.routes.length }}</span>
             </button>
             <button
+                v-if="isParallelNode"
+                class="tab"
+                :class="{ active: activeTab === 'branches' }"
+                @click="activeTab = 'branches'"
+            >
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                >
+                    <circle cx="18" cy="18" r="3"></circle>
+                    <circle cx="6" cy="6" r="3"></circle>
+                    <circle cx="18" cy="6" r="3"></circle>
+                    <path d="M6 9v12"></path>
+                    <path d="M18 9v6"></path>
+                </svg>
+                Branches
+                <span class="tool-count">{{
+                    parallelData.branches.length
+                }}</span>
+            </button>
+            <button
                 v-if="isAgentNode"
                 class="tab"
                 :class="{ active: activeTab === 'tools' }"
@@ -1099,6 +1188,189 @@ const handleDelete = () => {
                                 <line x1="6" y1="6" x2="18" y2="18"></line>
                             </svg>
                         </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Branches Tab (Parallel Node) -->
+            <div
+                v-if="activeTab === 'branches' && isParallelNode"
+                class="branches-tab"
+            >
+                <div class="branches-header">
+                    <label class="field-label">Parallel Branches</label>
+                    <button
+                        class="add-btn"
+                        @click="addBranch"
+                        aria-label="Add Branch"
+                    >
+                        <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                    </button>
+                </div>
+                <p class="field-hint">
+                    Each branch runs in parallel. Connect nodes to each branch's
+                    output handle. Optionally set a model and system prompt per
+                    branch.
+                </p>
+
+                <div class="branches-list">
+                    <div
+                        v-for="branch in parallelData.branches"
+                        :key="branch.id"
+                        class="branch-item"
+                        :class="{ expanded: expandedBranchId === branch.id }"
+                    >
+                        <div
+                            class="branch-header"
+                            @click="toggleBranchExpanded(branch.id)"
+                        >
+                            <div class="branch-inputs">
+                                <input
+                                    type="text"
+                                    class="text-input branch-label"
+                                    :value="branch.label"
+                                    @input="(e) => updateBranchLabel(branch.id, (e.target as HTMLInputElement).value)"
+                                    @click.stop
+                                    placeholder="Branch Label"
+                                />
+                                <div class="branch-badges">
+                                    <span
+                                        v-if="branch.model"
+                                        class="branch-badge model"
+                                    >
+                                        {{ branch.model.split('/').pop() }}
+                                    </span>
+                                    <span
+                                        v-if="branch.prompt"
+                                        class="branch-badge prompt"
+                                    >
+                                        prompt
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="branch-actions">
+                                <svg
+                                    class="expand-icon"
+                                    :class="{
+                                        rotated: expandedBranchId === branch.id,
+                                    }"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                >
+                                    <polyline
+                                        points="6 9 12 15 18 9"
+                                    ></polyline>
+                                </svg>
+                                <button
+                                    class="delete-btn"
+                                    @click.stop="removeBranch(branch.id)"
+                                    title="Remove branch"
+                                >
+                                    <svg
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                    >
+                                        <line
+                                            x1="18"
+                                            y1="6"
+                                            x2="6"
+                                            y2="18"
+                                        ></line>
+                                        <line
+                                            x1="6"
+                                            y1="6"
+                                            x2="18"
+                                            y2="18"
+                                        ></line>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div
+                            v-if="expandedBranchId === branch.id"
+                            class="branch-config"
+                        >
+                            <div class="branch-field">
+                                <label class="field-label-sm"
+                                    >Model (optional)</label
+                                >
+                                <select
+                                    class="model-select-sm"
+                                    :value="branch.model || ''"
+                                    @change="(e) => updateBranchModel(branch.id, (e.target as HTMLSelectElement).value)"
+                                >
+                                    <option value="">Use default</option>
+                                    <option
+                                        v-for="m in availableModels"
+                                        :key="m.id"
+                                        :value="m.id"
+                                    >
+                                        {{ m.name }}
+                                    </option>
+                                </select>
+                            </div>
+                            <div class="branch-field">
+                                <label class="field-label-sm"
+                                    >System Prompt (optional)</label
+                                >
+                                <textarea
+                                    class="prompt-textarea-sm"
+                                    :value="branch.prompt || ''"
+                                    @input="(e) => updateBranchPrompt(branch.id, (e.target as HTMLTextAreaElement).value)"
+                                    placeholder="Override system prompt for this branch..."
+                                    rows="3"
+                                ></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Merge Configuration -->
+                <div class="merge-section">
+                    <label class="field-label">Merge Configuration</label>
+                    <p class="field-hint">
+                        After all branches complete, results are merged using
+                        this prompt.
+                    </p>
+                    <div class="merge-field">
+                        <label class="field-label-sm">Merge Model</label>
+                        <select
+                            class="model-select"
+                            :value="
+                                parallelData.mergeModel || 'openai/gpt-4o-mini'
+                            "
+                            @change="(e) => props.editor.commands.updateNodeData(selectedNode!.id, { model: (e.target as HTMLSelectElement).value })"
+                        >
+                            <option
+                                v-for="m in availableModels"
+                                :key="m.id"
+                                :value="m.id"
+                            >
+                                {{ m.name }} ({{ m.provider }})
+                            </option>
+                        </select>
+                    </div>
+                    <div class="merge-field">
+                        <label class="field-label-sm">Merge Prompt</label>
+                        <textarea
+                            class="prompt-textarea"
+                            :value="parallelData.mergePrompt"
+                            @input="(e) => debouncedUpdate('prompt', (e.target as HTMLTextAreaElement).value)"
+                            placeholder="Instructions for merging branch outputs..."
+                            rows="4"
+                        ></textarea>
                     </div>
                 </div>
             </div>
@@ -1640,6 +1912,7 @@ const handleDelete = () => {
     display: flex;
     align-items: center;
     gap: var(--or3-spacing-sm, 8px);
+    padding: var(--or3-spacing-md, 16px);
     padding-bottom: var(--or3-spacing-md, 16px);
     border-bottom: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
     margin-bottom: var(--or3-spacing-md, 16px);
@@ -1726,7 +1999,7 @@ const handleDelete = () => {
 
 /* Description Section */
 .description-section {
-    padding-bottom: var(--or3-spacing-md, 16px);
+    padding: 0 var(--or3-spacing-md, 16px) var(--or3-spacing-md, 16px);
     margin-bottom: var(--or3-spacing-sm, 8px);
 }
 
@@ -1782,7 +2055,7 @@ const handleDelete = () => {
     display: flex;
     flex-wrap: wrap;
     gap: var(--or3-spacing-xs, 4px);
-    padding-bottom: var(--or3-spacing-md, 16px);
+    padding: 0 var(--or3-spacing-md, 16px) var(--or3-spacing-md, 16px);
     border-bottom: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
     margin-bottom: var(--or3-spacing-md, 16px);
 }
@@ -1828,6 +2101,28 @@ const handleDelete = () => {
 .tab-content {
     flex: 1;
     overflow-y: auto;
+    padding: 0;
+}
+
+.tab-content > div {
+    padding: 0 var(--or3-spacing-md, 16px) var(--or3-spacing-md, 16px);
+}
+
+.tab-content::-webkit-scrollbar {
+    width: 6px;
+}
+
+.tab-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.tab-content::-webkit-scrollbar-thumb {
+    background: var(--or3-color-border, rgba(255, 255, 255, 0.15));
+    border-radius: 3px;
+}
+
+.tab-content::-webkit-scrollbar-thumb:hover {
+    background: var(--or3-color-text-muted, rgba(255, 255, 255, 0.25));
 }
 
 .grid {
@@ -2441,14 +2736,14 @@ const handleDelete = () => {
 .add-btn {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
     background: var(--or3-color-primary, #6366f1);
     color: white;
     border: none;
     border-radius: var(--or3-radius-sm, 6px);
-    font-size: 12px;
-    font-weight: 500;
     cursor: pointer;
     transition: background 0.15s;
 }
@@ -2517,5 +2812,205 @@ const handleDelete = () => {
 .delete-btn svg {
     width: 16px;
     height: 16px;
+}
+
+/* Branches Tab (Parallel Node) */
+.branches-tab {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-lg, 20px);
+    padding-bottom: var(--or3-spacing-lg, 20px);
+}
+
+.branches-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--or3-spacing-md, 16px);
+}
+
+.branches-header .field-label {
+    margin-bottom: 0;
+}
+
+.branches-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-md, 12px);
+}
+
+.branch-item {
+    background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--or3-radius-lg, 10px);
+    overflow: hidden;
+    transition: border-color 0.15s;
+}
+
+.branch-item.expanded {
+    border-color: var(--or3-color-primary, #6366f1);
+}
+
+.branch-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--or3-spacing-md, 14px) var(--or3-spacing-md, 16px);
+    cursor: pointer;
+    transition: background 0.15s;
+    gap: var(--or3-spacing-sm, 8px);
+}
+
+.branch-header:hover {
+    background: var(--or3-color-bg-tertiary, rgba(255, 255, 255, 0.03));
+}
+
+.branch-inputs {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: var(--or3-spacing-sm, 12px);
+    min-width: 0;
+}
+
+.branch-label {
+    flex: 1;
+    min-width: 0;
+    font-weight: 500;
+}
+
+.branch-badges {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.branch-badge {
+    padding: 3px 8px;
+    font-size: 10px;
+    font-weight: 600;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.branch-badge.model {
+    background: var(--or3-color-info-bg, rgba(59, 130, 246, 0.15));
+    color: var(--or3-color-info, #3b82f6);
+}
+
+.branch-badge.prompt {
+    background: var(--or3-color-success-bg, rgba(34, 197, 94, 0.15));
+    color: var(--or3-color-success, #22c55e);
+}
+
+.branch-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.expand-icon {
+    width: 16px;
+    height: 16px;
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+    transition: transform 0.2s;
+}
+
+.expand-icon.rotated {
+    transform: rotate(180deg);
+}
+
+.branch-config {
+    padding: var(--or3-spacing-md, 16px);
+    border-top: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    background: var(--or3-color-bg-tertiary, rgba(255, 255, 255, 0.02));
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-md, 16px);
+}
+
+.branch-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-xs, 6px);
+}
+
+.field-label-sm {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.model-select-sm {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--or3-color-bg-primary, #0a0a0f);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--or3-radius-sm, 6px);
+    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.92));
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+
+.model-select-sm:hover {
+    border-color: var(--or3-color-border-hover, rgba(255, 255, 255, 0.15));
+}
+
+.model-select-sm:focus {
+    outline: none;
+    border-color: var(--or3-color-primary, #6366f1);
+}
+
+.prompt-textarea-sm {
+    width: 100%;
+    padding: 12px;
+    background: var(--or3-color-bg-primary, #0a0a0f);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--or3-radius-sm, 6px);
+    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.92));
+    font-size: 13px;
+    font-family: inherit;
+    line-height: 1.5;
+    resize: vertical;
+    min-height: 80px;
+    transition: border-color 0.15s;
+}
+
+.prompt-textarea-sm:hover {
+    border-color: var(--or3-color-border-hover, rgba(255, 255, 255, 0.15));
+}
+
+.prompt-textarea-sm:focus {
+    outline: none;
+    border-color: var(--or3-color-primary, #6366f1);
+}
+
+.prompt-textarea-sm::placeholder {
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+}
+
+/* Merge Section */
+.merge-section {
+    margin-top: var(--or3-spacing-lg, 24px);
+    padding-top: var(--or3-spacing-lg, 24px);
+    border-top: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-sm, 8px);
+}
+
+.merge-section .field-label {
+    margin-bottom: var(--or3-spacing-xs, 4px);
+}
+
+.merge-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-xs, 6px);
+    margin-top: var(--or3-spacing-md, 12px);
 }
 </style>

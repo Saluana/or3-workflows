@@ -39,6 +39,7 @@ const nodeTypes = [
             label: 'Parallel',
             model: 'openai/gpt-4o-mini',
             prompt: 'Combine the outputs into a coherent response.',
+            branches: [],
         },
     },
     {
