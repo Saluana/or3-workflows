@@ -2,7 +2,7 @@
 export { useWorkflowEditor, useEditor } from './composables/useEditor';
 export { useWorkflowExecution, type WorkflowExecutionState, type UseWorkflowExecutionReturn } from './composables/useWorkflowExecution';
 export { useWorkflowStorage, type UseWorkflowStorageReturn } from './composables/useWorkflowStorage';
-export { useExecutionState } from './composables/useExecutionState';
+export { useExecutionState, createExecutionState, type ExecutionState, type UseExecutionStateReturn } from './composables/useExecutionState';
 export { useNodeState } from './composables/useNodeState';
 
 // Core components
@@ -20,16 +20,34 @@ export { default as ValidationOverlay } from './components/ui/ValidationOverlay.
 // Node components
 export { default as NodeWrapper } from './components/nodes/NodeWrapper.vue';
 
-// Re-export key types from core
+// Re-export key types from core for convenience
 export {
+  // Data types
   type WorkflowData,
   type WorkflowNode,
   type WorkflowEdge,
+  type NodeData,
+  type AgentNodeData,
+  type RouterNodeData,
+  type ParallelNodeData,
+  type ToolNodeData,
+  type StartNodeData,
   type NodeStatus,
+  // Execution types
   type ExecutionResult,
+  type ExecutionCallbacks,
+  type ExecutionInput,
+  type ExecutionAdapter,
+  // Storage types
   type StorageAdapter,
   type WorkflowSummary,
+  // Type guards
+  isAgentNodeData,
+  isRouterNodeData,
+  isParallelNodeData,
+  isToolNodeData,
+  isStartNodeData,
 } from '@or3/workflow-core';
 
-// CSS - import in your app: import '@or3/workflow-vue/styles/variables.css'
+// CSS - import in your app: import '@or3/workflow-vue/style.css'
 

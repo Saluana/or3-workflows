@@ -1,4 +1,4 @@
-import { WorkflowNode, WorkflowEdge } from './types';
+import { WorkflowNode, WorkflowEdge, isAgentNodeData } from './types';
 
 export interface ValidationResult {
   isValid: boolean;
@@ -74,18 +74,69 @@ export function validateWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
     });
   }
 
-  // 3. Cycle Detection
-  // TODO: Implement simple DFS cycle check
+  // 3. Cycle Detection using DFS
+  const detectCycles = (): string[] => {
+    const adjacencyList = new Map<string, string[]>();
+    nodes.forEach(n => adjacencyList.set(n.id, []));
+    edges.forEach(e => {
+      adjacencyList.get(e.source)?.push(e.target);
+    });
+
+    const WHITE = 0; // Unvisited
+    const GRAY = 1;  // In current path
+    const BLACK = 2; // Fully processed
+    const color = new Map<string, number>();
+    nodes.forEach(n => color.set(n.id, WHITE));
+    
+    const cycleNodes: string[] = [];
+
+    const dfs = (nodeId: string): boolean => {
+      color.set(nodeId, GRAY);
+      const neighbors = adjacencyList.get(nodeId) || [];
+      
+      for (const neighbor of neighbors) {
+        if (color.get(neighbor) === GRAY) {
+          // Back edge found - cycle detected
+          cycleNodes.push(nodeId);
+          return true;
+        }
+        if (color.get(neighbor) === WHITE && dfs(neighbor)) {
+          cycleNodes.push(nodeId);
+          return true;
+        }
+      }
+      
+      color.set(nodeId, BLACK);
+      return false;
+    };
+
+    for (const node of nodes) {
+      if (color.get(node.id) === WHITE) {
+        dfs(node.id);
+      }
+    }
+
+    return cycleNodes;
+  };
+
+  const cycleNodes = detectCycles();
+  if (cycleNodes.length > 0) {
+    errors.push({
+      type: 'error',
+      code: 'CYCLE_DETECTED',
+      message: `Workflow contains a cycle involving node(s): ${cycleNodes.join(', ')}`,
+      nodeId: cycleNodes[0],
+    });
+  }
 
   // 4. Node Specific Checks
   nodes.forEach(node => {
     // Agent Node Checks
-    if (node.type === 'agent') {
-      const data = node.data as any; // Cast to access specific props
-      if (!data.model) {
+    if (node.type === 'agent' && isAgentNodeData(node.data)) {
+      if (!node.data.model) {
         errors.push({ type: 'error', code: 'MISSING_MODEL', message: 'Agent node missing model', nodeId: node.id });
       }
-      if (!data.prompt) {
+      if (!node.data.prompt) {
         warnings.push({ type: 'warning', code: 'EMPTY_PROMPT', message: 'Agent node has empty prompt', nodeId: node.id });
       }
     }

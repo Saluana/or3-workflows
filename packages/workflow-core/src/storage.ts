@@ -3,7 +3,7 @@ import type {
   WorkflowData,
   WorkflowSummary,
 } from './types';
-import { WorkflowDataSchema, SCHEMA_VERSION } from './types';
+import { WorkflowDataSchema, SCHEMA_VERSION, generateWorkflowId, isVersionCompatible } from './types';
 
 // ============================================================================
 // Constants
@@ -32,6 +32,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   /**
    * Load a workflow by ID.
+   * @throws Error if workflow not found or version incompatible
    */
   async load(id: string): Promise<WorkflowData> {
     const stored = this.getStoredWorkflows();
@@ -39,6 +40,14 @@ export class LocalStorageAdapter implements StorageAdapter {
     
     if (!workflow) {
       throw new Error(`Workflow not found: ${id}`);
+    }
+
+    // Check version compatibility
+    if (workflow.meta?.version && !isVersionCompatible(workflow.meta.version)) {
+      console.warn(
+        `Workflow "${id}" has version ${workflow.meta.version} which may be incompatible ` +
+        `with current schema version ${SCHEMA_VERSION}. Loading anyway.`
+      );
     }
 
     // Validate the loaded data
@@ -52,8 +61,8 @@ export class LocalStorageAdapter implements StorageAdapter {
     // Validate before saving
     const validated = WorkflowDataSchema.parse(workflow) as WorkflowData;
     
-    // Generate ID if not present in meta
-    const id = this.generateId(validated.meta.name);
+    // Generate ID from workflow name
+    const id = generateWorkflowId(validated.meta.name);
     
     // Update timestamps
     const now = new Date().toISOString();
@@ -237,17 +246,6 @@ export class LocalStorageAdapter implements StorageAdapter {
     }
   }
 
-  /**
-   * Generate a unique ID for a workflow.
-   */
-  private generateId(name: string): string {
-    const slug = name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '');
-    const timestamp = Date.now().toString(36);
-    return `${slug}-${timestamp}`;
-  }
 }
 
 // ============================================================================
@@ -295,6 +293,7 @@ export class IndexedDBAdapter implements StorageAdapter {
 
   /**
    * Load a workflow by ID.
+   * @throws Error if workflow not found or version incompatible
    */
   async load(id: string): Promise<WorkflowData> {
     const db = await this.getDB();
@@ -310,7 +309,17 @@ export class IndexedDBAdapter implements StorageAdapter {
           reject(new Error(`Workflow not found: ${id}`));
           return;
         }
-        resolve(WorkflowDataSchema.parse(request.result.data) as WorkflowData);
+        const workflow = request.result.data;
+        
+        // Check version compatibility
+        if (workflow.meta?.version && !isVersionCompatible(workflow.meta.version)) {
+          console.warn(
+            `Workflow "${id}" has version ${workflow.meta.version} which may be incompatible ` +
+            `with current schema version ${SCHEMA_VERSION}. Loading anyway.`
+          );
+        }
+        
+        resolve(WorkflowDataSchema.parse(workflow) as WorkflowData);
       };
     });
   }
@@ -322,7 +331,7 @@ export class IndexedDBAdapter implements StorageAdapter {
     const db = await this.getDB();
     const validated = WorkflowDataSchema.parse(workflow) as WorkflowData;
     
-    const id = this.generateId(validated.meta.name);
+    const id = generateWorkflowId(validated.meta.name);
     const now = new Date().toISOString();
 
     const record = {
@@ -432,18 +441,6 @@ export class IndexedDBAdapter implements StorageAdapter {
       }
       throw error;
     }
-  }
-
-  /**
-   * Generate a unique ID for a workflow.
-   */
-  private generateId(name: string): string {
-    const slug = name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '');
-    const timestamp = Date.now().toString(36);
-    return `${slug}-${timestamp}`;
   }
 
   /**

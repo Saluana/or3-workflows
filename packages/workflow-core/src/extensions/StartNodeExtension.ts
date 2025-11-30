@@ -36,6 +36,8 @@ export const StartNodeExtension: NodeExtension = {
   /**
    * Execute the start node.
    * Simply passes through the input to connected nodes.
+   * 
+   * @internal Called by the execution adapter. Do not call directly.
    */
   async execute(context: ExecutionContext): Promise<{ output: string; nextNodes: string[] }> {
     // Start node just passes through the input

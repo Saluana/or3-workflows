@@ -1,4 +1,4 @@
-import { ref, readonly } from 'vue';
+import { ref, readonly, type Ref, type DeepReadonly } from 'vue';
 
 export interface ExecutionState {
   isRunning: boolean;
@@ -8,15 +8,36 @@ export interface ExecutionState {
   error: Error | null;
 }
 
-const state = ref<ExecutionState>({
-  isRunning: false,
-  streamingContent: '',
-  nodeStatuses: {},
-  currentNodeId: null,
-  error: null,
-});
+export interface UseExecutionStateReturn {
+  state: DeepReadonly<Ref<ExecutionState>>;
+  setRunning: (isRunning: boolean) => void;
+  setStreamingContent: (content: string) => void;
+  appendStreamingContent: (content: string) => void;
+  setNodeStatus: (nodeId: string, status: 'idle' | 'active' | 'completed' | 'error') => void;
+  setCurrentNodeId: (nodeId: string | null) => void;
+  setError: (error: Error | null) => void;
+  reset: () => void;
+}
 
-export function useExecutionState() {
+/**
+ * Factory function to create execution state.
+ * Each call creates a new isolated state instance.
+ * 
+ * @example
+ * ```ts
+ * // Create isolated state for a workflow instance
+ * const { state, setRunning, reset } = createExecutionState();
+ * ```
+ */
+export function createExecutionState(): UseExecutionStateReturn {
+  const state = ref<ExecutionState>({
+    isRunning: false,
+    streamingContent: '',
+    nodeStatuses: {},
+    currentNodeId: null,
+    error: null,
+  });
+
   const setRunning = (isRunning: boolean) => {
     state.value.isRunning = isRunning;
   };
@@ -61,4 +82,20 @@ export function useExecutionState() {
     setError,
     reset,
   };
+}
+
+// Default shared instance for backward compatibility
+let defaultInstance: UseExecutionStateReturn | null = null;
+
+/**
+ * Get or create a shared execution state instance.
+ * For multiple workflow instances, use `createExecutionState()` instead.
+ * 
+ * @deprecated Use `createExecutionState()` for new code to avoid shared state issues.
+ */
+export function useExecutionState(): UseExecutionStateReturn {
+  if (!defaultInstance) {
+    defaultInstance = createExecutionState();
+  }
+  return defaultInstance;
 }

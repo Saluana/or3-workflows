@@ -52,8 +52,9 @@ export const AgentNodeExtension: NodeExtension = {
 
   /**
    * Execute the agent node.
-   * This is a placeholder - actual execution is handled by OpenRouterExecutionAdapter.
-   * Extensions can override this for custom execution logic.
+   * 
+   * @internal This is a placeholder - actual execution is handled by OpenRouterExecutionAdapter.
+   * Do not call this method directly. Extensions can override this for custom execution logic.
    */
   async execute(context: ExecutionContext): Promise<{ output: string; nextNodes: string[] }> {
     // The actual LLM call is handled by the execution adapter

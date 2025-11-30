@@ -12,52 +12,52 @@ This document provides the implementation checklist for locking down the or3-wor
 
 ### 1.1 Create `createWorkflowEditor` Factory Function
 
--   [ ] Add `createWorkflowEditor` function to `packages/workflow-core/src/editor.ts`
-    -   [ ] Function accepts `EditorOptions` and returns `WorkflowEditor`
-    -   [ ] Add JSDoc documentation with usage example
--   [ ] Add unit test for factory function in `packages/workflow-core/src/__tests__/editor.test.ts`
+-   [x] Add `createWorkflowEditor` function to `packages/workflow-core/src/editor.ts`
+    -   [x] Function accepts `EditorOptions` and returns `WorkflowEditor`
+    -   [x] Add JSDoc documentation with usage example
+-   [x] Add unit test for factory function in `packages/workflow-core/src/__tests__/editor.test.ts`
 
 ### 1.2 Refactor `index.ts` to Explicit Exports
 
--   [ ] Replace `export * from './types'` with explicit type exports
-    -   [ ] Export public types: `WorkflowData`, `WorkflowNode`, `WorkflowEdge`
-    -   [ ] Export node data types: `NodeData`, `AgentNodeData`, `RouterNodeData`, `ParallelNodeData`, `ToolNodeData`, `StartNodeData`
-    -   [ ] Export execution types: `ExecutionInput`, `ExecutionResult`, `ExecutionCallbacks`, `ExecutionOptions`, `ChatMessage`, `NodeStatus`
-    -   [ ] Export extension types: `Extension`, `NodeExtension`, `PortDefinition`
-    -   [ ] Export storage types: `StorageAdapter`, `WorkflowSummary`
--   [ ] Export `createWorkflowEditor` from `./editor`
--   [ ] Export `WorkflowEditor` type (for typing, but factory is preferred)
--   [ ] Export `EditorOptions` type
--   [ ] Replace `export * from './validation'` with explicit export
-    -   [ ] Export `validateWorkflow` function
-    -   [ ] Export `ValidationResult`, `ValidationError`, `ValidationWarning` types
--   [ ] Replace `export * from './execution'` with explicit exports
-    -   [ ] Export `ExecutionAdapter` type from types
-    -   [ ] Export `OpenRouterExecutionAdapter` class
--   [ ] Replace `export * from './storage'` with explicit exports
-    -   [ ] Export `LocalStorageAdapter` class
--   [ ] Replace `export * from './extensions'` with explicit exports
-    -   [ ] Export `StartNodeExtension`
-    -   [ ] Export `AgentNodeExtension`
-    -   [ ] Export `RouterNodeExtension`
-    -   [ ] Export `ParallelNodeExtension`
-    -   [ ] Export `ToolNodeExtension`
--   [ ] Export `SCHEMA_VERSION` constant
--   [ ] Remove `export * from './history'` (internal)
--   [ ] Remove `export * from './commands'` (internal, accessed via editor.commands)
+-   [x] Replace `export * from './types'` with explicit type exports
+    -   [x] Export public types: `WorkflowData`, `WorkflowNode`, `WorkflowEdge`
+    -   [x] Export node data types: `NodeData`, `AgentNodeData`, `RouterNodeData`, `ParallelNodeData`, `ToolNodeData`, `StartNodeData`
+    -   [x] Export execution types: `ExecutionInput`, `ExecutionResult`, `ExecutionCallbacks`, `ExecutionOptions`, `ChatMessage`, `NodeStatus`
+    -   [x] Export extension types: `Extension`, `NodeExtension`, `PortDefinition`
+    -   [x] Export storage types: `StorageAdapter`, `WorkflowSummary`
+-   [x] Export `createWorkflowEditor` from `./editor`
+-   [x] Export `WorkflowEditor` type (for typing, but factory is preferred)
+-   [x] Export `EditorOptions` type
+-   [x] Replace `export * from './validation'` with explicit export
+    -   [x] Export `validateWorkflow` function
+    -   [x] Export `ValidationResult`, `ValidationError`, `ValidationWarning` types
+-   [x] Replace `export * from './execution'` with explicit exports
+    -   [x] Export `ExecutionAdapter` type from types
+    -   [x] Export `OpenRouterExecutionAdapter` class
+-   [x] Replace `export * from './storage'` with explicit exports
+    -   [x] Export `LocalStorageAdapter` class
+-   [x] Replace `export * from './extensions'` with explicit exports
+    -   [x] Export `StartNodeExtension`
+    -   [x] Export `AgentNodeExtension`
+    -   [x] Export `RouterNodeExtension`
+    -   [x] Export `ParallelNodeExtension`
+    -   [x] Export `ToolNodeExtension`
+-   [x] Export `SCHEMA_VERSION` constant
+-   [x] Remove `export * from './history'` (internal)
+-   [x] Remove `export * from './commands'` (internal, accessed via editor.commands)
 
 ### 1.3 Add JSDoc to Public Types
 
--   [ ] Add JSDoc to all exported types in `types.ts`
--   [ ] Add JSDoc to `WorkflowEditor` class and public methods
--   [ ] Add JSDoc to `validateWorkflow` function
--   [ ] Add JSDoc to `LocalStorageAdapter` class
+-   [x] Add JSDoc to all exported types in `types.ts`
+-   [x] Add JSDoc to `WorkflowEditor` class and public methods
+-   [x] Add JSDoc to `validateWorkflow` function
+-   [x] Add JSDoc to `LocalStorageAdapter` class
 
 ### 1.4 Verify Build and Types
 
--   [ ] Run `bun run build` in `packages/workflow-core`
--   [ ] Verify `.d.ts` files only contain public exports
--   [ ] Run `bun run typecheck` to ensure no type errors
+-   [x] Run `bun run build` in `packages/workflow-core`
+-   [x] Verify `.d.ts` files only contain public exports
+-   [x] Run `bun run typecheck` to ensure no type errors
 
 ---
 
@@ -67,70 +67,70 @@ This document provides the implementation checklist for locking down the or3-wor
 
 ### 2.1 Rename `useEditor` to `useWorkflowEditor`
 
--   [ ] Rename function in `packages/workflow-vue/src/composables/useEditor.ts`
--   [ ] Add backward-compatible alias `export const useEditor = useWorkflowEditor`
--   [ ] Update JSDoc with full usage example
--   [ ] Update import in index.ts
+-   [x] Rename function in `packages/workflow-vue/src/composables/useEditor.ts`
+-   [x] Add backward-compatible alias `export const useEditor = useWorkflowEditor`
+-   [x] Update JSDoc with full usage example
+-   [x] Update import in index.ts
 
 ### 2.2 Create `useWorkflowExecution` Composable
 
--   [ ] Create `packages/workflow-vue/src/composables/useWorkflowExecution.ts`
-    -   [ ] Define `WorkflowExecutionState` interface
-    -   [ ] Define `UseWorkflowExecutionReturn` interface
-    -   [ ] Implement `useWorkflowExecution()` composable
-        -   [ ] Implement `execute(adapter, workflow, input)` function
-        -   [ ] Implement `stop(adapter)` function
-        -   [ ] Implement `reset()` function
-        -   [ ] Wire up `ExecutionCallbacks` to update reactive state
-    -   [ ] Add JSDoc documentation
--   [ ] Add unit tests in `packages/workflow-vue/src/composables/__tests__/`
+-   [x] Create `packages/workflow-vue/src/composables/useWorkflowExecution.ts`
+    -   [x] Define `WorkflowExecutionState` interface
+    -   [x] Define `UseWorkflowExecutionReturn` interface
+    -   [x] Implement `useWorkflowExecution()` composable
+        -   [x] Implement `execute(adapter, workflow, input)` function
+        -   [x] Implement `stop(adapter)` function
+        -   [x] Implement `reset()` function
+        -   [x] Wire up `ExecutionCallbacks` to update reactive state
+    -   [x] Add JSDoc documentation
+-   [x] Add unit tests in `packages/workflow-vue/src/composables/__tests__/`
 
 ### 2.3 Create `useWorkflowStorage` Composable
 
--   [ ] Create `packages/workflow-vue/src/composables/useWorkflowStorage.ts`
-    -   [ ] Define `UseWorkflowStorageReturn` interface
-    -   [ ] Implement `useWorkflowStorage(adapter: StorageAdapter)` composable
-        -   [ ] Implement `loadList()` function
-        -   [ ] Implement `load(id)` function
-        -   [ ] Implement `save(workflow)` function
-        -   [ ] Implement `remove(id)` function
-    -   [ ] Add JSDoc documentation
--   [ ] Add unit tests with mock adapter
+-   [x] Create `packages/workflow-vue/src/composables/useWorkflowStorage.ts`
+    -   [x] Define `UseWorkflowStorageReturn` interface
+    -   [x] Implement `useWorkflowStorage(adapter: StorageAdapter)` composable
+        -   [x] Implement `loadList()` function
+        -   [x] Implement `load(id)` function
+        -   [x] Implement `save(workflow)` function
+        -   [x] Implement `remove(id)` function
+    -   [x] Add JSDoc documentation
+-   [x] Add unit tests with mock adapter
 
 ### 2.4 Refactor `index.ts` to Explicit Exports
 
--   [ ] Export composables
-    -   [ ] `useWorkflowEditor` (primary)
-    -   [ ] `useEditor` (alias for backward compat)
-    -   [ ] `useWorkflowExecution`
-    -   [ ] `useWorkflowStorage`
-    -   [ ] `useExecutionState`
--   [ ] Export core components
-    -   [ ] `WorkflowCanvas`
-    -   [ ] `NodePalette`
-    -   [ ] `NodeInspector`
-    -   [ ] `ChatPanel`
--   [ ] Export optional components
-    -   [ ] `Controls`
-    -   [ ] `MiniMap`
-    -   [ ] `EdgeLabelEditor`
-    -   [ ] `ValidationOverlay`
--   [ ] Export `NodeWrapper` for custom node rendering
--   [ ] Re-export key types from `@or3/workflow-core`
-    -   [ ] `WorkflowData`
-    -   [ ] `WorkflowNode`
-    -   [ ] `WorkflowEdge`
-    -   [ ] `NodeStatus`
-    -   [ ] `ExecutionResult`
-    -   [ ] `StorageAdapter`
-    -   [ ] `WorkflowSummary`
--   [ ] Remove individual node component exports (internal)
+-   [x] Export composables
+    -   [x] `useWorkflowEditor` (primary)
+    -   [x] `useEditor` (alias for backward compat)
+    -   [x] `useWorkflowExecution`
+    -   [x] `useWorkflowStorage`
+    -   [x] `useExecutionState`
+-   [x] Export core components
+    -   [x] `WorkflowCanvas`
+    -   [x] `NodePalette`
+    -   [x] `NodeInspector`
+    -   [x] `ChatPanel`
+-   [x] Export optional components
+    -   [x] `Controls`
+    -   [x] `MiniMap`
+    -   [x] `EdgeLabelEditor`
+    -   [x] `ValidationOverlay`
+-   [x] Export `NodeWrapper` for custom node rendering
+-   [x] Re-export key types from `@or3/workflow-core`
+    -   [x] `WorkflowData`
+    -   [x] `WorkflowNode`
+    -   [x] `WorkflowEdge`
+    -   [x] `NodeStatus`
+    -   [x] `ExecutionResult`
+    -   [x] `StorageAdapter`
+    -   [x] `WorkflowSummary`
+-   [x] Remove individual node component exports (internal)
 
 ### 2.5 Verify Build
 
--   [ ] Run `bun run build` in `packages/workflow-vue`
--   [ ] Verify `.d.ts` files only contain public exports
--   [ ] Run `bun run typecheck`
+-   [x] Run `bun run build` in `packages/workflow-vue`
+-   [x] Verify `.d.ts` files only contain public exports
+-   [x] Run `bun run typecheck`
 
 ---
 
@@ -140,26 +140,28 @@ This document provides the implementation checklist for locking down the or3-wor
 
 ### 3.1 Validate Client Injection
 
--   [ ] Review constructor in `packages/workflow-core/src/execution.ts`
--   [ ] Add validation that `client` is provided
--   [ ] Throw descriptive error if client is null/undefined
--   [ ] Add JSDoc with usage example showing client injection
+-   [x] Review constructor in `packages/workflow-core/src/execution.ts`
+-   [x] Add validation that `client` is provided
+-   [x] Throw descriptive error if client is null/undefined
+-   [x] Add JSDoc with usage example showing client injection
 
 ### 3.2 Audit for Direct Fetch Usage
 
--   [ ] Search for `fetch(` in execution.ts
--   [ ] Replace any direct fetch calls with SDK methods
--   [ ] For model capabilities:
-    -   [ ] Check if OpenRouter SDK has a models API
-    -   [ ] If not, use static capabilities or cached data
--   [ ] Ensure all LLM calls use `client.chat.completions.create()`
--   [ ] Add/update unit tests for adapter
+-   [x] Search for `fetch(` in execution.ts
+-   [x] Replace any direct fetch calls with SDK methods
+-   [x] For model capabilities:
+    -   [x] Check if OpenRouter SDK has a models API
+    -   [x] If not, use static capabilities or cached data (used static inference)
+-   [x] Ensure all LLM calls use `client.chat.send()`
+-   [x] Add/update unit tests for adapter
 
 ### 3.3 Add Adapter Tests
 
--   [ ] Add test for constructor validation
--   [ ] Add test with mock OpenRouter client
--   [ ] Add test for execution callbacks being called
+-   [x] Add test for constructor validation
+-   [x] Add test with mock OpenRouter client
+-   [x] Add test for execution callbacks being called
+-   [x] Add tests for getModelCapabilities
+-   [x] Add tests for supportsModality
 
 ---
 
@@ -169,39 +171,39 @@ This document provides the implementation checklist for locking down the or3-wor
 
 ### 4.1 Verify `StorageAdapter` Interface
 
--   [ ] Review interface in `packages/workflow-core/src/types.ts`
--   [ ] Ensure all required methods are defined:
-    -   [ ] `load(id: string): Promise<WorkflowData>`
-    -   [ ] `save(workflow: WorkflowData): Promise<string>`
-    -   [ ] `delete(id: string): Promise<void>`
-    -   [ ] `list(): Promise<WorkflowSummary[]>`
--   [ ] Add optional methods:
-    -   [ ] `export?(workflow: WorkflowData): string`
-    -   [ ] `import?(json: string): WorkflowData`
--   [ ] Add JSDoc documentation
+-   [x] Review interface in `packages/workflow-core/src/types.ts`
+-   [x] Ensure all required methods are defined:
+    -   [x] `load(id: string): Promise<WorkflowData>`
+    -   [x] `save(workflow: WorkflowData): Promise<string>`
+    -   [x] `delete(id: string): Promise<void>`
+    -   [x] `list(): Promise<WorkflowSummary[]>`
+-   [x] Add optional methods:
+    -   [x] `export(workflow: WorkflowData): string`
+    -   [x] `import(json: string): WorkflowData`
+-   [x] Add JSDoc documentation with implementation example
 
 ### 4.2 Verify `ExecutionCallbacks` Interface
 
--   [ ] Review interface in `packages/workflow-core/src/types.ts`
--   [ ] Ensure all callbacks are documented:
-    -   [ ] `onNodeStart(nodeId: string): void`
-    -   [ ] `onNodeFinish(nodeId: string, output: string): void`
-    -   [ ] `onNodeError(nodeId: string, error: Error): void`
-    -   [ ] `onToken(nodeId: string, token: string): void`
-    -   [ ] `onRouteSelected?(nodeId: string, routeId: string): void`
--   [ ] Add JSDoc documentation
+-   [x] Review interface in `packages/workflow-core/src/types.ts`
+-   [x] Ensure all callbacks are documented:
+    -   [x] `onNodeStart(nodeId: string): void`
+    -   [x] `onNodeFinish(nodeId: string, output: string): void`
+    -   [x] `onNodeError(nodeId: string, error: Error): void`
+    -   [x] `onToken(nodeId: string, token: string): void`
+    -   [x] `onRouteSelected?(nodeId: string, routeId: string): void`
+-   [x] Add JSDoc documentation with usage example
 
 ### 4.3 Verify `ExecutionResult` Interface
 
--   [ ] Review interface in `packages/workflow-core/src/types.ts`
--   [ ] Ensure all fields are defined:
-    -   [ ] `success: boolean`
-    -   [ ] `output: string`
-    -   [ ] `nodeOutputs: Record<string, string>`
-    -   [ ] `duration: number`
-    -   [ ] `error?: Error`
-    -   [ ] `usage?: TokenUsage`
--   [ ] Add JSDoc documentation
+-   [x] Review interface in `packages/workflow-core/src/types.ts`
+-   [x] Ensure all fields are defined:
+    -   [x] `success: boolean`
+    -   [x] `output: string`
+    -   [x] `nodeOutputs: Record<string, string>`
+    -   [x] `duration: number`
+    -   [x] `error?: Error`
+    -   [x] `usage?: TokenUsage`
+-   [x] Add JSDoc documentation with usage example
 
 ---
 
@@ -211,26 +213,26 @@ This document provides the implementation checklist for locking down the or3-wor
 
 ### 5.1 Refactor Demo Composables
 
--   [ ] Extract reusable parts of `demo-v2/src/composables/useWorkflowExecution.ts`
-    -   [ ] Move generic execution state management to `@or3/workflow-vue`
-    -   [ ] Keep demo-specific chat/message handling in demo-v2
--   [ ] Extract reusable parts of `demo-v2/src/composables/useWorkflowStorage.ts`
-    -   [ ] Move generic storage wrapper to `@or3/workflow-vue`
-    -   [ ] Keep demo-specific UI logic in demo-v2
+-   [x] Extract reusable parts of `demo-v2/src/composables/useWorkflowExecution.ts`
+    -   [x] Move generic execution state management to `@or3/workflow-vue`
+    -   [x] Keep demo-specific chat/message handling in demo-v2
+-   [x] Extract reusable parts of `demo-v2/src/composables/useWorkflowStorage.ts`
+    -   [x] Move generic storage wrapper to `@or3/workflow-vue`
+    -   [x] Keep demo-specific UI logic in demo-v2
 
 ### 5.2 Update Demo Imports
 
--   [ ] Update `demo-v2/src/App.vue` to import from packages
-    -   [ ] Import `useWorkflowEditor` from `@or3/workflow-vue`
-    -   [ ] Import `useWorkflowExecution` from `@or3/workflow-vue`
-    -   [ ] Import `useWorkflowStorage` from `@or3/workflow-vue`
--   [ ] Update `demo-v2/src/composables/index.ts` to re-export package composables
--   [ ] Remove duplicated code from demo composables
+-   [x] Update `demo-v2/src/App.vue` to import from packages
+    -   [x] Import `useWorkflowEditor` from `@or3/workflow-vue`
+    -   [x] Import `useWorkflowExecution` from `@or3/workflow-vue`
+    -   [x] Import `useWorkflowStorage` from `@or3/workflow-vue`
+-   [x] Update `demo-v2/src/composables/index.ts` to re-export package composables
+-   [x] Remove duplicated code from demo composables
 
 ### 5.3 Verify Demo Still Works
 
--   [ ] Run `bun install` in demo-v2 directory
--   [ ] Run `bun dev` and verify app loads
+-   [x] Run `bun install` in demo-v2 directory
+-   [x] Run `bun dev` and verify app loads
 -   [ ] Test creating a workflow
 -   [ ] Test saving/loading workflow
 -   [ ] Test executing workflow (with API key)

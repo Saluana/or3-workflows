@@ -60,6 +60,82 @@ describe('OpenRouterExecutionAdapter', () => {
     };
   });
 
+  describe('constructor', () => {
+    it('should throw error if client is null', () => {
+      expect(() => new OpenRouterExecutionAdapter(null as any)).toThrow(
+        'OpenRouterExecutionAdapter requires an OpenRouter client instance'
+      );
+    });
+
+    it('should throw error if client is undefined', () => {
+      expect(() => new OpenRouterExecutionAdapter(undefined as any)).toThrow(
+        'OpenRouterExecutionAdapter requires an OpenRouter client instance'
+      );
+    });
+
+    it('should accept valid client', () => {
+      const client = createMockClient();
+      expect(() => new OpenRouterExecutionAdapter(client as any)).not.toThrow();
+    });
+
+    it('should use default options when none provided', () => {
+      const client = createMockClient();
+      const adapter = new OpenRouterExecutionAdapter(client as any);
+      expect(adapter).toBeDefined();
+    });
+
+    it('should accept custom options', () => {
+      const client = createMockClient();
+      const adapter = new OpenRouterExecutionAdapter(client as any, {
+        defaultModel: 'anthropic/claude-3-opus',
+        maxRetries: 5,
+        retryDelayMs: 2000,
+      });
+      expect(adapter).toBeDefined();
+    });
+  });
+
+  describe('getModelCapabilities', () => {
+    it('should return capabilities for vision models', async () => {
+      const capabilities = await adapter.getModelCapabilities('openai/gpt-4o');
+      expect(capabilities).toBeDefined();
+      expect(capabilities?.inputModalities).toContain('image');
+    });
+
+    it('should return capabilities for Claude 3 models', async () => {
+      const capabilities = await adapter.getModelCapabilities('anthropic/claude-3-opus');
+      expect(capabilities).toBeDefined();
+      expect(capabilities?.inputModalities).toContain('image');
+      expect(capabilities?.contextLength).toBe(200000);
+    });
+
+    it('should return text-only for unknown models', async () => {
+      const capabilities = await adapter.getModelCapabilities('unknown/model');
+      expect(capabilities).toBeDefined();
+      expect(capabilities?.inputModalities).toEqual(['text']);
+    });
+
+    it('should cache capabilities', async () => {
+      const first = await adapter.getModelCapabilities('openai/gpt-4o');
+      const second = await adapter.getModelCapabilities('openai/gpt-4o');
+      expect(first).toBe(second); // Same reference
+    });
+  });
+
+  describe('supportsModality', () => {
+    it('should return true for text on any model', async () => {
+      expect(await adapter.supportsModality('unknown/model', 'text')).toBe(true);
+    });
+
+    it('should return true for image on vision models', async () => {
+      expect(await adapter.supportsModality('openai/gpt-4o', 'image')).toBe(true);
+    });
+
+    it('should return false for image on text-only models', async () => {
+      expect(await adapter.supportsModality('openai/gpt-3.5-turbo', 'image')).toBe(false);
+    });
+  });
+
   describe('execute', () => {
     it('should execute a simple workflow with start and agent nodes', async () => {
       const workflow = createTestWorkflow();

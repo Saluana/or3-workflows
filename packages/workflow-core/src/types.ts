@@ -3,6 +3,49 @@ import { z } from 'zod';
 export const SCHEMA_VERSION = '2.0.0';
 
 // ============================================================================
+// Utility Functions
+// ============================================================================
+
+/**
+ * Generate a unique slug-based ID from a name.
+ * @param name - The name to convert to a slug ID
+ * @returns A unique ID in format "slug-timestamp"
+ */
+export function generateWorkflowId(name: string): string {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+  const timestamp = Date.now().toString(36);
+  return `${slug}-${timestamp}`;
+}
+
+/**
+ * Check if a workflow version is compatible with the current schema.
+ * @param version - The version string to check
+ * @returns true if compatible (same major version)
+ */
+export function isVersionCompatible(version: string): boolean {
+  const currentMajor = parseInt(SCHEMA_VERSION.split('.')[0] || '0', 10);
+  const checkMajor = parseInt(version.split('.')[0] || '0', 10);
+  return currentMajor === checkMajor;
+}
+
+/**
+ * Parse a semantic version string.
+ * @param version - Version string (e.g., "2.0.0")
+ * @returns Object with major, minor, patch numbers
+ */
+export function parseVersion(version: string): { major: number; minor: number; patch: number } {
+  const parts = version.split('.').map(p => parseInt(p, 10) || 0);
+  return {
+    major: parts[0] || 0,
+    minor: parts[1] || 0,
+    patch: parts[2] || 0,
+  };
+}
+
+// ============================================================================
 // Multimodal Types
 // ============================================================================
 
@@ -88,6 +131,46 @@ export type NodeData =
   | RouterNodeData
   | ParallelNodeData
   | ToolNodeData;
+
+// ============================================================================
+// Type Guards for Node Data
+// ============================================================================
+
+/**
+ * Type guard to check if node data is AgentNodeData.
+ */
+export function isAgentNodeData(data: NodeData): data is AgentNodeData {
+  return 'model' in data && 'prompt' in data && !('routes' in data) && !('branches' in data);
+}
+
+/**
+ * Type guard to check if node data is RouterNodeData.
+ */
+export function isRouterNodeData(data: NodeData): data is RouterNodeData {
+  return 'routes' in data && Array.isArray((data as RouterNodeData).routes);
+}
+
+/**
+ * Type guard to check if node data is ParallelNodeData.
+ */
+export function isParallelNodeData(data: NodeData): data is ParallelNodeData {
+  return 'branches' in data && Array.isArray((data as ParallelNodeData).branches);
+}
+
+/**
+ * Type guard to check if node data is ToolNodeData.
+ */
+export function isToolNodeData(data: NodeData): data is ToolNodeData {
+  return 'toolId' in data;
+}
+
+/**
+ * Type guard to check if node data is StartNodeData.
+ * Start nodes have minimal data - only label and optional status.
+ */
+export function isStartNodeData(data: NodeData): data is StartNodeData {
+  return !isAgentNodeData(data) && !isRouterNodeData(data) && !isParallelNodeData(data) && !isToolNodeData(data);
+}
 
 /**
  * Base interface for all node data.
@@ -307,33 +390,99 @@ export const WorkflowDataSchema = z.object({
 // Execution Types
 // ============================================================================
 
-/** Callbacks for execution events */
+/**
+ * Callbacks for workflow execution events.
+ * 
+ * Implement these callbacks to receive real-time updates during workflow execution,
+ * including streaming tokens, node lifecycle events, and routing decisions.
+ *
+ * @example
+ * ```typescript
+ * const callbacks: ExecutionCallbacks = {
+ *   onNodeStart: (nodeId) => console.log(`Node ${nodeId} started`),
+ *   onNodeFinish: (nodeId, output) => console.log(`Node ${nodeId} finished: ${output}`),
+ *   onNodeError: (nodeId, error) => console.error(`Node ${nodeId} error:`, error),
+ *   onToken: (nodeId, token) => process.stdout.write(token),
+ *   onRouteSelected: (nodeId, routeId) => console.log(`Router ${nodeId} selected ${routeId}`),
+ * };
+ * ```
+ */
 export interface ExecutionCallbacks {
-  /** Called when a node starts executing */
+  /**
+   * Called when a node begins execution.
+   * Use this to update UI state (e.g., show loading indicator).
+   * @param nodeId - The ID of the node that started.
+   */
   onNodeStart: (nodeId: string) => void;
-  /** Called when a node finishes executing */
+  
+  /**
+   * Called when a node successfully completes execution.
+   * @param nodeId - The ID of the node that finished.
+   * @param output - The output produced by the node.
+   */
   onNodeFinish: (nodeId: string, output: string) => void;
-  /** Called when a node encounters an error */
+  
+  /**
+   * Called when a node encounters an error during execution.
+   * The workflow will stop after this callback.
+   * @param nodeId - The ID of the node that errored.
+   * @param error - The error that occurred.
+   */
   onNodeError: (nodeId: string, error: Error) => void;
-  /** Called for each streaming token */
+  
+  /**
+   * Called for each streaming token from the LLM.
+   * Use this to display real-time text generation.
+   * @param nodeId - The ID of the node generating tokens.
+   * @param token - The token/chunk of text received.
+   */
   onToken: (nodeId: string, token: string) => void;
-  /** Called when a router selects a route */
+  
+  /**
+   * Called when a router node selects a route.
+   * Optional - use this to visualize routing decisions.
+   * @param nodeId - The ID of the router node.
+   * @param routeId - The ID of the selected route.
+   */
   onRouteSelected?: (nodeId: string, routeId: string) => void;
 }
 
-/** Result of workflow execution */
+/**
+ * Result returned after workflow execution completes.
+ * 
+ * Contains the final output, per-node outputs, timing information,
+ * and any errors that occurred.
+ *
+ * @example
+ * ```typescript
+ * const result = await adapter.execute(workflow, input, callbacks);
+ * 
+ * if (result.success) {
+ *   console.log('Output:', result.output);
+ *   console.log('Duration:', result.duration, 'ms');
+ *   console.log('Node outputs:', result.nodeOutputs);
+ * } else {
+ *   console.error('Execution failed:', result.error?.message);
+ * }
+ * ```
+ */
 export interface ExecutionResult {
-  /** Whether execution completed successfully */
+  /** Whether execution completed successfully without errors. */
   success: boolean;
-  /** Final output of the workflow */
+  
+  /** Final output of the workflow (from the last executed node). */
   output: string;
-  /** Output from each node, keyed by node ID */
+  
+  /** Output from each executed node, keyed by node ID. */
   nodeOutputs: Record<string, string>;
-  /** Error if execution failed */
+  
+  /** Error that caused execution to fail (only set if success is false). */
   error?: Error;
-  /** Total execution duration in milliseconds */
+  
+  /** Total execution duration in milliseconds. */
   duration: number;
-  /** Token usage statistics */
+  
+  /** Token usage statistics (if available from the LLM provider). */
   usage?: TokenUsage;
 }
 
@@ -423,33 +572,112 @@ export interface ExecutionAdapter {
 // Storage Types
 // ============================================================================
 
-/** Summary of a saved workflow */
+/**
+ * Summary information for a saved workflow.
+ * Used in list views without loading the full workflow data.
+ */
 export interface WorkflowSummary {
+  /** Unique identifier for the workflow. */
   id: string;
+  
+  /** Display name of the workflow. */
   name: string;
+  
+  /** Optional description. */
   description?: string;
+  
+  /** ISO 8601 timestamp of creation. */
   createdAt: string;
+  
+  /** ISO 8601 timestamp of last update. */
   updatedAt: string;
+  
+  /** Number of nodes in the workflow. */
   nodeCount: number;
 }
 
-/** Storage adapter interface */
+/**
+ * Interface for workflow persistence adapters.
+ * 
+ * Implement this interface to create custom storage backends
+ * (e.g., database, cloud storage, file system).
+ *
+ * @example
+ * ```typescript
+ * class MyDatabaseAdapter implements StorageAdapter {
+ *   async load(id: string): Promise<WorkflowData> {
+ *     const row = await db.query('SELECT data FROM workflows WHERE id = ?', [id]);
+ *     return JSON.parse(row.data);
+ *   }
+ *   
+ *   async save(workflow: WorkflowData): Promise<string> {
+ *     const id = workflow.meta.id || generateId();
+ *     await db.query('INSERT INTO workflows (id, data) VALUES (?, ?)', [id, JSON.stringify(workflow)]);
+ *     return id;
+ *   }
+ *   
+ *   async delete(id: string): Promise<void> {
+ *     await db.query('DELETE FROM workflows WHERE id = ?', [id]);
+ *   }
+ *   
+ *   async list(): Promise<WorkflowSummary[]> {
+ *     return db.query('SELECT id, name, updated_at FROM workflows');
+ *   }
+ *   
+ *   export(workflow: WorkflowData): string {
+ *     return JSON.stringify(workflow, null, 2);
+ *   }
+ *   
+ *   import(json: string): WorkflowData {
+ *     return JSON.parse(json);
+ *   }
+ * }
+ * ```
+ */
 export interface StorageAdapter {
-  /** Load a workflow by ID */
+  /**
+   * Load a workflow by its unique ID.
+   * @param id - The workflow ID.
+   * @returns The full workflow data.
+   * @throws Error if workflow not found.
+   */
   load(id: string): Promise<WorkflowData>;
   
-  /** Save a workflow, returns the ID */
+  /**
+   * Save a workflow to storage.
+   * Creates a new workflow or updates an existing one.
+   * @param workflow - The workflow data to save.
+   * @returns The ID of the saved workflow.
+   */
   save(workflow: WorkflowData): Promise<string>;
   
-  /** Delete a workflow by ID */
+  /**
+   * Delete a workflow from storage.
+   * @param id - The workflow ID to delete.
+   * @throws Error if workflow not found.
+   */
   delete(id: string): Promise<void>;
   
-  /** List all saved workflows */
+  /**
+   * List all saved workflows.
+   * @returns Array of workflow summaries (without full node data).
+   */
   list(): Promise<WorkflowSummary[]>;
   
-  /** Export workflow to JSON string */
+  /**
+   * Export a workflow to a JSON string.
+   * Use for file downloads or clipboard operations.
+   * @param workflow - The workflow to export.
+   * @returns JSON string representation.
+   */
   export(workflow: WorkflowData): string;
   
-  /** Import workflow from JSON string */
+  /**
+   * Import a workflow from a JSON string.
+   * Use for file uploads or paste operations.
+   * @param json - JSON string to parse.
+   * @returns Parsed workflow data.
+   * @throws Error if JSON is invalid or malformed.
+   */
   import(json: string): WorkflowData;
 }

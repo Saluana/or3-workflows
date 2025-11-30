@@ -12,7 +12,6 @@ import type {
   ChatMessage,
   ModelCapabilities,
   InputModality,
-  OutputModality,
   MessageContentPart,
   AgentNodeData,
   RouterNodeData,
@@ -90,6 +89,20 @@ interface InternalExecutionContext {
 /**
  * Execution adapter that uses OpenRouter SDK for LLM calls.
  * Implements BFS traversal with streaming, retry logic, and multimodal support.
+ *
+ * @example
+ * ```typescript
+ * import OpenRouter from '@openrouter/sdk';
+ * import { OpenRouterExecutionAdapter } from '@or3/workflow-core';
+ *
+ * const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
+ * const adapter = new OpenRouterExecutionAdapter(client, {
+ *   defaultModel: 'openai/gpt-4o-mini',
+ *   maxRetries: 2,
+ * });
+ *
+ * const result = await adapter.execute(workflow, { text: 'Hello' }, callbacks);
+ * ```
  */
 export class OpenRouterExecutionAdapter implements ExecutionAdapter {
   private client: OpenRouter;
@@ -98,7 +111,28 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
   private running = false;
   private modelCapabilitiesCache: Map<string, ModelCapabilities | null> = new Map();
 
+  /**
+   * Create a new OpenRouterExecutionAdapter.
+   *
+   * @param client - An initialized OpenRouter SDK client instance.
+   *                 Must be created with a valid API key.
+   * @param options - Optional execution configuration.
+   * @throws {Error} If client is null or undefined.
+   *
+   * @example
+   * ```typescript
+   * const client = new OpenRouter({ apiKey: 'your-api-key' });
+   * const adapter = new OpenRouterExecutionAdapter(client);
+   * ```
+   */
   constructor(client: OpenRouter, options: ExecutionOptions = {}) {
+    if (!client) {
+      throw new Error(
+        'OpenRouterExecutionAdapter requires an OpenRouter client instance. ' +
+        'Create one with: new OpenRouter({ apiKey: "your-api-key" })'
+      );
+    }
+    
     this.client = client;
     this.options = {
       defaultModel: DEFAULT_MODEL,
@@ -155,7 +189,9 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
       const queue: string[] = [startNode.id];
       const executed = new Set<string>();
       const skipped = new Set<string>();
-      const maxIterations = workflow.nodes.length * MAX_ITERATIONS_MULTIPLIER;
+      // Use configured maxIterations or calculate from node count
+      const maxIterations = this.options.maxIterations ?? 
+        (workflow.nodes.length * MAX_ITERATIONS_MULTIPLIER);
       let iterations = 0;
       let finalOutput = '';
 
@@ -290,7 +326,14 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
   }
 
   /**
-   * Get model capabilities from OpenRouter.
+   * Get model capabilities for a given model ID.
+   * 
+   * Uses static capability detection based on known model patterns.
+   * The OpenRouter SDK does not expose a models API directly, so we infer
+   * capabilities from model naming conventions.
+   *
+   * @param modelId - The model identifier (e.g., 'openai/gpt-4o-mini').
+   * @returns Model capabilities or null if unknown.
    */
   async getModelCapabilities(modelId: string): Promise<ModelCapabilities | null> {
     // Check cache first
@@ -298,39 +341,87 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
       return this.modelCapabilitiesCache.get(modelId) || null;
     }
 
-    try {
-      // Use OpenRouter's models endpoint
-      const response = await fetch(`https://openrouter.ai/api/v1/models/${modelId}`, {
-        headers: {
-          'Authorization': `Bearer ${(this.client as any).apiKey || ''}`,
-        },
-      });
-
-      if (!response.ok) {
-        this.modelCapabilitiesCache.set(modelId, null);
-        return null;
-      }
-
-      const data = await response.json();
-      const capabilities: ModelCapabilities = {
-        id: modelId,
-        name: data.name || modelId,
-        inputModalities: this.parseModalities(data.architecture?.input_modalities || ['text']),
-        outputModalities: this.parseOutputModalities(data.architecture?.output_modalities || ['text']),
-        contextLength: data.context_length || 4096,
-        supportedParameters: data.supported_parameters || [],
-      };
-
-      this.modelCapabilitiesCache.set(modelId, capabilities);
-      return capabilities;
-    } catch {
-      this.modelCapabilitiesCache.set(modelId, null);
-      return null;
-    }
+    // Infer capabilities from model naming conventions
+    const capabilities = this.inferModelCapabilities(modelId);
+    this.modelCapabilitiesCache.set(modelId, capabilities);
+    return capabilities;
   }
 
   /**
-   * Check if model supports a specific modality.
+   * Infer model capabilities from model ID patterns.
+   * @internal
+   */
+  private inferModelCapabilities(modelId: string): ModelCapabilities {
+    const lowerModelId = modelId.toLowerCase();
+    
+    // Default capabilities
+    const capabilities: ModelCapabilities = {
+      id: modelId,
+      name: modelId.split('/').pop() || modelId,
+      inputModalities: ['text'],
+      outputModalities: ['text'],
+      contextLength: 4096,
+      supportedParameters: ['temperature', 'max_tokens', 'top_p'],
+    };
+
+    // Vision models (GPT-4V, Claude 3, Gemini with vision)
+    const visionPatterns = [
+      'gpt-4o', 'gpt-4-vision', 'gpt-4-turbo',
+      'claude-3', 'claude-3.5',
+      'gemini-pro-vision', 'gemini-1.5', 'gemini-2',
+      'llava', 'vision',
+    ];
+    if (visionPatterns.some(p => lowerModelId.includes(p))) {
+      capabilities.inputModalities = ['text', 'image'];
+    }
+
+    // Audio models
+    const audioPatterns = ['whisper', 'audio', 'gpt-4o-audio'];
+    if (audioPatterns.some(p => lowerModelId.includes(p))) {
+      capabilities.inputModalities = [...capabilities.inputModalities, 'audio'];
+    }
+
+    // Large context models
+    const largeContextPatterns: Array<{ pattern: string; context: number }> = [
+      { pattern: 'claude-3', context: 200000 },
+      { pattern: 'claude-2.1', context: 200000 },
+      { pattern: 'gpt-4-turbo', context: 128000 },
+      { pattern: 'gpt-4o', context: 128000 },
+      { pattern: 'gemini-1.5-pro', context: 1000000 },
+      { pattern: 'gemini-1.5-flash', context: 1000000 },
+      { pattern: 'gemini-2', context: 1000000 },
+      { pattern: 'mistral-large', context: 128000 },
+      { pattern: 'command-r', context: 128000 },
+    ];
+    
+    for (const { pattern, context } of largeContextPatterns) {
+      if (lowerModelId.includes(pattern)) {
+        capabilities.contextLength = context;
+        break;
+      }
+    }
+
+    // Image generation models
+    const imageGenPatterns = ['dall-e', 'stable-diffusion', 'midjourney', 'imagen'];
+    if (imageGenPatterns.some(p => lowerModelId.includes(p))) {
+      capabilities.outputModalities = ['image'];
+    }
+
+    // Embedding models
+    const embeddingPatterns = ['embed', 'embedding', 'text-embedding'];
+    if (embeddingPatterns.some(p => lowerModelId.includes(p))) {
+      capabilities.outputModalities = ['embeddings'];
+    }
+
+    return capabilities;
+  }
+
+  /**
+   * Check if a model supports a specific input modality.
+   *
+   * @param modelId - The model identifier.
+   * @param modality - The input modality to check ('text', 'image', 'audio', etc.).
+   * @returns True if the model supports the modality.
    */
   async supportsModality(modelId: string, modality: InputModality): Promise<boolean> {
     const capabilities = await this.getModelCapabilities(modelId);
@@ -784,22 +875,6 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
     }
 
     return parts.length > 1 ? parts : text;
-  }
-
-  /**
-   * Parse input modalities from API response.
-   */
-  private parseModalities(modalities: string[]): InputModality[] {
-    const validModalities: InputModality[] = ['text', 'image', 'file', 'audio', 'video'];
-    return modalities.filter(m => validModalities.includes(m as InputModality)) as InputModality[];
-  }
-
-  /**
-   * Parse output modalities from API response.
-   */
-  private parseOutputModalities(modalities: string[]): OutputModality[] {
-    const validModalities: OutputModality[] = ['text', 'image', 'embeddings'];
-    return modalities.filter(m => validModalities.includes(m as OutputModality)) as OutputModality[];
   }
 
   // ==========================================================================

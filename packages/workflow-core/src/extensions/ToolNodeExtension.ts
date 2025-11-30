@@ -59,6 +59,8 @@ export const ToolNodeExtension: NodeExtension = {
    * Execute the tool node.
    * This is a placeholder - actual tool execution would be implemented
    * based on the registered tool handlers.
+   * 
+   * @internal Called by the execution adapter. Do not call directly.
    */
   async execute(context: ExecutionContext): Promise<{ output: string; error?: string; nextNodes: string[] }> {
     const data = context.node.data as ToolNodeData;

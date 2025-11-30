@@ -91,12 +91,9 @@ export function useWorkflowStorage(adapter: StorageAdapter): UseWorkflowStorageR
       await adapter.delete(id);
       // Refresh list after delete
       await loadList();
-      if (currentWorkflow.value?.nodes.find(n => n.id === id)) { // This check is wrong, id is workflow id
-         if (currentWorkflow.value && currentWorkflow.value.meta.name === id) { // Still wrong, need to check if current loaded workflow is the one deleted.
-             // Actually, we don't have ID in WorkflowData root, it's returned by save or in summary.
-             // Assuming we might want to clear currentWorkflow if it matches, but for now let's just leave it.
-         }
-      }
+      // Clear current workflow to avoid stale state
+      // (We don't track workflow IDs in WorkflowData, so we can't check if it matches)
+      currentWorkflow.value = null;
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err));
       error.value = e;

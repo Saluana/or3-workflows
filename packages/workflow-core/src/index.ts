@@ -21,6 +21,16 @@ export {
   type PortDefinition,
   type StorageAdapter,
   type WorkflowSummary,
+  // Type guards
+  isAgentNodeData,
+  isRouterNodeData,
+  isParallelNodeData,
+  isToolNodeData,
+  isStartNodeData,
+  // Utility functions
+  generateWorkflowId,
+  isVersionCompatible,
+  parseVersion,
 } from './types';
 
 // Editor and state management
@@ -32,7 +42,7 @@ export { type ExecutionAdapter } from './types';
 export { OpenRouterExecutionAdapter } from './execution';
 
 // Storage adapters
-export { LocalStorageAdapter } from './storage';
+export { LocalStorageAdapter, IndexedDBAdapter } from './storage';
 
 // Standard node extensions
 export {
