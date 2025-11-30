@@ -260,6 +260,7 @@ const parallelData = computed(() => {
         branches: Array.isArray(data?.branches) ? data.branches : [],
         mergeModel: data?.model || '',
         mergePrompt: data?.prompt || '',
+        mergeEnabled: data?.mergeEnabled,
     };
 });
 
@@ -1339,39 +1340,53 @@ const handleDelete = () => {
 
                 <!-- Merge Configuration -->
                 <div class="merge-section">
-                    <label class="field-label">Merge Configuration</label>
-                    <p class="field-hint">
-                        After all branches complete, results are merged using
-                        this prompt.
-                    </p>
-                    <div class="merge-field">
-                        <label class="field-label-sm">Merge Model</label>
-                        <select
-                            class="model-select"
-                            :value="
-                                parallelData.mergeModel || 'openai/gpt-4o-mini'
-                            "
-                            @change="(e) => props.editor.commands.updateNodeData(selectedNode!.id, { model: (e.target as HTMLSelectElement).value })"
-                        >
-                            <option
-                                v-for="m in availableModels"
-                                :key="m.id"
-                                :value="m.id"
+                    <div class="merge-header">
+                        <label class="field-label">Merge Configuration</label>
+                        <div class="toggle-label">
+                            <input
+                                type="checkbox"
+                                :checked="parallelData.mergeEnabled !== false"
+                                @change="(e) => props.editor.commands.updateNodeData(selectedNode!.id, { mergeEnabled: (e.target as HTMLInputElement).checked } as any)"
+                            />
+                            <span class="toggle-text">Enable Merge</span>
+                        </div>
+                    </div>
+
+                    <template v-if="parallelData.mergeEnabled !== false">
+                        <p class="field-hint">
+                            After all branches complete, results are merged
+                            using this prompt.
+                        </p>
+                        <div class="merge-field">
+                            <label class="field-label-sm">Merge Model</label>
+                            <select
+                                class="model-select"
+                                :value="
+                                    parallelData.mergeModel ||
+                                    'openai/gpt-4o-mini'
+                                "
+                                @change="(e) => props.editor.commands.updateNodeData(selectedNode!.id, { model: (e.target as HTMLSelectElement).value })"
                             >
-                                {{ m.name }} ({{ m.provider }})
-                            </option>
-                        </select>
-                    </div>
-                    <div class="merge-field">
-                        <label class="field-label-sm">Merge Prompt</label>
-                        <textarea
-                            class="prompt-textarea"
-                            :value="parallelData.mergePrompt"
-                            @input="(e) => debouncedUpdate('prompt', (e.target as HTMLTextAreaElement).value)"
-                            placeholder="Instructions for merging branch outputs..."
-                            rows="4"
-                        ></textarea>
-                    </div>
+                                <option
+                                    v-for="m in availableModels"
+                                    :key="m.id"
+                                    :value="m.id"
+                                >
+                                    {{ m.name }} ({{ m.provider }})
+                                </option>
+                            </select>
+                        </div>
+                        <div class="merge-field">
+                            <label class="field-label-sm">Merge Prompt</label>
+                            <textarea
+                                class="prompt-textarea"
+                                :value="parallelData.mergePrompt"
+                                @input="(e) => debouncedUpdate('prompt', (e.target as HTMLTextAreaElement).value)"
+                                placeholder="Instructions for merging branch outputs..."
+                                rows="4"
+                            ></textarea>
+                        </div>
+                    </template>
                 </div>
             </div>
 

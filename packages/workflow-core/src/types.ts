@@ -318,6 +318,7 @@ export interface ParallelNodeData extends BaseNodeData {
     model?: string;
     prompt?: string;
     branches: BranchDefinition[];
+    mergeEnabled?: boolean;
 }
 
 /**
@@ -696,11 +697,11 @@ export interface ExecutionCallbacks {
     /**
      * Called when context compaction occurs.
      * Optional - use this to log or display compaction events.
-     * 
+     *
      * Note: This callback is currently defined but not yet wired up in the
      * OpenRouterExecutionAdapter. It will be called once compaction integration
      * is implemented.
-     * 
+     *
      * @param result - Details about the compaction operation.
      */
     onContextCompacted?: (result: CompactionResult) => void;

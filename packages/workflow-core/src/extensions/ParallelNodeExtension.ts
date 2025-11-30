@@ -50,6 +50,7 @@ export const ParallelNodeExtension: NodeExtension = {
         model: undefined, // Model for merge step
         prompt: '', // Merge/synthesis prompt
         branches: [] as BranchDefinition[],
+        mergeEnabled: true,
     },
 
     /**
@@ -67,62 +68,53 @@ export const ParallelNodeExtension: NodeExtension = {
             throw new Error('Parallel node has no branches configured');
         }
 
-        if (!context.executeSubgraph) {
-            throw new Error(
-                'Parallel execution requires executeSubgraph capability in context'
-            );
-        }
-
         const outgoingEdges = context.getOutgoingEdges(node.id);
+        const mergeEnabled = data.mergeEnabled !== false;
 
-        // Map branches to start nodes
-        const branchExecutions = branches
-            .map((branch) => {
-                const edge = outgoingEdges.find(
-                    (e) => e.sourceHandle === branch.id
-                );
-                if (!edge) return null;
+        // Execute all branches internally using their model/prompt configs
+        // Branches are internal LLM calls, not external node connections
+        const branchExecutions = branches.map((branch) => {
+            // Use branch-specific model/prompt or fall back to defaults
+            const branchModel = branch.model || data.model || DEFAULT_MODEL;
+            const branchPrompt =
+                branch.prompt || 'You are a helpful assistant.';
 
-                const startNodeId = edge.target;
+            const messages: ChatMessage[] = [
+                { role: 'system', content: branchPrompt },
+                { role: 'user', content: context.input },
+            ];
 
-                // Apply overrides if configured
-                const overrides: Record<string, any> = {};
-                if (branch.model) overrides.model = branch.model;
-                if (branch.prompt) overrides.prompt = branch.prompt;
-
-                const nodeOverrides =
-                    Object.keys(overrides).length > 0
-                        ? { [startNodeId]: { data: overrides } }
-                        : undefined;
-
-                return {
+            return {
+                branchId: branch.id,
+                label: branch.label,
+                promise: (async () => {
+                    if (!provider) {
+                        throw new Error('Parallel node requires LLM provider');
+                    }
+                    const result = await provider.chat(
+                        branchModel,
+                        messages,
+                        {}
+                    );
+                    return {
+                        status: 'fulfilled' as const,
+                        value: { output: result.content || '' },
+                        branchId: branch.id,
+                        label: branch.label,
+                    };
+                })().catch((error) => ({
+                    status: 'rejected' as const,
+                    reason: error,
                     branchId: branch.id,
                     label: branch.label,
-                    promise: context.executeSubgraph!(
-                        startNodeId,
-                        context.input,
-                        { nodeOverrides }
-                    )
-                        .then((result) => ({
-                            status: 'fulfilled' as const,
-                            value: result,
-                            branchId: branch.id,
-                            label: branch.label,
-                        }))
-                        .catch((error) => ({
-                            status: 'rejected' as const,
-                            reason: error,
-                            branchId: branch.id,
-                            label: branch.label,
-                        })),
-                };
-            })
-            .filter(Boolean);
+                })),
+            };
+        });
 
         if (branchExecutions.length === 0) {
             return {
-                output: 'No connected branches executed.',
-                nextNodes: [], // Or route to 'merged' if present but nothing to merge?
+                output: 'No branches configured.',
+                nextNodes: [],
             };
         }
 
@@ -163,8 +155,8 @@ export const ParallelNodeExtension: NodeExtension = {
 
         let output = formattedOutputs;
 
-        // Merge if prompt provided
-        if (data.prompt) {
+        // Merge if enabled and prompt provided
+        if (mergeEnabled && data.prompt) {
             if (!provider) {
                 throw new Error(
                     'Parallel node requires LLM provider for merging results'
@@ -189,16 +181,31 @@ export const ParallelNodeExtension: NodeExtension = {
             output = result.content || '';
         }
 
-        // Determine next nodes (connected to 'merged' handle)
-        const mergeEdges = outgoingEdges.filter(
-            (e) => e.sourceHandle === 'merged'
-        );
+        // Determine next nodes
+        let nextNodes: string[] = [];
+
+        if (mergeEnabled) {
+            // If merge enabled, route to 'merged' handle
+            const mergeEdges = outgoingEdges.filter(
+                (e) => e.sourceHandle === 'merged'
+            );
+            nextNodes = mergeEdges.map((e) => e.target);
+        } else {
+            // If merge disabled, route to branch handles (Splitter Mode)
+            // We use the same handles as the branch starts
+            branches.forEach((branch) => {
+                const branchEdges = outgoingEdges.filter(
+                    (e) => e.sourceHandle === branch.id
+                );
+                nextNodes.push(...branchEdges.map((e) => e.target));
+            });
+        }
 
         return {
             output,
-            nextNodes: mergeEdges.map((e) => e.target),
+            nextNodes,
             metadata: {
-                branchOutputs: outputs,
+                branchOutputs: outputs, // Branch outputs
             },
         };
     },
@@ -253,7 +260,7 @@ export const ParallelNodeExtension: NodeExtension = {
         });
 
         // Warn if no merge prompt is configured
-        if (!data.prompt || data.prompt.trim() === '') {
+        if (!data.prompt?.trim()) {
             errors.push({
                 type: 'warning',
                 code: 'EMPTY_PROMPT',
