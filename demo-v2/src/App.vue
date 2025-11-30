@@ -3,12 +3,13 @@ import { ref, computed, onMounted, watch } from 'vue';
 import type { Node, Edge } from '@vue-flow/core';
 
 // Import from our v2 packages
-import { type WorkflowData } from '@or3/workflow-core';
+import { type WorkflowData, validateWorkflow } from '@or3/workflow-core';
 import {
     WorkflowCanvas,
     NodePalette,
     NodeInspector,
     EdgeLabelEditor,
+    ValidationOverlay,
     useEditor,
     useExecutionState,
 } from '@or3/workflow-vue';
@@ -17,10 +18,8 @@ import {
 import {
     useWorkflowExecution,
     useWorkflowStorage,
-    useWorkflowValidation,
     useMobileNav,
     type ChatMessage,
-    type ValidationResult,
 } from './composables';
 import type { WorkflowSummary } from '@or3/workflow-core';
 
@@ -62,7 +61,6 @@ const {
 } = useWorkflowStorage();
 
 const { execute: executeWorkflowFn } = useWorkflowExecution();
-const { validateWorkflow } = useWorkflowValidation();
 
 // Edge editing
 const selectedEdge = ref<Edge | null>(null);
@@ -80,12 +78,13 @@ const conversationHistory = ref<Array<{ role: string; content: string }>>([]);
 
 // Workflow name
 const workflowName = ref('My Workflow');
+const workflowDescription = ref('');
 
 // Modals
 const showSaveModal = ref(false);
 const showLoadModal = ref(false);
 const showValidationModal = ref(false);
-const validationResult = ref<ValidationResult | null>(null);
+const validationResult = ref<ReturnType<typeof validateWorkflow> | null>(null);
 const error = ref<string | null>(null);
 
 // ============================================================================
@@ -110,6 +109,8 @@ onMounted(() => {
     const autosaveData = loadAutosave();
     if (autosaveData) {
         editor.value.load(autosaveData);
+        workflowName.value = autosaveData.meta.name;
+        workflowDescription.value = autosaveData.meta.description || '';
     } else {
         // Create default workflow
         createDefaultWorkflow();
@@ -126,6 +127,21 @@ watch(
     { deep: true }
 );
 
+watch(
+    () => editor.value?.getEdges(),
+    () => {
+        if (!editor.value) return;
+        autosave(editor.value.getJSON());
+    },
+    { deep: true }
+);
+
+watch([workflowName, workflowDescription], () => {
+    if (!editor.value) return;
+    syncMetaToEditor();
+    autosave(editor.value.getJSON());
+});
+
 // ============================================================================
 // Default Workflow
 // ============================================================================
@@ -134,7 +150,11 @@ function createDefaultWorkflow() {
 
     // Load a pre-built default workflow with edges
     const defaultWorkflow: WorkflowData = {
-        meta: { version: '2.0.0', name: 'Customer Support Workflow' },
+        meta: {
+            version: '2.0.0',
+            name: 'Customer Support Workflow',
+            description: 'Route support inquiries to the right agent and summarize.',
+        },
         nodes: [
             {
                 id: 'start',
@@ -181,6 +201,15 @@ function createDefaultWorkflow() {
                     prompt: 'Format the response professionally and ensure it is helpful, complete, and friendly.',
                 },
             },
+            {
+                id: 'tool-summary',
+                type: 'tool',
+                position: { x: 200, y: 580 },
+                data: {
+                    label: 'Summarize Tool',
+                    toolId: 'demo_summarize',
+                },
+            },
         ],
         edges: [
             { id: 'e1', source: 'start', target: 'router' },
@@ -198,10 +227,13 @@ function createDefaultWorkflow() {
             },
             { id: 'e4', source: 'tech-agent', target: 'formatter' },
             { id: 'e5', source: 'sales-agent', target: 'formatter' },
+            { id: 'e6', source: 'formatter', target: 'tool-summary' },
         ],
     };
 
     editor.value.load(defaultWorkflow);
+    workflowName.value = defaultWorkflow.meta.name;
+    workflowDescription.value = defaultWorkflow.meta.description || '';
 }
 
 // ============================================================================
@@ -264,8 +296,8 @@ async function handleSendMessage() {
     }
 
     chatInput.value = '';
-    const nodes = editor.value.getNodes();
-    const edges = editor.value.getEdges();
+    syncMetaToEditor();
+    const workflow = editor.value.getJSON();
 
     // Add user message
     const userMessage: ChatMessage = {
@@ -278,7 +310,7 @@ async function handleSendMessage() {
     conversationHistory.value.push({ role: 'user', content: message });
 
     // Reset node statuses
-    nodes.forEach((n) => setNodeStatus(n.id, 'idle'));
+    workflow.nodes.forEach((n) => setNodeStatus(n.id, 'idle'));
 
     setRunning(true);
     setStreamingContent('');
@@ -294,8 +326,7 @@ async function handleSendMessage() {
 
         const finalOutput = await executeWorkflowFn(
             apiKey.value,
-            execNodes,
-            edges,
+            workflow,
             message,
             conversationHistory.value.slice(0, -1),
             {
@@ -338,10 +369,8 @@ async function handleSendMessage() {
 // ============================================================================
 function handleSave() {
     if (!editor.value) return;
-    const nodes = editor.value.getNodes();
-    const edges = editor.value.getEdges();
-
-    saveWorkflowToStorage(workflowName.value, nodes, edges);
+    syncMetaToEditor();
+    saveWorkflowToStorage(editor.value.getJSON());
     showSaveModal.value = false;
 }
 
@@ -353,14 +382,14 @@ async function handleLoad(summary: WorkflowSummary) {
 
     editor.value.load(fullWorkflow);
     workflowName.value = fullWorkflow.meta.name;
+    workflowDescription.value = fullWorkflow.meta.description || '';
     showLoadModal.value = false;
 }
 
 function handleExport() {
     if (!editor.value) return;
-    const nodes = editor.value.getNodes();
-    const edges = editor.value.getEdges();
-    exportWorkflow(workflowName.value, nodes, edges);
+    syncMetaToEditor();
+    exportWorkflow(editor.value.getJSON());
 }
 
 async function handleImport(event: Event) {
@@ -385,15 +414,10 @@ async function handleImport(event: Event) {
 // ============================================================================
 function handleValidate() {
     if (!editor.value) return;
-    const nodes = editor.value.getNodes();
-    const edges = editor.value.getEdges();
-    // Map to the expected validation shape
-    const validationNodes = nodes.map((n) => ({
-        id: n.id,
-        type: n.type,
-        data: { ...n.data } as Record<string, unknown>,
-    }));
-    validationResult.value = validateWorkflow(validationNodes, edges);
+    validationResult.value = validateWorkflow(
+        editor.value.getNodes() as any,
+        editor.value.getEdges() as any
+    );
     showValidationModal.value = true;
 }
 
@@ -413,6 +437,14 @@ function clearMessages() {
     conversationHistory.value = [];
     resetExecution();
 }
+
+function syncMetaToEditor() {
+    if (!editor.value) return;
+    editor.value.setMeta({
+        name: workflowName.value || 'Untitled',
+        description: workflowDescription.value || undefined,
+    });
+}
 </script>
 
 <template>
@@ -422,6 +454,20 @@ function clearMessages() {
             <div class="header-left">
                 <h1 class="logo">or3-workflow</h1>
                 <span class="version">v2</span>
+                <div class="meta-inputs">
+                    <input
+                        v-model="workflowName"
+                        class="meta-input"
+                        placeholder="Workflow name"
+                        @change="syncMetaToEditor"
+                    />
+                    <input
+                        v-model="workflowDescription"
+                        class="meta-input"
+                        placeholder="Description (optional)"
+                        @change="syncMetaToEditor"
+                    />
+                </div>
             </div>
 
             <div class="header-center">
@@ -682,6 +728,11 @@ function clearMessages() {
                     @node-click="handleNodeClick"
                     @edge-click="handleEdgeClick"
                     @pane-click="handlePaneClick"
+                />
+                <ValidationOverlay
+                    v-if="editor"
+                    class="canvas-overlay"
+                    :editor="editor"
                 />
 
                 <!-- Edge Label Editor -->
@@ -1367,6 +1418,29 @@ function clearMessages() {
     font-weight: 600;
 }
 
+.meta-inputs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 12px;
+}
+
+.meta-input {
+    background: var(--or3-color-bg-elevated, #1c1c27);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.1));
+    border-radius: var(--or3-radius-sm, 6px);
+    padding: 6px 10px;
+    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
+    min-width: 180px;
+    font-size: 12px;
+}
+
+.meta-input:focus {
+    outline: none;
+    border-color: var(--or3-color-accent, #8b5cf6);
+    box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+}
+
 .icon {
     width: 18px;
     height: 18px;
@@ -1498,6 +1572,13 @@ function clearMessages() {
     flex: 1;
     position: relative;
     overflow: hidden;
+}
+
+.canvas-overlay {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 10;
 }
 
 /* Chat */

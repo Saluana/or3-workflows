@@ -1,4 +1,4 @@
-import { WorkflowData, WorkflowNode, WorkflowEdge, Extension, Command, WorkflowDataSchema } from './types';
+import { WorkflowData, WorkflowNode, WorkflowEdge, Extension, Command, WorkflowDataSchema, SCHEMA_VERSION } from './types';
 import { HistoryManager } from './history';
 import { CommandManager } from './commands';
 
@@ -34,6 +34,8 @@ export function createWorkflowEditor(options: EditorOptions = {}): WorkflowEdito
 export class WorkflowEditor {
   public nodes: WorkflowNode[] = [];
   public edges: WorkflowEdge[] = [];
+  public meta: WorkflowData['meta'];
+  public viewport = { x: 0, y: 0, zoom: 1 };
   public extensions: Map<string, Extension> = new Map();
   public extensionCommands: Record<string, Command> = {};
   
@@ -45,6 +47,13 @@ export class WorkflowEditor {
   constructor(options: EditorOptions = {}) {
     this.history = new HistoryManager();
     this.commands = new CommandManager(this);
+    const now = new Date().toISOString();
+    this.meta = {
+      version: SCHEMA_VERSION,
+      name: 'Untitled',
+      createdAt: now,
+      updatedAt: now,
+    };
     
     if (options.extensions) {
       options.extensions.forEach(ext => this.registerExtension(ext));
@@ -92,6 +101,7 @@ export class WorkflowEditor {
       const parsed = WorkflowDataSchema.parse(content);
       this.nodes = parsed.nodes as WorkflowNode[];
       this.edges = parsed.edges;
+      this.setMeta(parsed.meta, { touchUpdatedAt: false });
       this.history.clear();
       this.history.push({ nodes: this.nodes, edges: this.edges });
       this.emit('update');
@@ -136,8 +146,9 @@ export class WorkflowEditor {
   public getJSON(): WorkflowData {
     return {
       meta: {
-        version: '2.0.0',
-        name: 'Untitled', // TODO: Manage meta
+        ...this.meta,
+        version: this.meta.version || SCHEMA_VERSION,
+        name: this.meta.name || 'Untitled',
       },
       nodes: this.nodes,
       edges: this.edges,
@@ -189,5 +200,48 @@ export class WorkflowEditor {
     this.listeners.clear();
     this.nodes = [];
     this.edges = [];
+  }
+
+  /**
+   * Update workflow metadata such as name/description.
+   * @param meta - Partial metadata to merge
+   * @param options - Control timestamp updates
+   */
+  public setMeta(meta: Partial<WorkflowData['meta']>, options: { touchUpdatedAt?: boolean } = {}): void {
+    const now = new Date().toISOString();
+    const shouldTouch = options.touchUpdatedAt ?? true;
+
+    this.meta = {
+      ...this.meta,
+      ...meta,
+      version: meta.version || this.meta.version || SCHEMA_VERSION,
+      createdAt: meta.createdAt || this.meta.createdAt || now,
+      updatedAt: shouldTouch ? now : meta.updatedAt || this.meta.updatedAt || now,
+    };
+
+    this.emit('metaUpdate', this.meta);
+  }
+
+  /**
+   * Get current workflow metadata.
+   */
+  public getMeta(): WorkflowData['meta'] {
+    return this.meta;
+  }
+
+  /**
+   * Touch the metadata updatedAt timestamp.
+   */
+  public touchMeta(): void {
+    this.setMeta({}, { touchUpdatedAt: true });
+  }
+
+  /**
+   * Update viewport zoom level stored in core state.
+   */
+  public setViewportZoom(level: number): void {
+    const clamped = Math.max(0.1, Math.min(level, 3));
+    this.viewport = { ...this.viewport, zoom: clamped };
+    this.emit('viewportUpdate', this.viewport);
   }
 }

@@ -60,12 +60,12 @@ export const ToolNodeExtension: NodeExtension = {
    * This is a placeholder - actual tool execution would be implemented
    * based on the registered tool handlers.
    * 
-   * @internal Called by the execution adapter. Do not call directly.
+   * @internal Called by the execution adapter or manually for custom runtimes.
    */
   async execute(context: ExecutionContext): Promise<{ output: string; error?: string; nextNodes: string[] }> {
     const data = context.node.data as ToolNodeData;
-    
-    // Placeholder - actual tool execution would happen here
+
+    // Validate tool configuration
     if (!data.toolId) {
       return {
         output: '',
@@ -74,10 +74,29 @@ export const ToolNodeExtension: NodeExtension = {
       };
     }
 
-    return {
-      output: `[Tool ${data.toolId} would execute with input: ${context.input}]`,
-      nextNodes: [],
-    };
+    const tool = toolRegistry.get(data.toolId);
+    if (!tool) {
+      return {
+        output: '',
+        error: `Tool not registered: ${data.toolId}`,
+        nextNodes: [],
+      };
+    }
+
+    try {
+      const output = await tool.handler(context.input, data.config);
+      return {
+        output,
+        nextNodes: [],
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        output: '',
+        error: message,
+        nextNodes: [],
+      };
+    }
   },
 
   /**

@@ -3,8 +3,8 @@ import {
 } from '@or3/workflow-vue';
 import {
     OpenRouterExecutionAdapter,
-    type WorkflowNode,
-    type WorkflowEdge,
+    toolRegistry,
+    type WorkflowData,
     type ChatMessage as CoreChatMessage,
 } from '@or3/workflow-core';
 
@@ -24,6 +24,24 @@ export interface ExecutionCallbacks {
     onAppendContent: (content: string) => void;
 }
 
+// Register a simple demo tool for the Tool node
+let demoToolRegistered = false;
+function registerDemoTool() {
+    if (demoToolRegistered) return;
+    toolRegistry.register({
+        id: 'demo_summarize',
+        name: 'Summarize Text',
+        description: 'Summarize the latest workflow output.',
+        handler: async (input: string) => {
+            const trimmed = input?.toString().trim() || '';
+            if (!trimmed) return 'No content to summarize.';
+            if (trimmed.length < 200) return `Summary: ${trimmed}`;
+            return `Summary: ${trimmed.slice(0, 197)}...`;
+        },
+    });
+    demoToolRegistered = true;
+}
+
 export function useWorkflowExecution() {
     const {
         execute: coreExecute,
@@ -35,12 +53,13 @@ export function useWorkflowExecution() {
 
     async function execute(
         apiKey: string,
-        nodes: any[],
-        edges: any[],
+        workflow: WorkflowData,
         input: string,
         _conversationHistory: Array<{ role: string; content: string }>,
         callbacks: ExecutionCallbacks
     ): Promise<string> {
+        registerDemoTool();
+
         // Validate API key format
         if (!apiKey.startsWith('sk-or-')) {
             throw new Error(
@@ -52,18 +71,6 @@ export function useWorkflowExecution() {
         const client = new OpenRouter({ apiKey });
         // Cast client to any to avoid version mismatch issues between demo and core dependencies
         const adapter = new OpenRouterExecutionAdapter(client as any);
-
-        // Adapt nodes/edges to core types
-        const workflowData = {
-            meta: {
-                version: '2.0.0',
-                name: 'Execution',
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-            },
-            nodes: nodes as WorkflowNode[],
-            edges: edges as WorkflowEdge[],
-        };
 
         const executionInput = {
             text: input,
@@ -86,7 +93,7 @@ export function useWorkflowExecution() {
             },
         };
         
-        const result = await coreExecute(adapter, workflowData, executionInput, coreCallbacks);
+        const result = await coreExecute(adapter, workflow, executionInput, coreCallbacks);
         
         if (!result.success && result.error) {
             throw result.error;

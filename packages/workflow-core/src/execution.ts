@@ -18,7 +18,9 @@ import type {
   ParallelNodeData,
   RouteDefinition,
   BranchDefinition,
+  ToolNodeData,
 } from './types';
+import { toolRegistry } from './extensions/ToolNodeExtension';
 
 // ============================================================================
 // Constants
@@ -499,6 +501,16 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
           context.currentInput = output;
           break;
 
+        case 'tool':
+          output = await this.withRetry(() =>
+            this.executeToolNode(node, context)
+          );
+          nextNodes = childEdges.map(c => c.nodeId);
+          context.outputs[nodeId] = output;
+          context.nodeChain.push(nodeId);
+          context.currentInput = output;
+          break;
+
         case 'router':
         case 'condition': // Support legacy name
           const routeResult = await this.withRetry(() =>
@@ -600,6 +612,35 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     }
 
     return output;
+  }
+
+  /**
+   * Execute a tool node using the registered tool handler.
+   */
+  private async executeToolNode(
+    node: WorkflowNode,
+    context: InternalExecutionContext
+  ): Promise<string> {
+    const data = node.data as ToolNodeData;
+    if (!data.toolId) {
+      throw new Error('Tool node requires a tool to run');
+    }
+
+    // Custom handler passed via execution options takes precedence
+    if (this.options.onToolCall) {
+      return await this.options.onToolCall(data.toolId, {
+        input: context.currentInput,
+        config: data.config,
+        node,
+      });
+    }
+
+    const tool = toolRegistry.get(data.toolId);
+    if (!tool) {
+      throw new Error(`Tool not registered: ${data.toolId}`);
+    }
+
+    return tool.handler(context.currentInput, data.config);
   }
 
   /**
@@ -870,7 +911,12 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
             audio: { url },
           });
           break;
-        // Video would be handled similarly if supported
+        case 'video':
+          parts.push({
+            type: 'video',
+            video: { url, mimeType: attachment.mimeType },
+          });
+          break;
       }
     }
 

@@ -64,23 +64,15 @@ export const ParallelNodeExtension: NodeExtension = {
 
   /**
    * Execute the parallel node.
-   * This is a placeholder - actual concurrent execution is handled by OpenRouterExecutionAdapter.
+   * Actual concurrent execution is handled by OpenRouterExecutionAdapter.
    */
   async execute(context: ExecutionContext): Promise<{ output: string; branchOutputs: Record<string, string>; nextNodes: string[] }> {
     const data = context.node.data as ParallelNodeData;
     const branches = data.branches || [];
-
-    // Placeholder - actual parallel execution happens in adapter
-    const branchOutputs: Record<string, string> = {};
-    branches.forEach((branch: BranchDefinition) => {
-      branchOutputs[branch.id] = `[${branch.label} output]`;
-    });
-
-    return {
-      output: `Parallel execution of ${branches.length} branches`,
-      branchOutputs,
-      nextNodes: [],
-    };
+    throw new Error(
+      `ParallelNodeExtension.execute is handled by OpenRouterExecutionAdapter (${branches.length} branches configured). ` +
+      'Use the adapter to run workflows instead of calling the extension directly.'
+    );
   },
 
   /**

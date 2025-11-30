@@ -44,6 +44,7 @@ export class CommandManager {
         };
 
         this.editor.nodes = [...this.editor.nodes, node];
+        this.editor.touchMeta();
         this.pushHistory();
         this.editor.emit('nodeCreate', node);
         this.editor.emit('update');
@@ -61,6 +62,7 @@ export class CommandManager {
             (e) => e.source !== id && e.target !== id
         );
 
+        this.editor.touchMeta();
         this.pushHistory();
         this.editor.emit('nodeDelete', node);
         this.editor.emit('update');
@@ -90,6 +92,7 @@ export class CommandManager {
             ...this.editor.nodes.slice(idx + 1),
         ];
 
+        this.editor.touchMeta();
         this.debouncedPushHistory();
         this.editor.emit('nodeUpdate', updatedNode);
         this.editor.emit('update');
@@ -109,6 +112,7 @@ export class CommandManager {
         };
 
         this.editor.nodes = [...this.editor.nodes, newNode];
+        this.editor.touchMeta();
         this.pushHistory();
         this.editor.emit('nodeCreate', newNode);
         this.editor.emit('update');
@@ -131,6 +135,7 @@ export class CommandManager {
             ...this.editor.nodes.slice(idx + 1),
         ];
 
+        this.editor.touchMeta();
         this.debouncedPushHistory();
         this.editor.emit('nodeUpdate', updatedNode);
         this.editor.emit('update');
@@ -154,6 +159,7 @@ export class CommandManager {
         };
 
         this.editor.edges = [...this.editor.edges, edge];
+        this.editor.touchMeta();
         this.pushHistory();
         this.editor.emit('edgeCreate', edge);
         this.editor.emit('update');
@@ -167,6 +173,7 @@ export class CommandManager {
         const edge = this.editor.edges[index];
         this.editor.edges = this.editor.edges.filter((e) => e.id !== id);
 
+        this.editor.touchMeta();
         this.pushHistory();
         this.editor.emit('edgeDelete', edge);
         this.editor.emit('update');
@@ -201,6 +208,7 @@ export class CommandManager {
             ...this.editor.edges.slice(idx + 1),
         ];
 
+        this.editor.touchMeta();
         this.debouncedPushHistory();
         this.editor.emit('edgeUpdate', updatedEdge);
         this.editor.emit('update');
@@ -230,9 +238,11 @@ export class CommandManager {
     }
 
     // Viewport (Placeholder - usually handled by renderer, but state can be here)
-    public zoomTo(_level: number): boolean {
-        // TODO: Implement if we store viewport state in core
-        return true;
+    public zoomTo(level: number): boolean {
+        if (typeof level !== 'number' || Number.isNaN(level)) return false;
+        const previous = this.editor.viewport.zoom;
+        this.editor.setViewportZoom(level);
+        return previous !== this.editor.viewport.zoom;
     }
 
     // History

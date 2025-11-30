@@ -141,10 +141,16 @@ export function validateWorkflow(nodes: WorkflowNode[], edges: WorkflowEdge[]): 
       }
     }
 
-    // Dead End Check (except terminal nodes if we had them, but for now all should output or be end)
-    // Actually, maybe we don't enforce dead end for all nodes, but let's warn if a node has no outgoing edges and is not an explicit "end" node (if we had one).
-    // For now, just warn if it's not a start node and has no outputs? No, start node has outputs.
-    // Let's skip dead end check for now or make it smarter.
+    // Dead End Check - warn if a node has no outgoing edges (excluding start)
+    const outgoingEdges = edges.filter(e => e.source === node.id);
+    if (node.type !== 'start' && outgoingEdges.length === 0) {
+      warnings.push({
+        type: 'warning',
+        code: 'DEAD_END_NODE',
+        message: 'Node has no outgoing connections',
+        nodeId: node.id,
+      });
+    }
   });
 
   return {

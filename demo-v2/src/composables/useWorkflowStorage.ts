@@ -27,39 +27,9 @@ export function useWorkflowStorage() {
 
     // ... (rest of file)
 
-    return {
-        savedWorkflows,
-        storage: adapter,
-        loadSavedWorkflows,
-        loadList,
-        load,
-        saveWorkflow,
-        deleteWorkflow,
-        exportWorkflow,
-        importWorkflow,
-        autosave,
-        loadAutosave,
-    };
-
-    async function saveWorkflow(
-        name: string,
-        nodes: unknown[],
-        edges: unknown[]
-    ) {
-        const workflow: WorkflowData = {
-            meta: {
-                version: '2.0.0',
-                name,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-            },
-            nodes: nodes as any,
-            edges: edges as any,
-        };
-        
+    async function saveWorkflow(workflow: WorkflowData) {
         await save(workflow);
-        // Return type in demo was SavedWorkflow, but core save returns ID.
-        // We'll just reload the list to update UI.
+        // Return the workflow for compatibility
         return workflow;
     }
 
@@ -67,26 +37,25 @@ export function useWorkflowStorage() {
         return remove(id);
     }
 
-    function exportWorkflow(
-        name: string,
-        nodes: unknown[],
-        edges: unknown[]
-    ): void {
-        const workflow = {
-            name,
-            version: '2.0',
-            exportedAt: new Date().toISOString(),
-            nodes,
-            edges,
+    function exportWorkflow(workflow: WorkflowData): void {
+        const payload = {
+            ...workflow,
+            meta: {
+                ...workflow.meta,
+                exportedAt: new Date().toISOString(),
+            },
         };
 
-        const blob = new Blob([JSON.stringify(workflow, null, 2)], {
+        const blob = new Blob([JSON.stringify(payload, null, 2)], {
             type: 'application/json',
         });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${name.replace(/\s+/g, '-').toLowerCase()}-workflow.json`;
+        const safeName = (workflow.meta.name || 'workflow')
+            .replace(/\s+/g, '-')
+            .toLowerCase();
+        a.download = `${safeName}.json`;
         a.click();
         URL.revokeObjectURL(url);
     }
@@ -99,8 +68,15 @@ export function useWorkflowStorage() {
             throw new Error('Invalid workflow file format');
         }
 
+        const now = new Date().toISOString();
         return {
-            meta: { version: '2.0.0', name: data.name || 'Imported Workflow' },
+            meta: {
+                version: data.meta?.version || '2.0.0',
+                name: data.meta?.name || data.name || 'Imported Workflow',
+                description: data.meta?.description || data.description,
+                createdAt: data.meta?.createdAt || now,
+                updatedAt: data.meta?.updatedAt || now,
+            },
             nodes: data.nodes,
             edges: data.edges,
         };

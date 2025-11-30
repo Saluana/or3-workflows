@@ -57,20 +57,15 @@ export const RouterNodeExtension: NodeExtension = {
 
   /**
    * Execute the router node.
-   * This is a placeholder - actual LLM classification is handled by OpenRouterExecutionAdapter.
+   * Actual routing is handled by OpenRouterExecutionAdapter.
    */
   async execute(context: ExecutionContext): Promise<{ output: string; selectedRoute: string; nextNodes: string[] }> {
     const data = context.node.data as RouterNodeData;
-    const routes = data.routes || [];
-
-    // Placeholder - actual routing happens in adapter
-    const selectedRoute = routes[0]?.label || 'default';
-    
-    return {
-      output: `Routed to: ${selectedRoute}`,
-      selectedRoute,
-      nextNodes: [],
-    };
+    const routeCount = (data.routes || []).length;
+    throw new Error(
+      `RouterNodeExtension.execute is handled by OpenRouterExecutionAdapter (configured ${routeCount} routes). ` +
+      'Use the adapter to run workflows instead of calling the extension directly.'
+    );
   },
 
   /**

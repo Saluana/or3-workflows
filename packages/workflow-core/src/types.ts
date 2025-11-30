@@ -63,11 +63,12 @@ export interface Attachment {
 }
 
 export interface MessageContentPart {
-  type: 'text' | 'image_url' | 'file' | 'audio';
+  type: 'text' | 'image_url' | 'file' | 'audio' | 'video';
   text?: string;
   imageUrl?: { url: string; detail?: 'auto' | 'low' | 'high' };
   file?: { url: string; mimeType: string };
   audio?: { url: string; format?: string };
+  video?: { url: string; mimeType?: string };
 }
 
 export type MessageContent = string | MessageContentPart[];
@@ -341,6 +342,8 @@ export type Command = (...args: any[]) => boolean;
 export type EditorEvent = 
   | 'update'
   | 'selectionUpdate'
+  | 'metaUpdate'
+  | 'viewportUpdate'
   | 'nodeCreate'
   | 'nodeDelete'
   | 'nodeUpdate'

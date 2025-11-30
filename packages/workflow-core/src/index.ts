@@ -51,5 +51,7 @@ export {
   RouterNodeExtension,
   ParallelNodeExtension,
   ToolNodeExtension,
+  ToolRegistry,
+  toolRegistry,
+  type RegisteredTool,
 } from './extensions';
-
