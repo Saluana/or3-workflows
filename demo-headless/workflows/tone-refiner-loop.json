@@ -1,0 +1,63 @@
+{
+  "meta": {
+    "version": "2.0.0",
+    "name": "Tone Refiner Loop",
+    "description": "Iteratively polishes text to be concise, friendly, and action-oriented."
+  },
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 0, "y": 0 },
+      "data": { "label": "Start" }
+    },
+    {
+      "id": "agent-prepare",
+      "type": "agent",
+      "position": { "x": 220, "y": 0 },
+      "data": {
+        "label": "Clean Draft",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Rewrite input to remove fluff and fix grammar while keeping intent. Output a single paragraph."
+      }
+    },
+    {
+      "id": "loop-1",
+      "type": "whileLoop",
+      "position": { "x": 440, "y": 0 },
+      "data": {
+        "label": "Polish Until Ready",
+        "conditionPrompt": "If the draft is concise (<120 words), friendly, and has a clear call-to-action, respond \"done\". Otherwise respond \"continue\" and explain what to improve.",
+        "maxIterations": 3,
+        "onMaxIterations": "continue"
+      }
+    },
+    {
+      "id": "agent-refine",
+      "type": "agent",
+      "position": { "x": 660, "y": -80 },
+      "data": {
+        "label": "Refine Tone",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Polish the draft: keep it under 120 words, friendly, direct, with a single clear ask at the end."
+      }
+    },
+    {
+      "id": "agent-final",
+      "type": "agent",
+      "position": { "x": 880, "y": 0 },
+      "data": {
+        "label": "Final QA",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Return the final message plus a one-line rationale: \"Why this is ready: ...\""
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "agent-prepare" },
+    { "id": "e2", "source": "agent-prepare", "target": "loop-1" },
+    { "id": "e3", "source": "loop-1", "sourceHandle": "body", "target": "agent-refine" },
+    { "id": "e4", "source": "loop-1", "sourceHandle": "done", "target": "agent-final" }
+  ]
+}
+

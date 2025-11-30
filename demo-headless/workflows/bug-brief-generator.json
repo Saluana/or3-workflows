@@ -1,0 +1,51 @@
+{
+  "meta": {
+    "version": "2.0.0",
+    "name": "Bug Brief Generator",
+    "description": "Turns raw bug text into a ready-to-file bug brief with repro, scope, and impact."
+  },
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 0, "y": 0 },
+      "data": { "label": "Start" }
+    },
+    {
+      "id": "agent-structure",
+      "type": "agent",
+      "position": { "x": 220, "y": 0 },
+      "data": {
+        "label": "Structure Report",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Turn the input into a structured bug report outline: Title, Summary, Observed, Expected, Suspected scope, Impacted users, Attachments needed."
+      }
+    },
+    {
+      "id": "agent-steps",
+      "type": "agent",
+      "position": { "x": 440, "y": 0 },
+      "data": {
+        "label": "Repro Steps",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Draft concise reproduction steps (max 8). Include environment assumptions and data setup if relevant."
+      }
+    },
+    {
+      "id": "agent-final",
+      "type": "agent",
+      "position": { "x": 660, "y": 0 },
+      "data": {
+        "label": "Final Bug Brief",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Produce a ready-to-file bug brief with sections: Summary, Repro Steps, Expected vs Observed, Impact, Suspected Scope, Evidence Needed."
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "agent-structure" },
+    { "id": "e2", "source": "agent-structure", "target": "agent-steps" },
+    { "id": "e3", "source": "agent-steps", "target": "agent-final" }
+  ]
+}
+

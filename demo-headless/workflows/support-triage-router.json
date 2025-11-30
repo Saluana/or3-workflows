@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "version": "2.0.0",
+    "name": "Support Triage Router",
+    "description": "Routes incoming support text to bug, feature, or billing lanes."
+  },
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 0, "y": 0 },
+      "data": { "label": "Start" }
+    },
+    {
+      "id": "router-1",
+      "type": "router",
+      "position": { "x": 200, "y": 0 },
+      "data": {
+        "label": "Classify Request",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Pick route bug, feature, or billing. Bug = defects, errors, crashes, regressions. Feature = requests, improvements. Billing = payments, invoices, pricing, refunds."
+      }
+    },
+    {
+      "id": "agent-bug",
+      "type": "agent",
+      "position": { "x": 450, "y": -150 },
+      "data": {
+        "label": "Bug Intake",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Act as a support triager for a BUG report. Return bullet points for: observed behavior, expected behavior, reproduction steps, environment, logs/IDs."
+      }
+    },
+    {
+      "id": "agent-feature",
+      "type": "agent",
+      "position": { "x": 450, "y": 0 },
+      "data": {
+        "label": "Feature Intake",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Act as a PM helper for a FEATURE idea. Return bullet points for: problem, user impact, desired outcome, constraints, urgency."
+      }
+    },
+    {
+      "id": "agent-billing",
+      "type": "agent",
+      "position": { "x": 450, "y": 150 },
+      "data": {
+        "label": "Billing Intake",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Act as billing support. Return bullet points for: account identifiers, charge/invoice IDs, timeline of issue, requested action, proof/evidence gathered."
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "router-1" },
+    { "id": "e2", "source": "router-1", "sourceHandle": "bug", "target": "agent-bug", "label": "Bug" },
+    { "id": "e3", "source": "router-1", "sourceHandle": "feature", "target": "agent-feature", "label": "Feature" },
+    { "id": "e4", "source": "router-1", "sourceHandle": "billing", "target": "agent-billing", "label": "Billing" }
+  ]
+}
+

@@ -1,0 +1,78 @@
+{
+  "meta": {
+    "version": "2.0.0",
+    "name": "Parallel Briefing Synthesizer",
+    "description": "Runs three perspectives in parallel then merges: exec summary, risks, and actions."
+  },
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 0, "y": 0 },
+      "data": { "label": "Start" }
+    },
+    {
+      "id": "parallel-1",
+      "type": "parallel",
+      "position": { "x": 220, "y": 0 },
+      "data": {
+        "label": "Fan Out",
+        "prompt": "Merge the branch outputs into a tight briefing with headings: Executive Summary, Risks, Actions.",
+        "model": "openai/gpt-4o-mini",
+        "branches": [
+          { "id": "branch-summary", "label": "Executive Summary" },
+          { "id": "branch-risks", "label": "Risks" },
+          { "id": "branch-actions", "label": "Actions" }
+        ]
+      }
+    },
+    {
+      "id": "agent-summary",
+      "type": "agent",
+      "position": { "x": 480, "y": -120 },
+      "data": {
+        "label": "Executive Summary",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Summarize the input in 3 bullets for an exec audience. Focus on goal, status, top insight."
+      }
+    },
+    {
+      "id": "agent-risks",
+      "type": "agent",
+      "position": { "x": 480, "y": 0 },
+      "data": {
+        "label": "Risk Scan",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "List up to 3 risks with likelihood (low/med/high) and mitigation ideas."
+      }
+    },
+    {
+      "id": "agent-actions",
+      "type": "agent",
+      "position": { "x": 480, "y": 120 },
+      "data": {
+        "label": "Action Items",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Return 3 specific action items with owners TBD and a one-line success metric each."
+      }
+    },
+    {
+      "id": "agent-merge",
+      "type": "agent",
+      "position": { "x": 700, "y": 0 },
+      "data": {
+        "label": "Final Briefing",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Take the merged briefing text and ensure it is crisp, numbered, and under 180 words."
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "parallel-1" },
+    { "id": "e2", "source": "parallel-1", "sourceHandle": "branch-summary", "target": "agent-summary" },
+    { "id": "e3", "source": "parallel-1", "sourceHandle": "branch-risks", "target": "agent-risks" },
+    { "id": "e4", "source": "parallel-1", "sourceHandle": "branch-actions", "target": "agent-actions" },
+    { "id": "e5", "source": "parallel-1", "sourceHandle": "merged", "target": "agent-merge" }
+  ]
+}
+

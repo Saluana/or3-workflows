@@ -29,14 +29,16 @@ type Theme = 'light' | 'dark' | 'system';
 const currentTheme = ref<Theme>('system');
 
 function getSystemTheme(): 'light' | 'dark' {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+        ? 'dark'
+        : 'light';
 }
 
 function applyTheme(theme: Theme) {
     const root = document.documentElement;
     root.classList.remove('light', 'dark');
     root.removeAttribute('data-theme');
-    
+
     if (theme === 'system') {
         // Let CSS media query handle it
         const systemTheme = getSystemTheme();
@@ -64,13 +66,15 @@ onMounted(() => {
         currentTheme.value = savedTheme;
     }
     applyTheme(currentTheme.value);
-    
+
     // Listen for system theme changes
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-        if (currentTheme.value === 'system') {
-            applyTheme('system');
-        }
-    });
+    window
+        .matchMedia('(prefers-color-scheme: dark)')
+        .addEventListener('change', () => {
+            if (currentTheme.value === 'system') {
+                applyTheme('system');
+            }
+        });
 });
 
 // Computed display value for current effective theme
@@ -314,7 +318,14 @@ function getThemeIcon(): 'sun' | 'moon' | 'system' {
                     stroke-width="2"
                     class="action-icon"
                 >
-                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                    <rect
+                        x="2"
+                        y="3"
+                        width="20"
+                        height="14"
+                        rx="2"
+                        ry="2"
+                    ></rect>
                     <line x1="8" y1="21" x2="16" y2="21"></line>
                     <line x1="12" y1="17" x2="12" y2="21"></line>
                 </svg>

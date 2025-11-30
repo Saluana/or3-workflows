@@ -1,0 +1,66 @@
+{
+  "meta": {
+    "version": "2.0.0",
+    "name": "Risk Register Builder",
+    "description": "Builds a risk register by generating risks and mitigations in parallel then merging."
+  },
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 0, "y": 0 },
+      "data": { "label": "Start" }
+    },
+    {
+      "id": "parallel-1",
+      "type": "parallel",
+      "position": { "x": 220, "y": 0 },
+      "data": {
+        "label": "Generate Risks & Mitigations",
+        "prompt": "Merge the branch outputs into a table-like text: columns Risk, Impact, Likelihood, Mitigation, Owner TBD.",
+        "model": "openai/gpt-4o-mini",
+        "branches": [
+          { "id": "branch-risks", "label": "Risks" },
+          { "id": "branch-mitigations", "label": "Mitigations" }
+        ]
+      }
+    },
+    {
+      "id": "agent-risks",
+      "type": "agent",
+      "position": { "x": 480, "y": -60 },
+      "data": {
+        "label": "Risk Ideas",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "List 5 risks with impact and likelihood (low/med/high). Keep each risk under 20 words."
+      }
+    },
+    {
+      "id": "agent-mitigations",
+      "type": "agent",
+      "position": { "x": 480, "y": 60 },
+      "data": {
+        "label": "Mitigation Ideas",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Provide matching mitigations for plausible risks in the topic. Each under 20 words."
+      }
+    },
+    {
+      "id": "agent-final",
+      "type": "agent",
+      "position": { "x": 700, "y": 0 },
+      "data": {
+        "label": "Register",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Make sure risks and mitigations align. Output a compact register with 5 rows."
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "parallel-1" },
+    { "id": "e2", "source": "parallel-1", "sourceHandle": "branch-risks", "target": "agent-risks" },
+    { "id": "e3", "source": "parallel-1", "sourceHandle": "branch-mitigations", "target": "agent-mitigations" },
+    { "id": "e4", "source": "parallel-1", "sourceHandle": "merged", "target": "agent-final" }
+  ]
+}
+

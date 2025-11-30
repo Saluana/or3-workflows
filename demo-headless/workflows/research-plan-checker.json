@@ -1,0 +1,51 @@
+{
+  "meta": {
+    "version": "2.0.0",
+    "name": "Research Plan Checker",
+    "description": "Builds a quick research plan and self-checks coverage and ethics."
+  },
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 0, "y": 0 },
+      "data": { "label": "Start" }
+    },
+    {
+      "id": "agent-plan",
+      "type": "agent",
+      "position": { "x": 220, "y": 0 },
+      "data": {
+        "label": "Draft Plan",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Create a lean research plan: goals, 3 hypotheses, methods, participants, timeline, success signals."
+      }
+    },
+    {
+      "id": "agent-audit",
+      "type": "agent",
+      "position": { "x": 440, "y": 0 },
+      "data": {
+        "label": "Coverage Audit",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Audit the plan: check for bias/ethics, missing signals, and feasibility. Return fixes and an overall confidence (low/med/high)."
+      }
+    },
+    {
+      "id": "agent-final",
+      "type": "agent",
+      "position": { "x": 660, "y": 0 },
+      "data": {
+        "label": "Final Plan",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Apply the audit feedback and output a tightened plan under 200 words."
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "agent-plan" },
+    { "id": "e2", "source": "agent-plan", "target": "agent-audit" },
+    { "id": "e3", "source": "agent-audit", "target": "agent-final" }
+  ]
+}
+

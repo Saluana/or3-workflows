@@ -46,3 +46,21 @@ For help:
 bun demo-headless/src/index.ts --help
 ```
 
+## Prebuilt workflows (8 niche cases)
+
+All paths below are relative to `demo-headless/` when using `--filter demo-headless`:
+
+- `./workflows/support-triage-router.json` — routes to bug/feature/billing intake lanes.
+- `./workflows/tone-refiner-loop.json` — while-loop polisher for concise, friendly copy.
+- `./workflows/parallel-briefing.json` — parallel exec summary, risks, and actions, then merge.
+- `./workflows/bug-brief-generator.json` — structured bug brief with repro steps.
+- `./workflows/meeting-notes-to-actions.json` — turns meeting notes into decisions/risks/actions.
+- `./workflows/research-plan-checker.json` — drafts a research plan and audits it.
+- `./workflows/data-quality-audit.json` — data-quality checklist + probe queries.
+- `./workflows/risk-register-builder.json` — parallel risks/mitigations merged into a register.
+
+Example run (from repo root):
+
+```bash
+bun run --filter demo-headless run -- ./workflows/parallel-briefing.json "Context about a launch status for the briefing."
+```
