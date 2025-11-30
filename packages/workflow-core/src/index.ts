@@ -55,6 +55,7 @@ export {
 // Human-in-the-Loop (HITL)
 export {
     type HITLMode,
+    type HITLAction,
     type HITLConfig,
     type HITLRequest,
     type HITLResponse,

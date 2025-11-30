@@ -23,7 +23,7 @@ import type {
     WhileLoopNodeData,
     LoopState,
 } from './types';
-import type { SubflowNodeData, SubflowRegistry } from './subflow';
+import type { SubflowNodeData } from './subflow';
 import { validateInputMappings } from './subflow';
 import { toolRegistry } from './extensions/ToolNodeExtension';
 import {
@@ -1596,18 +1596,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     onNodeError: (nodeId, error) => {
                         callbacks.onNodeError(`${node.id}/${nodeId}`, error);
                     },
-                },
-                {
-                    // Share session if configured
-                    sessionId:
-                        data.shareSession !== false
-                            ? context.session.id
-                            : undefined,
-                    // Pass along memory adapter
-                    memory: context.memory,
-                    // Track nesting depth
-                    __subflowDepth: currentDepth + 1,
-                } as any
+                }
             );
 
             // Get output from subflow

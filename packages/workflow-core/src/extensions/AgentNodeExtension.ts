@@ -69,7 +69,7 @@ export const AgentNodeExtension: NodeExtension = {
      * Calling this directly will raise to prevent confusing placeholder data.
      */
     async execute(
-        context: ExecutionContext
+        _context: ExecutionContext
     ): Promise<{ output: string; nextNodes: string[] }> {
         throw new Error(
             'AgentNodeExtension.execute is handled by OpenRouterExecutionAdapter. ' +

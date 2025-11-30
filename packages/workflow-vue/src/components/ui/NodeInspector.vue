@@ -261,13 +261,13 @@ const errorHandling = computed<NodeErrorConfig>(() => {
 });
 
 const retryConfig = computed<NodeRetryConfig>(() => {
-    const retry = errorHandling.value.retry || {};
+    const retry = errorHandling.value.retry;
     return {
-        maxRetries: retry.maxRetries ?? 0,
-        baseDelay: retry.baseDelay ?? 1000,
-        maxDelay: retry.maxDelay,
-        retryOn: retry.retryOn ?? [],
-        skipOn: retry.skipOn,
+        maxRetries: retry?.maxRetries ?? 0,
+        baseDelay: retry?.baseDelay ?? 1000,
+        maxDelay: retry?.maxDelay,
+        retryOn: retry?.retryOn ?? [],
+        skipOn: retry?.skipOn,
     };
 });
 

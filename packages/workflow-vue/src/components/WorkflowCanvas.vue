@@ -399,4 +399,12 @@ defineExpose({
 .vue-flow__controls-button svg {
     fill: currentColor !important;
 }
+
+/* Remove default node background */
+.vue-flow__node {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+}
 </style>

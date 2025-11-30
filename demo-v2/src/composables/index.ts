@@ -1,4 +1,8 @@
-export { useWorkflowExecution, type ChatMessage } from './useWorkflowExecution';
+export {
+    useWorkflowExecution,
+    type ChatMessage,
+    type ExecutionCallbacks,
+} from './useWorkflowExecution';
 export { useWorkflowStorage, type SavedWorkflow } from './useWorkflowStorage';
 export {
     useWorkflowValidation,

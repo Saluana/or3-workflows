@@ -80,6 +80,13 @@ const conversationHistory = ref<Array<{ role: string; content: string }>>([]);
 const workflowName = ref('My Workflow');
 const workflowDescription = ref('');
 
+// HITL (Human-in-the-Loop) state
+import type { HITLRequest, HITLResponse } from '@or3/workflow-core';
+const showHITLModal = ref(false);
+const pendingHITLRequest = ref<HITLRequest | null>(null);
+const hitlUserInput = ref('');
+let resolveHITLPromise: ((response: HITLResponse) => void) | null = null;
+
 // Modals
 const showSaveModal = ref(false);
 const showLoadModal = ref(false);
@@ -149,65 +156,102 @@ function createDefaultWorkflow() {
     if (!editor.value) return;
 
     // Load a pre-built default workflow with edges
+    // This workflow demonstrates the new v2 features including:
+    // - Router node for intent detection
+    // - Agent nodes for processing
+    // - While Loop for iterative refinement
+    // - Output node for structured results
+    // - HITL (Human-in-the-Loop) for review
     const defaultWorkflow: WorkflowData = {
         meta: {
             version: '2.0.0',
-            name: 'Customer Support Workflow',
-            description: 'Route support inquiries to the right agent and summarize.',
+            name: 'Smart Assistant Workflow',
+            description:
+                'An intelligent assistant with routing, iteration, and human review capabilities.',
         },
         nodes: [
             {
                 id: 'start',
                 type: 'start',
-                position: { x: 250, y: 0 },
+                position: { x: 300, y: 0 },
                 data: { label: 'Start' },
             },
             {
                 id: 'router',
                 type: 'router',
-                position: { x: 200, y: 120 },
+                position: { x: 250, y: 100 },
                 data: {
                     label: 'Detect Intent',
-                    prompt: 'Route to technical support for technical issues, sales for product inquiries.',
-                },
-            },
-            {
-                id: 'tech-agent',
-                type: 'agent',
-                position: { x: 50, y: 280 },
-                data: {
-                    label: 'Technical Agent',
-                    model: 'anthropic/claude-3.5-sonnet',
-                    prompt: 'You are a technical support specialist. Help users with technical issues, troubleshooting, and bug fixes.',
-                },
-            },
-            {
-                id: 'sales-agent',
-                type: 'agent',
-                position: { x: 350, y: 280 },
-                data: {
-                    label: 'Sales Agent',
-                    model: 'openai/gpt-4o',
-                    prompt: 'You are a friendly sales representative. Help users with product inquiries, pricing, and features.',
-                },
-            },
-            {
-                id: 'formatter',
-                type: 'agent',
-                position: { x: 200, y: 440 },
-                data: {
-                    label: 'Response Formatter',
+                    prompt: 'Analyze the user request and route to:\n- "analysis" for questions requiring research or analysis\n- "creative" for creative writing, brainstorming, or idea generation\n- "simple" for quick factual answers',
                     model: 'openai/gpt-4o-mini',
-                    prompt: 'Format the response professionally and ensure it is helpful, complete, and friendly.',
                 },
             },
             {
-                id: 'tool-summary',
-                type: 'tool',
-                position: { x: 200, y: 580 },
+                id: 'analysis-agent',
+                type: 'agent',
+                position: { x: 0, y: 250 },
                 data: {
-                    label: 'Summarize Tool',
-                    toolId: 'demo_summarize',
+                    label: 'Analysis Agent',
+                    model: 'anthropic/claude-3.5-sonnet',
+                    prompt: 'You are an analytical expert. Provide thorough, well-researched answers with clear reasoning and evidence.',
+                    hitl: {
+                        enabled: true,
+                        mode: 'review',
+                        prompt: 'Please review this analysis before it is finalized.',
+                    },
+                },
+            },
+            {
+                id: 'creative-agent',
+                type: 'agent',
+                position: { x: 250, y: 250 },
+                data: {
+                    label: 'Creative Agent',
+                    model: 'openai/gpt-4o',
+                    prompt: 'You are a creative writer. Generate engaging, imaginative content that inspires and delights.',
+                },
+            },
+            {
+                id: 'simple-agent',
+                type: 'agent',
+                position: { x: 500, y: 250 },
+                data: {
+                    label: 'Quick Answer',
+                    model: 'openai/gpt-4o-mini',
+                    prompt: 'Provide a concise, direct answer. Be helpful but brief.',
+                },
+            },
+            {
+                id: 'refine-loop',
+                type: 'whileLoop',
+                position: { x: 250, y: 400 },
+                data: {
+                    label: 'Refine Response',
+                    conditionPrompt:
+                        'Review the response quality. If it could be significantly improved, respond "continue". If it is good enough, respond "done".',
+                    maxIterations: 3,
+                    onMaxIterations: 'continue',
+                },
+            },
+            {
+                id: 'refine-agent',
+                type: 'agent',
+                position: { x: 250, y: 530 },
+                data: {
+                    label: 'Refinement',
+                    model: 'openai/gpt-4o-mini',
+                    prompt: 'Review and improve the previous response. Make it more clear, accurate, and helpful. Build on what was good and fix any issues.',
+                },
+            },
+            {
+                id: 'output',
+                type: 'output',
+                position: { x: 250, y: 680 },
+                data: {
+                    label: 'Final Output',
+                    format: 'text',
+                    template: '',
+                    includeMetadata: false,
                 },
             },
         ],
@@ -216,18 +260,37 @@ function createDefaultWorkflow() {
             {
                 id: 'e2',
                 source: 'router',
-                target: 'tech-agent',
-                label: 'Technical',
+                target: 'analysis-agent',
+                label: 'Analysis',
             },
             {
                 id: 'e3',
                 source: 'router',
-                target: 'sales-agent',
-                label: 'Sales',
+                target: 'creative-agent',
+                label: 'Creative',
             },
-            { id: 'e4', source: 'tech-agent', target: 'formatter' },
-            { id: 'e5', source: 'sales-agent', target: 'formatter' },
-            { id: 'e6', source: 'formatter', target: 'tool-summary' },
+            {
+                id: 'e4',
+                source: 'router',
+                target: 'simple-agent',
+                label: 'Simple',
+            },
+            { id: 'e5', source: 'analysis-agent', target: 'refine-loop' },
+            { id: 'e6', source: 'creative-agent', target: 'refine-loop' },
+            { id: 'e7', source: 'simple-agent', target: 'output' },
+            {
+                id: 'e8',
+                source: 'refine-loop',
+                target: 'refine-agent',
+                sourceHandle: 'body',
+            },
+            { id: 'e9', source: 'refine-agent', target: 'refine-loop' },
+            {
+                id: 'e10',
+                source: 'refine-loop',
+                target: 'output',
+                sourceHandle: 'done',
+            },
         ],
     };
 
@@ -286,6 +349,66 @@ function clearApiKey() {
 }
 
 // ============================================================================
+// HITL (Human-in-the-Loop) Handlers
+// ============================================================================
+async function handleHITLRequest(request: HITLRequest): Promise<HITLResponse> {
+    pendingHITLRequest.value = request;
+    hitlUserInput.value = '';
+    showHITLModal.value = true;
+
+    return new Promise((resolve) => {
+        resolveHITLPromise = resolve;
+    });
+}
+
+function handleHITLApprove() {
+    if (!pendingHITLRequest.value || !resolveHITLPromise) return;
+
+    const response: HITLResponse = {
+        requestId: pendingHITLRequest.value.id,
+        action: 'approve',
+        data: hitlUserInput.value || undefined,
+        respondedAt: new Date().toISOString(),
+    };
+
+    resolveHITLPromise(response);
+    closeHITLModal();
+}
+
+function handleHITLReject() {
+    if (!pendingHITLRequest.value || !resolveHITLPromise) return;
+
+    const response: HITLResponse = {
+        requestId: pendingHITLRequest.value.id,
+        action: 'reject',
+        respondedAt: new Date().toISOString(),
+    };
+
+    resolveHITLPromise(response);
+    closeHITLModal();
+}
+
+function handleHITLSkip() {
+    if (!pendingHITLRequest.value || !resolveHITLPromise) return;
+
+    const response: HITLResponse = {
+        requestId: pendingHITLRequest.value.id,
+        action: 'skip',
+        respondedAt: new Date().toISOString(),
+    };
+
+    resolveHITLPromise(response);
+    closeHITLModal();
+}
+
+function closeHITLModal() {
+    showHITLModal.value = false;
+    pendingHITLRequest.value = null;
+    hitlUserInput.value = '';
+    resolveHITLPromise = null;
+}
+
+// ============================================================================
 // Workflow Execution
 // ============================================================================
 async function handleSendMessage() {
@@ -317,13 +440,6 @@ async function handleSendMessage() {
     error.value = null;
 
     try {
-        // Map nodes to execution format (data as Record<string, unknown>)
-        const execNodes = nodes.map((n) => ({
-            id: n.id,
-            type: n.type,
-            data: { ...n.data } as Record<string, unknown>,
-        }));
-
         const finalOutput = await executeWorkflowFn(
             apiKey.value,
             workflow,
@@ -333,6 +449,17 @@ async function handleSendMessage() {
                 onNodeStatus: setNodeStatus,
                 onStreamingContent: setStreamingContent,
                 onAppendContent: appendStreamingContent,
+                onHITLRequest: handleHITLRequest,
+                onRouteSelected: (nodeId, routeId) => {
+                    console.log(
+                        `[Router] Node ${nodeId} selected route: ${routeId}`
+                    );
+                },
+                onContextCompacted: (result) => {
+                    console.log(
+                        `[Compaction] Reduced from ${result.tokensBefore} to ${result.tokensAfter} tokens`
+                    );
+                },
             }
         );
 
@@ -1359,6 +1486,122 @@ function syncMetaToEditor() {
                 </div>
             </div>
         </div>
+
+        <!-- HITL (Human-in-the-Loop) Modal -->
+        <div
+            v-if="showHITLModal && pendingHITLRequest"
+            class="modal-overlay hitl-overlay"
+        >
+            <div class="modal hitl-modal">
+                <div class="hitl-header">
+                    <div class="hitl-icon">
+                        <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <path d="M12 16v-4"></path>
+                            <path d="M12 8h.01"></path>
+                        </svg>
+                    </div>
+                    <h2>Human Review Required</h2>
+                    <span class="hitl-mode-badge">{{
+                        pendingHITLRequest.mode
+                    }}</span>
+                </div>
+
+                <div class="hitl-content">
+                    <p class="hitl-node-info">
+                        <strong>Node:</strong> {{ pendingHITLRequest.nodeId }}
+                    </p>
+
+                    <div v-if="pendingHITLRequest.prompt" class="hitl-prompt">
+                        {{ pendingHITLRequest.prompt }}
+                    </div>
+
+                    <div v-if="pendingHITLRequest.context" class="hitl-context">
+                        <h4>Context</h4>
+                        <pre>{{
+                            typeof pendingHITLRequest.context === 'string'
+                                ? pendingHITLRequest.context
+                                : JSON.stringify(
+                                      pendingHITLRequest.context,
+                                      null,
+                                      2
+                                  )
+                        }}</pre>
+                    </div>
+
+                    <!-- Input mode: show text input -->
+                    <div
+                        v-if="pendingHITLRequest.mode === 'input'"
+                        class="hitl-input-section"
+                    >
+                        <label class="form-label">Your Input</label>
+                        <textarea
+                            v-model="hitlUserInput"
+                            class="hitl-textarea"
+                            placeholder="Enter your response..."
+                            rows="4"
+                        ></textarea>
+                    </div>
+
+                    <!-- Custom options if provided -->
+                    <div
+                        v-if="pendingHITLRequest.options?.length"
+                        class="hitl-options"
+                    >
+                        <button
+                            v-for="option in pendingHITLRequest.options"
+                            :key="option.id"
+                            class="btn hitl-option-btn"
+                            :class="{
+                                'btn-primary': option.action === 'approve',
+                                'btn-danger': option.action === 'reject',
+                                'btn-ghost': option.action === 'skip',
+                            }"
+                            @click="
+                                () => {
+                                    if (
+                                        resolveHITLPromise &&
+                                        pendingHITLRequest
+                                    ) {
+                                        resolveHITLPromise({
+                                            requestId: pendingHITLRequest.id,
+                                            action: option.action,
+                                            data: hitlUserInput || undefined,
+                                            respondedAt:
+                                                new Date().toISOString(),
+                                        });
+                                        closeHITLModal();
+                                    }
+                                }
+                            "
+                        >
+                            {{ option.label }}
+                        </button>
+                    </div>
+                </div>
+
+                <div class="modal-actions hitl-actions">
+                    <button class="btn btn-ghost" @click="handleHITLSkip">
+                        Skip
+                    </button>
+                    <button class="btn btn-danger" @click="handleHITLReject">
+                        Reject
+                    </button>
+                    <button class="btn btn-primary" @click="handleHITLApprove">
+                        {{
+                            pendingHITLRequest.mode === 'input'
+                                ? 'Submit'
+                                : 'Approve'
+                        }}
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 </template>
 
@@ -2272,5 +2515,142 @@ function syncMetaToEditor() {
         right: 0;
         bottom: 60px;
     }
+}
+
+/* HITL Modal Styles */
+.hitl-overlay {
+    z-index: 1000;
+}
+
+.hitl-modal {
+    max-width: 500px;
+    width: 90%;
+}
+
+.hitl-header {
+    display: flex;
+    align-items: center;
+    gap: var(--or3-spacing-sm, 8px);
+    margin-bottom: var(--or3-spacing-md, 16px);
+}
+
+.hitl-icon {
+    width: 32px;
+    height: 32px;
+    color: var(--or3-color-warning, #f59e0b);
+}
+
+.hitl-icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+.hitl-header h2 {
+    flex: 1;
+    margin: 0;
+    font-size: 1.25rem;
+}
+
+.hitl-mode-badge {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    background: var(--or3-color-bg-tertiary, #2a2a3a);
+    color: var(--or3-color-text-secondary, #888);
+}
+
+.hitl-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-md, 16px);
+}
+
+.hitl-node-info {
+    color: var(--or3-color-text-secondary, #888);
+    font-size: 0.875rem;
+    margin: 0;
+}
+
+.hitl-prompt {
+    padding: var(--or3-spacing-md, 16px);
+    background: var(--or3-color-bg-tertiary, #2a2a3a);
+    border-radius: var(--or3-border-radius-md, 8px);
+    line-height: 1.5;
+}
+
+.hitl-context {
+    background: var(--or3-color-bg-tertiary, #2a2a3a);
+    border-radius: var(--or3-border-radius-md, 8px);
+    overflow: hidden;
+}
+
+.hitl-context h4 {
+    margin: 0;
+    padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 16px);
+    background: rgba(255, 255, 255, 0.05);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    color: var(--or3-color-text-secondary, #888);
+}
+
+.hitl-context pre {
+    margin: 0;
+    padding: var(--or3-spacing-md, 16px);
+    font-size: 0.875rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.hitl-input-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-xs, 4px);
+}
+
+.hitl-textarea {
+    width: 100%;
+    padding: var(--or3-spacing-sm, 8px);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--or3-border-radius-sm, 4px);
+    background: var(--or3-color-bg-secondary, #12121a);
+    color: var(--or3-color-text-primary, #fff);
+    font-family: inherit;
+    font-size: 0.875rem;
+    resize: vertical;
+}
+
+.hitl-textarea:focus {
+    outline: none;
+    border-color: var(--or3-color-accent, #6366f1);
+}
+
+.hitl-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--or3-spacing-sm, 8px);
+}
+
+.hitl-option-btn {
+    flex: 1;
+    min-width: 100px;
+}
+
+.hitl-actions {
+    margin-top: var(--or3-spacing-md, 16px);
+    border-top: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    padding-top: var(--or3-spacing-md, 16px);
+}
+
+.btn-danger {
+    background: var(--or3-color-error, #ef4444);
+    color: white;
+}
+
+.btn-danger:hover {
+    background: #dc2626;
 }
 </style>

@@ -33,7 +33,13 @@ export type ValidationErrorCode =
     | 'MISSING_PROMPT'
     | 'MISSING_SUBFLOW_ID'
     | 'SUBFLOW_NOT_FOUND'
-    | 'MISSING_INPUT_MAPPING';
+    | 'MISSING_INPUT_MAPPING'
+    | 'MISSING_OPERATION'
+    | 'INVALID_LIMIT'
+    | 'MISSING_CONDITION_PROMPT'
+    | 'INVALID_MAX_ITERATIONS'
+    | 'MISSING_BODY'
+    | 'MISSING_EXIT';
 
 export type ValidationWarningCode =
     | 'EMPTY_PROMPT'
@@ -43,7 +49,9 @@ export type ValidationWarningCode =
     | 'NO_SUBFLOW_OUTPUTS'
     | 'NO_REGISTRY'
     | 'NO_INPUT'
-    | 'NO_OUTPUT';
+    | 'NO_OUTPUT'
+    | 'MISSING_BODY'
+    | 'MISSING_EXIT';
 
 export function validateWorkflow(
     nodes: WorkflowNode[],

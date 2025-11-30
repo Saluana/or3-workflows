@@ -21,6 +21,17 @@
 export type HITLMode = 'approval' | 'input' | 'review';
 
 /**
+ * HITL response action types.
+ */
+export type HITLAction =
+    | 'approve'
+    | 'reject'
+    | 'submit'
+    | 'modify'
+    | 'skip'
+    | 'custom';
+
+/**
  * Configuration for HITL behavior on a node.
  *
  * @example
@@ -111,7 +122,7 @@ export interface HITLRequest {
     };
 
     /** Options for approval mode */
-    options?: Array<{ id: string; label: string; action: string }>;
+    options?: Array<{ id: string; label: string; action: HITLAction }>;
 
     /** Schema for input mode */
     inputSchema?: Record<string, unknown>;
@@ -138,7 +149,7 @@ export interface HITLResponse {
      * - `modify`: Review mode - use modified output
      * - `skip`: Skip this node entirely
      */
-    action: 'approve' | 'reject' | 'submit' | 'modify' | 'skip';
+    action: HITLAction;
 
     /**
      * Data provided by the human.
