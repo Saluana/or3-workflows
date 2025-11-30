@@ -15,6 +15,7 @@ import {
 // Type guard for configurable node data
 interface ConfigurableNodeData {
     label: string;
+    description?: string;
     prompt?: string;
     model?: string;
     tools?: string[];

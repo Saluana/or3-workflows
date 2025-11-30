@@ -1059,14 +1059,15 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         }
 
         // Create abort promise that rejects when execution is cancelled
+        let abortHandler: (() => void) | undefined;
         const abortPromise = new Promise<HITLResponse>((_, reject) => {
             const signal = this.abortController?.signal;
             if (signal?.aborted) {
                 reject(new Error('Workflow cancelled'));
                 return;
             }
-            const onAbort = () => reject(new Error('Workflow cancelled'));
-            signal?.addEventListener('abort', onAbort, { once: true });
+            abortHandler = () => reject(new Error('Workflow cancelled'));
+            signal?.addEventListener('abort', abortHandler, { once: true });
         });
 
         const promises: Promise<HITLResponse>[] = [
@@ -1074,9 +1075,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             abortPromise,
         ];
 
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
         if (config.timeout && config.timeout > 0) {
             const timeoutPromise = new Promise<HITLResponse>((resolve) => {
-                const timeoutId = setTimeout(() => {
+                timeoutId = setTimeout(() => {
                     const defaultAction = config.defaultAction || 'reject';
                     resolve({
                         requestId: request.id,
@@ -1089,20 +1091,24 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                         respondedAt: new Date().toISOString(),
                     });
                 }, config.timeout);
-
-                // Clear timeout if execution is aborted
-                this.abortController?.signal.addEventListener(
-                    'abort',
-                    () => {
-                        clearTimeout(timeoutId);
-                    },
-                    { once: true }
-                );
             });
             promises.push(timeoutPromise);
         }
 
-        return Promise.race(promises);
+        try {
+            return await Promise.race(promises);
+        } finally {
+            // Cleanup
+            if (abortHandler && this.abortController?.signal) {
+                this.abortController.signal.removeEventListener(
+                    'abort',
+                    abortHandler
+                );
+            }
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+        }
     }
 
     /**
@@ -1184,7 +1190,23 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     }
 
     private async sleep(ms: number): Promise<void> {
-        await new Promise((resolve) => setTimeout(resolve, ms));
+        if (this.abortController?.signal.aborted) {
+            throw new Error('Workflow cancelled');
+        }
+        return new Promise((resolve, reject) => {
+            const signal = this.abortController?.signal;
+            const timeoutId = setTimeout(() => {
+                signal?.removeEventListener('abort', onAbort);
+                resolve();
+            }, ms);
+
+            const onAbort = () => {
+                clearTimeout(timeoutId);
+                reject(new Error('Workflow cancelled'));
+            };
+
+            signal?.addEventListener('abort', onAbort, { once: true });
+        });
     }
 
     private getChildNodes(nodeId: string, edges: WorkflowEdge[]): string[] {
