@@ -57,7 +57,7 @@ if (modelRegistry.size === 0) {
 }
 
 const availableModels = computed(() => {
-    return modelRegistry.getAllInfo().map(m => ({
+    return modelRegistry.getAllInfo().map((m) => ({
         id: m.id,
         name: m.name,
         provider: m.provider,
