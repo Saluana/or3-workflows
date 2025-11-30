@@ -68,9 +68,17 @@ const emit = defineEmits<{
                     title="Undo (⌘Z)"
                     @click="emit('undo')"
                 >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="toolbar-icon">
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        class="toolbar-icon"
+                    >
                         <path d="M3 7v6h6"></path>
-                        <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path>
+                        <path
+                            d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"
+                        ></path>
                     </svg>
                 </button>
                 <button
@@ -80,9 +88,17 @@ const emit = defineEmits<{
                     title="Redo (⌘⇧Z)"
                     @click="emit('redo')"
                 >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="toolbar-icon">
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        class="toolbar-icon"
+                    >
                         <path d="M21 7v6h-6"></path>
-                        <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"></path>
+                        <path
+                            d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"
+                        ></path>
                     </svg>
                 </button>
             </div>
@@ -91,40 +107,101 @@ const emit = defineEmits<{
 
             <!-- File Operations -->
             <div class="toolbar-group">
-                <button class="toolbar-btn" title="Save workflow" @click="emit('save')">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="toolbar-icon">
-                        <path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"></path>
-                        <path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"></path>
+                <button
+                    class="toolbar-btn"
+                    title="Save workflow"
+                    @click="emit('save')"
+                >
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        class="toolbar-icon"
+                    >
+                        <path
+                            d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"
+                        ></path>
+                        <path
+                            d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"
+                        ></path>
                         <path d="M7 3v4a1 1 0 0 0 1 1h7"></path>
                     </svg>
                 </button>
-                <button class="toolbar-btn" title="Load workflow" @click="emit('load')">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="toolbar-icon">
-                        <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path>
+                <button
+                    class="toolbar-btn"
+                    title="Load workflow"
+                    @click="emit('load')"
+                >
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        class="toolbar-icon"
+                    >
+                        <path
+                            d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"
+                        ></path>
                     </svg>
                 </button>
-                <button class="toolbar-btn" title="Export as JSON" @click="emit('export')">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="toolbar-icon">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <button
+                    class="toolbar-btn"
+                    title="Export as JSON"
+                    @click="emit('export')"
+                >
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        class="toolbar-icon"
+                    >
+                        <path
+                            d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
+                        ></path>
                         <polyline points="7 10 12 15 17 10"></polyline>
                         <line x1="12" x2="12" y1="15" y2="3"></line>
                     </svg>
                 </button>
                 <label class="toolbar-btn" title="Import JSON">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="toolbar-icon">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        class="toolbar-icon"
+                    >
+                        <path
+                            d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
+                        ></path>
                         <polyline points="17 8 12 3 7 8"></polyline>
                         <line x1="12" x2="12" y1="3" y2="15"></line>
                     </svg>
-                    <input type="file" accept=".json" class="sr-only" @change="emit('import', $event)" />
+                    <input
+                        type="file"
+                        accept=".json"
+                        class="sr-only"
+                        @change="emit('import', $event)"
+                    />
                 </label>
             </div>
 
             <div class="toolbar-divider"></div>
 
             <!-- Validate -->
-            <button class="validate-btn" title="Check for issues" @click="emit('validate')">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="toolbar-icon">
+            <button
+                class="validate-btn"
+                title="Check for issues"
+                @click="emit('validate')"
+            >
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    class="toolbar-icon"
+                >
                     <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
                     <polyline points="22 4 12 14.01 9 11.01"></polyline>
                 </svg>
@@ -134,15 +211,25 @@ const emit = defineEmits<{
 
         <!-- Actions Section -->
         <div class="header-actions">
-            <button 
-                class="api-key-btn" 
+            <button
+                class="api-key-btn"
                 :class="{ 'has-key': hasApiKey }"
                 @click="emit('openApiKeyModal')"
             >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="action-icon">
-                    <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path>
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    class="action-icon"
+                >
+                    <path
+                        d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"
+                    ></path>
                 </svg>
-                <span class="api-key-text">{{ hasApiKey ? 'API Key Set' : 'Set API Key' }}</span>
+                <span class="api-key-text">{{
+                    hasApiKey ? 'API Key Set' : 'Set API Key'
+                }}</span>
                 <span v-if="hasApiKey" class="api-key-indicator"></span>
             </button>
 
@@ -152,7 +239,13 @@ const emit = defineEmits<{
                 title="Toggle chat panel"
                 @click="emit('update:showChatPanel', !showChatPanel)"
             >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="action-icon">
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    class="action-icon"
+                >
                     <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path>
                 </svg>
             </button>
@@ -189,7 +282,10 @@ const emit = defineEmits<{
 .logo {
     font-size: var(--or3-text-lg, 16px);
     font-weight: var(--or3-font-bold, 700);
-    background: var(--or3-gradient-accent, linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%));
+    background: var(
+        --or3-gradient-accent,
+        linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%)
+    );
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -241,7 +337,8 @@ const emit = defineEmits<{
 .workflow-name-input:focus,
 .workflow-desc-input:focus {
     border-color: var(--or3-color-accent, #8b5cf6);
-    box-shadow: 0 0 0 3px var(--or3-color-accent-subtle, rgba(139, 92, 246, 0.08));
+    box-shadow: 0 0 0 3px
+        var(--or3-color-accent-subtle, rgba(139, 92, 246, 0.08));
     outline: none;
 }
 

@@ -16,17 +16,28 @@ const emit = defineEmits<{
         <div v-if="show" class="modal-overlay" @click.self="emit('close')">
             <div class="modal">
                 <div class="modal-icon">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
-                        <polyline points="17,21 17,13 7,13 7,21"/>
-                        <polyline points="7,3 7,8 15,8"/>
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path
+                            d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"
+                        />
+                        <polyline points="17,21 17,13 7,13 7,21" />
+                        <polyline points="7,3 7,8 15,8" />
                     </svg>
                 </div>
                 <h2>Save Workflow</h2>
                 <p class="modal-desc">
-                    Give your workflow a descriptive name. Saved workflows are stored locally in your browser.
+                    Give your workflow a descriptive name. Saved workflows are
+                    stored locally in your browser.
                 </p>
-                
+
                 <label class="form-label">Workflow Name</label>
                 <input
                     :value="workflowName"
@@ -41,14 +52,24 @@ const emit = defineEmits<{
                     "
                     @keydown.enter="emit('save')"
                 />
-                
+
                 <div class="modal-actions">
                     <button class="btn btn-ghost" @click="emit('close')">
                         Cancel
                     </button>
                     <button class="btn btn-primary" @click="emit('save')">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <polyline points="20,6 9,17 4,12"/>
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <polyline points="20,6 9,17 4,12" />
                         </svg>
                         Save Workflow
                     </button>
@@ -137,7 +158,8 @@ const emit = defineEmits<{
 .input:focus {
     outline: none;
     border-color: var(--or3-color-accent, #8b5cf6);
-    box-shadow: 0 0 0 3px var(--or3-color-accent-muted, rgba(139, 92, 246, 0.15));
+    box-shadow: 0 0 0 3px
+        var(--or3-color-accent-muted, rgba(139, 92, 246, 0.15));
 }
 
 .input::placeholder {

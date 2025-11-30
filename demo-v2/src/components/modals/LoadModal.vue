@@ -19,16 +19,28 @@ const emit = defineEmits<{
             <div class="modal modal-lg">
                 <div class="modal-header">
                     <div class="modal-icon">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <path
+                                d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                            />
                         </svg>
                     </div>
                     <div>
                         <h2>Your Workflows</h2>
-                        <p class="modal-subtitle">Select a workflow to continue editing</p>
+                        <p class="modal-subtitle">
+                            Select a workflow to continue editing
+                        </p>
                     </div>
                 </div>
-                
+
                 <div v-if="workflows.length > 0" class="workflow-list">
                     <div
                         v-for="workflow in workflows"
@@ -37,14 +49,31 @@ const emit = defineEmits<{
                         @click="emit('load', workflow)"
                     >
                         <div class="workflow-icon">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <circle cx="12" cy="12" r="3"/>
-                                <path d="M12 2v4m0 12v4M2 12h4m12 0h4"/>
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <circle cx="12" cy="12" r="3" />
+                                <path d="M12 2v4m0 12v4M2 12h4m12 0h4" />
                             </svg>
                         </div>
                         <div class="workflow-info">
-                            <span class="workflow-name">{{ workflow.name }}</span>
-                            <span class="workflow-date">Last edited {{ new Date(workflow.updatedAt).toLocaleDateString() }}</span>
+                            <span class="workflow-name">{{
+                                workflow.name
+                            }}</span>
+                            <span class="workflow-date"
+                                >Last edited
+                                {{
+                                    new Date(
+                                        workflow.updatedAt
+                                    ).toLocaleDateString()
+                                }}</span
+                            >
                         </div>
                         <div class="workflow-actions">
                             <button
@@ -52,25 +81,47 @@ const emit = defineEmits<{
                                 title="Delete workflow"
                                 @click.stop="emit('delete', workflow.id)"
                             >
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <polyline points="3,6 5,6 21,6"/>
-                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                >
+                                    <polyline points="3,6 5,6 21,6" />
+                                    <path
+                                        d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                                    />
                                 </svg>
                             </button>
                         </div>
                     </div>
                 </div>
-                
+
                 <div v-else class="empty-state">
                     <div class="empty-icon">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.5"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <path
+                                d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                            />
                         </svg>
                     </div>
                     <p class="empty-title">No workflows yet</p>
-                    <p class="empty-desc">Create your first workflow and save it to see it here.</p>
+                    <p class="empty-desc">
+                        Create your first workflow and save it to see it here.
+                    </p>
                 </div>
-                
+
                 <div class="modal-actions">
                     <button class="btn btn-ghost" @click="emit('close')">
                         Close

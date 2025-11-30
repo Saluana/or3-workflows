@@ -1023,7 +1023,8 @@ function syncMetaToEditor() {
     flex-direction: column;
     background: var(--or3-color-bg-secondary, #111115);
     position: relative;
-    transition: width var(--or3-transition-normal, 200ms), transform var(--or3-transition-normal, 200ms);
+    transition: width var(--or3-transition-normal, 200ms),
+        transform var(--or3-transition-normal, 200ms);
 }
 
 .sidebar-header {
@@ -2031,7 +2032,8 @@ function syncMetaToEditor() {
 .hitl-textarea:focus {
     outline: none;
     border-color: var(--or3-color-accent, #8b5cf6);
-    box-shadow: 0 0 0 3px var(--or3-color-accent-muted, rgba(139, 92, 246, 0.15));
+    box-shadow: 0 0 0 3px
+        var(--or3-color-accent-muted, rgba(139, 92, 246, 0.15));
 }
 
 .hitl-options {

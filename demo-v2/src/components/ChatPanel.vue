@@ -24,7 +24,8 @@ watch(
     async () => {
         await nextTick();
         if (messagesContainer.value) {
-            messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+            messagesContainer.value.scrollTop =
+                messagesContainer.value.scrollHeight;
         }
     }
 );
@@ -34,14 +35,16 @@ watch(
     async () => {
         await nextTick();
         if (messagesContainer.value) {
-            messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+            messagesContainer.value.scrollTop =
+                messagesContainer.value.scrollHeight;
         }
     }
 );
 
 // Count active nodes
 const completedNodeCount = () => {
-    return Object.values(props.nodeStatuses).filter(s => s === 'completed').length;
+    return Object.values(props.nodeStatuses).filter((s) => s === 'completed')
+        .length;
 };
 
 const totalNodeCount = () => {
@@ -54,14 +57,22 @@ const totalNodeCount = () => {
         <!-- Header -->
         <header class="chat-header">
             <div class="chat-title">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="chat-icon">
-                    <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path>
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    class="chat-icon"
+                >
+                    <path
+                        d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"
+                    ></path>
                 </svg>
                 <h3>Workflow Chat</h3>
             </div>
-            <button 
+            <button
                 v-if="messages.length > 0"
-                class="clear-btn" 
+                class="clear-btn"
                 @click="emit('clear')"
             >
                 Clear
@@ -69,22 +80,34 @@ const totalNodeCount = () => {
         </header>
 
         <!-- Status Bar (if running) -->
-        <div v-if="isRunning || Object.keys(nodeStatuses).length > 0" class="status-bar">
+        <div
+            v-if="isRunning || Object.keys(nodeStatuses).length > 0"
+            class="status-bar"
+        >
             <div class="status-content">
                 <div v-if="isRunning" class="status-indicator running">
-                    <svg class="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg
+                        class="spinner"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                    >
                         <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
                     </svg>
                     <span>Running workflow...</span>
                 </div>
                 <div v-else class="status-indicator">
                     <span class="status-dot completed"></span>
-                    <span>{{ completedNodeCount() }}/{{ totalNodeCount() }} nodes completed</span>
+                    <span
+                        >{{ completedNodeCount() }}/{{ totalNodeCount() }} nodes
+                        completed</span
+                    >
                 </div>
             </div>
             <div v-if="Object.keys(nodeStatuses).length > 0" class="node-chips">
-                <span 
-                    v-for="(status, nodeId) in nodeStatuses" 
+                <span
+                    v-for="(status, nodeId) in nodeStatuses"
                     :key="nodeId"
                     class="node-chip"
                     :class="status"
@@ -98,9 +121,18 @@ const totalNodeCount = () => {
         <!-- Messages Area -->
         <div ref="messagesContainer" class="messages-area">
             <!-- Empty State -->
-            <div v-if="messages.length === 0 && !streamingContent" class="empty-state">
+            <div
+                v-if="messages.length === 0 && !streamingContent"
+                class="empty-state"
+            >
                 <div class="empty-icon-wrapper">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="empty-icon">
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        class="empty-icon"
+                    >
                         <rect x="3" y="11" width="18" height="10" rx="2"></rect>
                         <circle cx="12" cy="5" r="2"></circle>
                         <path d="M12 7v4"></path>
@@ -108,25 +140,42 @@ const totalNodeCount = () => {
                 </div>
                 <h4 class="empty-title">Send a message to run the workflow</h4>
                 <p class="empty-description">
-                    Your message will flow through the workflow nodes and generate a response.
+                    Your message will flow through the workflow nodes and
+                    generate a response.
                 </p>
             </div>
 
             <!-- Message List -->
             <template v-else>
-                <div 
-                    v-for="msg in messages" 
-                    :key="msg.id" 
+                <div
+                    v-for="msg in messages"
+                    :key="msg.id"
                     class="message"
                     :class="msg.role"
                 >
                     <div class="message-avatar">
-                        <svg v-if="msg.role === 'user'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path>
+                        <svg
+                            v-if="msg.role === 'user'"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <path
+                                d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"
+                            ></path>
                             <circle cx="12" cy="7" r="4"></circle>
                         </svg>
-                        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path>
+                        <svg
+                            v-else
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <path
+                                d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"
+                            ></path>
                         </svg>
                     </div>
                     <div class="message-content">
@@ -138,15 +187,26 @@ const totalNodeCount = () => {
                 </div>
 
                 <!-- Streaming Message -->
-                <div v-if="streamingContent" class="message assistant streaming">
+                <div
+                    v-if="streamingContent"
+                    class="message assistant streaming"
+                >
                     <div class="message-avatar">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path>
+                        <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <path
+                                d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"
+                            ></path>
                         </svg>
                     </div>
                     <div class="message-content">
                         <div class="message-bubble">
-                            {{ streamingContent }}<span class="typing-cursor"></span>
+                            {{ streamingContent
+                            }}<span class="typing-cursor"></span>
                         </div>
                     </div>
                 </div>
@@ -161,8 +221,15 @@ const totalNodeCount = () => {
                     placeholder="Type a message..."
                     :disabled="isRunning"
                     rows="1"
-                    @input="emit('update:chatInput', ($event.target as HTMLTextAreaElement).value)"
-                    @keydown.enter.exact.prevent="!isRunning && chatInput?.trim() && emit('send')"
+                    @input="
+                        emit(
+                            'update:chatInput',
+                            ($event.target as HTMLTextAreaElement).value
+                        )
+                    "
+                    @keydown.enter.exact.prevent="
+                        !isRunning && chatInput?.trim() && emit('send')
+                    "
                     @keydown.enter.shift.exact=""
                 ></textarea>
                 <button
@@ -170,16 +237,32 @@ const totalNodeCount = () => {
                     :disabled="!chatInput?.trim() || isRunning"
                     @click="emit('send')"
                 >
-                    <svg v-if="isRunning" class="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg
+                        v-if="isRunning"
+                        class="spinner"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                    >
                         <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
                     </svg>
-                    <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg
+                        v-else
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                    >
                         <path d="M22 2L11 13"></path>
                         <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                     </svg>
                 </button>
             </div>
-            <p class="input-hint">Press <kbd>Enter</kbd> to send, <kbd>Shift+Enter</kbd> for new line</p>
+            <p class="input-hint">
+                Press <kbd>Enter</kbd> to send, <kbd>Shift+Enter</kbd> for new
+                line
+            </p>
         </div>
     </aside>
 </template>
@@ -276,8 +359,12 @@ const totalNodeCount = () => {
 }
 
 @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .status-dot {
@@ -392,8 +479,14 @@ const totalNodeCount = () => {
 }
 
 @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(4px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .message-avatar {
@@ -468,7 +561,9 @@ const totalNodeCount = () => {
 }
 
 @keyframes blink {
-    50% { opacity: 0; }
+    50% {
+        opacity: 0;
+    }
 }
 
 /* Input Area */
@@ -511,7 +606,8 @@ const totalNodeCount = () => {
 .input-wrapper textarea:focus {
     outline: none;
     border-color: var(--or3-color-accent, #8b5cf6);
-    box-shadow: 0 0 0 3px var(--or3-color-accent-subtle, rgba(139, 92, 246, 0.08));
+    box-shadow: 0 0 0 3px
+        var(--or3-color-accent-subtle, rgba(139, 92, 246, 0.08));
 }
 
 .input-wrapper textarea:disabled {
@@ -525,7 +621,10 @@ const totalNodeCount = () => {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--or3-gradient-accent, linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%));
+    background: var(
+        --or3-gradient-accent,
+        linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%)
+    );
     border: none;
     border-radius: var(--or3-radius-md, 8px);
     color: white;
@@ -578,7 +677,7 @@ const totalNodeCount = () => {
         width: 100%;
         max-width: none;
     }
-    
+
     .input-hint {
         display: none;
     }

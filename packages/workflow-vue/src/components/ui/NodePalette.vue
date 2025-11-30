@@ -9,7 +9,8 @@ const nodeTypes = [
     {
         type: 'agent',
         label: 'Agent Node',
-        description: 'Connect to any LLM model to process and respond to messages',
+        description:
+            'Connect to any LLM model to process and respond to messages',
         colorVar: '--or3-color-accent',
         defaultData: {
             label: 'New Agent',
@@ -20,7 +21,8 @@ const nodeTypes = [
     {
         type: 'router',
         label: 'Router Node',
-        description: 'Intelligently route messages to different paths based on intent',
+        description:
+            'Intelligently route messages to different paths based on intent',
         colorVar: '--or3-color-warning',
         defaultData: {
             label: 'Router',
@@ -30,7 +32,8 @@ const nodeTypes = [
     {
         type: 'parallel',
         label: 'Parallel Node',
-        description: 'Execute multiple branches simultaneously and combine results',
+        description:
+            'Execute multiple branches simultaneously and combine results',
         colorVar: '--or3-color-info',
         defaultData: {
             label: 'Parallel',
@@ -51,7 +54,8 @@ const nodeTypes = [
     {
         type: 'memory',
         label: 'Memory Node',
-        description: 'Store and retrieve long-term context across conversations',
+        description:
+            'Store and retrieve long-term context across conversations',
         colorVar: '--or3-color-info',
         defaultData: {
             label: 'Memory',
@@ -189,7 +193,9 @@ const onDragStart = (
                         stroke="currentColor"
                         stroke-width="2"
                     >
-                        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+                        <path
+                            d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
+                        ></path>
                     </svg>
                     <svg
                         v-else-if="node.type === 'memory'"
@@ -242,7 +248,13 @@ const onDragStart = (
                     <span class="node-name">{{ node.label }}</span>
                     <span class="node-desc">{{ node.description }}</span>
                 </div>
-                <svg class="drag-handle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <svg
+                    class="drag-handle"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                >
                     <circle cx="9" cy="5" r="1"></circle>
                     <circle cx="9" cy="12" r="1"></circle>
                     <circle cx="9" cy="19" r="1"></circle>
@@ -254,12 +266,21 @@ const onDragStart = (
         </div>
 
         <div class="palette-hint">
-            <svg class="hint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg
+                class="hint-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+            >
                 <circle cx="12" cy="12" r="10"></circle>
                 <line x1="12" y1="16" x2="12" y2="12"></line>
                 <line x1="12" y1="8" x2="12.01" y2="8"></line>
             </svg>
-            <p>Drag nodes onto the canvas to build your workflow. Connect nodes by dragging from output to input handles.</p>
+            <p>
+                Drag nodes onto the canvas to build your workflow. Connect nodes
+                by dragging from output to input handles.
+            </p>
         </div>
     </div>
 </template>

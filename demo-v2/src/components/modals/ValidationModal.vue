@@ -16,36 +16,96 @@ const emit = defineEmits<{
         <div v-if="show" class="modal-overlay" @click.self="emit('close')">
             <div class="modal">
                 <div class="modal-header">
-                    <div class="modal-icon" :class="{ 'icon-success': result?.isValid && result?.warnings.length === 0, 'icon-error': result && result.errors.length > 0, 'icon-warning': result?.isValid && result && result.warnings.length > 0 }">
-                        <svg v-if="result?.isValid && result?.errors.length === 0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-                            <polyline points="22,4 12,14.01 9,11.01"/>
+                    <div
+                        class="modal-icon"
+                        :class="{
+                            'icon-success':
+                                result?.isValid &&
+                                result?.warnings.length === 0,
+                            'icon-error': result && result.errors.length > 0,
+                            'icon-warning':
+                                result?.isValid &&
+                                result &&
+                                result.warnings.length > 0,
+                        }"
+                    >
+                        <svg
+                            v-if="
+                                result?.isValid && result?.errors.length === 0
+                            "
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                            <polyline points="22,4 12,14.01 9,11.01" />
                         </svg>
-                        <svg v-else-if="result && result.errors.length > 0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="12" cy="12" r="10"/>
-                            <line x1="15" y1="9" x2="9" y2="15"/>
-                            <line x1="9" y1="9" x2="15" y2="15"/>
+                        <svg
+                            v-else-if="result && result.errors.length > 0"
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <circle cx="12" cy="12" r="10" />
+                            <line x1="15" y1="9" x2="9" y2="15" />
+                            <line x1="9" y1="9" x2="15" y2="15" />
                         </svg>
-                        <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                            <line x1="12" y1="9" x2="12" y2="13"/>
-                            <line x1="12" y1="17" x2="12.01" y2="17"/>
+                        <svg
+                            v-else
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        >
+                            <path
+                                d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                            />
+                            <line x1="12" y1="9" x2="12" y2="13" />
+                            <line x1="12" y1="17" x2="12.01" y2="17" />
                         </svg>
                     </div>
                     <div>
                         <h2>Workflow Validation</h2>
-                        <p class="modal-subtitle" v-if="result?.isValid && result?.warnings.length === 0">Your workflow passed all checks</p>
-                        <p class="modal-subtitle" v-else-if="result && result.errors.length > 0">Please fix the issues below</p>
-                        <p class="modal-subtitle" v-else>Review the warnings below</p>
+                        <p
+                            class="modal-subtitle"
+                            v-if="
+                                result?.isValid && result?.warnings.length === 0
+                            "
+                        >
+                            Your workflow passed all checks
+                        </p>
+                        <p
+                            class="modal-subtitle"
+                            v-else-if="result && result.errors.length > 0"
+                        >
+                            Please fix the issues below
+                        </p>
+                        <p class="modal-subtitle" v-else>
+                            Review the warnings below
+                        </p>
                     </div>
                 </div>
-                
+
                 <div v-if="result" class="validation-result">
                     <div
                         v-if="result.isValid && result.warnings.length === 0"
                         class="validation-success"
                     >
-                        <p>All nodes are properly connected and configured. Your workflow is ready to execute.</p>
+                        <p>
+                            All nodes are properly connected and configured.
+                            Your workflow is ready to execute.
+                        </p>
                     </div>
 
                     <div
@@ -53,15 +113,30 @@ const emit = defineEmits<{
                         class="validation-section errors"
                     >
                         <h3>
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <circle cx="12" cy="12" r="10"/>
-                                <line x1="15" y1="9" x2="9" y2="15"/>
-                                <line x1="9" y1="9" x2="15" y2="15"/>
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <circle cx="12" cy="12" r="10" />
+                                <line x1="15" y1="9" x2="9" y2="15" />
+                                <line x1="9" y1="9" x2="15" y2="15" />
                             </svg>
-                            {{ result.errors.length }} Error{{ result.errors.length > 1 ? 's' : '' }}
+                            {{ result.errors.length }} Error{{
+                                result.errors.length > 1 ? 's' : ''
+                            }}
                         </h3>
                         <ul>
-                            <li v-for="(err, i) in result.errors" :key="'err-' + i">
+                            <li
+                                v-for="(err, i) in result.errors"
+                                :key="'err-' + i"
+                            >
                                 {{ err.message }}
                             </li>
                         </ul>
@@ -72,12 +147,26 @@ const emit = defineEmits<{
                         class="validation-section warnings"
                     >
                         <h3>
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                                <line x1="12" y1="9" x2="12" y2="13"/>
-                                <line x1="12" y1="17" x2="12.01" y2="17"/>
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path
+                                    d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                                />
+                                <line x1="12" y1="9" x2="12" y2="13" />
+                                <line x1="12" y1="17" x2="12.01" y2="17" />
                             </svg>
-                            {{ result.warnings.length }} Warning{{ result.warnings.length > 1 ? 's' : '' }}
+                            {{ result.warnings.length }} Warning{{
+                                result.warnings.length > 1 ? 's' : ''
+                            }}
                         </h3>
                         <ul>
                             <li
@@ -89,7 +178,7 @@ const emit = defineEmits<{
                         </ul>
                     </div>
                 </div>
-                
+
                 <div class="modal-actions">
                     <button class="btn btn-primary" @click="emit('close')">
                         Got it

@@ -27,16 +27,27 @@ function handleSave() {
         >
             <div class="modal">
                 <div class="modal-icon">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path
+                            d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"
+                        />
                     </svg>
                 </div>
                 <h2>Connect to OpenRouter</h2>
                 <p class="modal-desc">
-                    Your API key enables secure access to AI models for workflow execution.
-                    Keys are stored locally and never sent to external servers.
+                    Your API key enables secure access to AI models for workflow
+                    execution. Keys are stored locally and never sent to
+                    external servers.
                 </p>
-                
+
                 <label class="input-label">API Key</label>
                 <input
                     v-model="tempApiKey"
@@ -45,11 +56,17 @@ function handleSave() {
                     class="input"
                     @keydown.enter="handleSave"
                 />
-                
+
                 <p class="modal-hint">
-                    Don't have a key? <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">Get one from OpenRouter →</a>
+                    Don't have a key?
+                    <a
+                        href="https://openrouter.ai/keys"
+                        target="_blank"
+                        rel="noopener"
+                        >Get one from OpenRouter →</a
+                    >
                 </p>
-                
+
                 <div class="modal-actions">
                     <button
                         v-if="hasApiKey"
@@ -153,7 +170,8 @@ function handleSave() {
 .input:focus {
     outline: none;
     border-color: var(--or3-color-accent, #8b5cf6);
-    box-shadow: 0 0 0 3px var(--or3-color-accent-muted, rgba(139, 92, 246, 0.15));
+    box-shadow: 0 0 0 3px
+        var(--or3-color-accent-muted, rgba(139, 92, 246, 0.15));
 }
 
 .input::placeholder {
