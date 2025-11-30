@@ -95,6 +95,54 @@ async function readStdin(): Promise<string> {
     });
 }
 
+async function loadDotEnvIfNeeded() {
+    if (Bun.env.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY) {
+        return;
+    }
+
+    const candidates = [
+        resolve(process.cwd(), '.env'),
+        resolve(process.cwd(), '..', '.env'),
+    ];
+
+    for (const file of candidates) {
+        if (!(await fileExists(file))) continue;
+
+        const raw = await readFile(file, 'utf8');
+        const lines = raw.split(/\r?\n/);
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) continue;
+
+            const match = trimmed.match(
+                /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/
+            );
+            if (!match) continue;
+
+            const [, key, rawValue] = match;
+            let value = rawValue;
+
+            if (
+                (value.startsWith('"') && value.endsWith('"')) ||
+                (value.startsWith("'") && value.endsWith("'"))
+            ) {
+                value = value.slice(1, -1);
+            }
+
+            if (!(key in Bun.env)) {
+                (Bun.env as Record<string, string | undefined>)[key] = value;
+            }
+            if (!(key in process.env)) {
+                process.env[key] = value;
+            }
+        }
+
+        // Stop after first .env we successfully load
+        break;
+    }
+}
+
 function printHelp() {
     const script = Bun.argv[1] ?? 'src/index.ts';
     // eslint-disable-next-line no-console
@@ -115,6 +163,8 @@ function printHelp() {
 }
 
 async function main() {
+    await loadDotEnvIfNeeded();
+
     const [, , ...args] = Bun.argv;
 
     if (args.length === 0 || args.includes('-h') || args.includes('--help')) {

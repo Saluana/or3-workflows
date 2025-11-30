@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ref, onMounted } from 'vue';
+
 defineProps<{
     workflowName: string;
     workflowDescription: string;
@@ -21,6 +23,62 @@ const emit = defineEmits<{
     validate: [];
     openApiKeyModal: [];
 }>();
+
+// Theme management
+type Theme = 'light' | 'dark' | 'system';
+const currentTheme = ref<Theme>('system');
+
+function getSystemTheme(): 'light' | 'dark' {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function applyTheme(theme: Theme) {
+    const root = document.documentElement;
+    root.classList.remove('light', 'dark');
+    root.removeAttribute('data-theme');
+    
+    if (theme === 'system') {
+        // Let CSS media query handle it
+        const systemTheme = getSystemTheme();
+        if (systemTheme === 'light') {
+            root.classList.add('light');
+        }
+    } else {
+        root.classList.add(theme);
+        root.setAttribute('data-theme', theme);
+    }
+}
+
+function toggleTheme() {
+    const themes: Theme[] = ['system', 'light', 'dark'];
+    const currentIndex = themes.indexOf(currentTheme.value);
+    currentTheme.value = themes[(currentIndex + 1) % themes.length];
+    localStorage.setItem('or3-theme', currentTheme.value);
+    applyTheme(currentTheme.value);
+}
+
+// Initialize theme
+onMounted(() => {
+    const savedTheme = localStorage.getItem('or3-theme') as Theme | null;
+    if (savedTheme && ['light', 'dark', 'system'].includes(savedTheme)) {
+        currentTheme.value = savedTheme;
+    }
+    applyTheme(currentTheme.value);
+    
+    // Listen for system theme changes
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+        if (currentTheme.value === 'system') {
+            applyTheme('system');
+        }
+    });
+});
+
+// Computed display value for current effective theme
+function getThemeIcon(): 'sun' | 'moon' | 'system' {
+    if (currentTheme.value === 'light') return 'sun';
+    if (currentTheme.value === 'dark') return 'moon';
+    return 'system';
+}
 </script>
 
 <template>
@@ -211,6 +269,57 @@ const emit = defineEmits<{
 
         <!-- Actions Section -->
         <div class="header-actions">
+            <!-- Theme Toggle -->
+            <button
+                class="theme-toggle-btn"
+                :title="`Theme: ${currentTheme} (click to cycle)`"
+                @click="toggleTheme"
+            >
+                <!-- Sun icon for light mode -->
+                <svg
+                    v-if="getThemeIcon() === 'sun'"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    class="action-icon"
+                >
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <path d="M12 2v2"></path>
+                    <path d="M12 20v2"></path>
+                    <path d="m4.93 4.93 1.41 1.41"></path>
+                    <path d="m17.66 17.66 1.41 1.41"></path>
+                    <path d="M2 12h2"></path>
+                    <path d="M20 12h2"></path>
+                    <path d="m6.34 17.66-1.41 1.41"></path>
+                    <path d="m19.07 4.93-1.41 1.41"></path>
+                </svg>
+                <!-- Moon icon for dark mode -->
+                <svg
+                    v-else-if="getThemeIcon() === 'moon'"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    class="action-icon"
+                >
+                    <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
+                </svg>
+                <!-- System icon for auto mode -->
+                <svg
+                    v-else
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    class="action-icon"
+                >
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                    <line x1="8" y1="21" x2="16" y2="21"></line>
+                    <line x1="12" y1="17" x2="12" y2="21"></line>
+                </svg>
+            </button>
+
             <button
                 class="api-key-btn"
                 :class="{ 'has-key': hasApiKey }"
@@ -489,6 +598,29 @@ const emit = defineEmits<{
 .chat-toggle-btn.active {
     background: var(--or3-color-accent-subtle, rgba(139, 92, 246, 0.08));
     color: var(--or3-color-accent, #8b5cf6);
+}
+
+.theme-toggle-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--or3-radius-sm, 6px);
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.72));
+    transition: all var(--or3-transition-fast, 120ms);
+    cursor: pointer;
+    background: transparent;
+    border: none;
+}
+
+.theme-toggle-btn:hover {
+    background: var(--or3-color-surface-subtle, rgba(255, 255, 255, 0.06));
+    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
+}
+
+.theme-toggle-btn:active {
+    transform: scale(0.95);
 }
 
 .sr-only {
