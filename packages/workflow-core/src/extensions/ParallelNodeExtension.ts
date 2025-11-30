@@ -12,7 +12,7 @@ import type {
     ValidationWarning,
 } from '../types';
 
-const DEFAULT_MODEL = 'openai/gpt-4o-mini';
+const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
 
 /**
  * Parallel Node Extension

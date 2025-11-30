@@ -93,6 +93,7 @@ interface InternalExecutionContext {
     signal: AbortSignal;
     session: Session;
     memory: MemoryAdapter;
+    workflowName: string;
 }
 
 // ============================================================================
@@ -173,7 +174,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             ...options,
         };
         this.memory = this.options.memory || new InMemoryAdapter();
-        this.tokenCounter = this.options.tokenCounter || new ApproximateTokenCounter();
+        this.tokenCounter =
+            this.options.tokenCounter || new ApproximateTokenCounter();
     }
 
     private isLLMProvider(obj: any): obj is LLMProvider {
@@ -225,6 +227,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 signal: this.abortController.signal,
                 session,
                 memory: this.memory,
+                workflowName: workflow.meta.name,
             };
 
             // BFS execution through the graph
@@ -532,6 +535,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             subflowDepth: this.options._subflowDepth ?? 0,
             maxSubflowDepth: this.options.maxSubflowDepth ?? 10,
             tools: this.options.tools,
+            maxToolIterations: this.options.maxToolIterations,
+            onMaxToolIterations: this.options.onMaxToolIterations,
+            onHITLRequest: this.options.onHITLRequest,
+            workflowName: context.workflowName,
 
             onToken: (token: string) => {
                 callbacks.onToken(nodeId, token);
@@ -1338,7 +1345,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             compactedMessages = [summaryMessage, ...toPreserve];
         }
 
-        const tokensAfter = countMessageTokens(compactedMessages, this.tokenCounter);
+        const tokensAfter = countMessageTokens(
+            compactedMessages,
+            this.tokenCounter
+        );
 
         const result: CompactionResult = {
             compacted: true,

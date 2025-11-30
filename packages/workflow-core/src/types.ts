@@ -276,6 +276,15 @@ export interface AgentNodeData extends BaseNodeData {
     errorHandling?: NodeErrorConfig;
     /** Human-in-the-loop configuration for this node */
     hitl?: HITLConfig;
+    /** Maximum tool call iterations for this node (overrides global setting) */
+    maxToolIterations?: number;
+    /**
+     * Behavior when max tool iterations is reached.
+     * - 'warning': Add a warning to output and continue (default)
+     * - 'error': Throw an error
+     * - 'hitl': Trigger human-in-the-loop for approval to continue
+     */
+    onMaxToolIterations?: 'warning' | 'error' | 'hitl';
 }
 
 /**
@@ -825,6 +834,18 @@ export interface ExecutionOptions {
      * @internal
      */
     _subflowDepth?: number;
+    /**
+     * Maximum number of tool call iterations for agent nodes (default: 10).
+     * Prevents infinite tool-calling loops.
+     */
+    maxToolIterations?: number;
+    /**
+     * Default behavior when max tool iterations is reached.
+     * - 'warning': Add a warning to output and continue (default)
+     * - 'error': Throw an error
+     * - 'hitl': Trigger human-in-the-loop for approval to continue
+     */
+    onMaxToolIterations?: 'warning' | 'error' | 'hitl';
 }
 
 /** Tool definition in OpenRouter/OpenAI format */
@@ -905,6 +926,16 @@ export interface ExecutionContext {
     maxSubflowDepth?: number;
     /** Global tools available to all agents */
     tools?: ToolDefinition[];
+    /** Maximum tool call iterations (from node or global options) */
+    maxToolIterations?: number;
+    /** Behavior when max tool iterations is reached */
+    onMaxToolIterations?: 'warning' | 'error' | 'hitl';
+    /** HITL callback for human-in-the-loop requests */
+    onHITLRequest?: (
+        request: import('./hitl').HITLRequest
+    ) => Promise<import('./hitl').HITLResponse>;
+    /** Current workflow name for HITL context */
+    workflowName?: string;
 }
 
 /** Chat message for conversation history */
