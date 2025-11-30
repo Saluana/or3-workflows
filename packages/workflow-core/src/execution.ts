@@ -531,6 +531,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             defaultModel: this.options.defaultModel,
             subflowDepth: this.options._subflowDepth ?? 0,
             maxSubflowDepth: this.options.maxSubflowDepth ?? 10,
+            tools: this.options.tools,
 
             onToken: (token: string) => {
                 callbacks.onToken(nodeId, token);

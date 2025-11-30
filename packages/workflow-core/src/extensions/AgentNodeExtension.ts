@@ -13,6 +13,9 @@ import type {
 /** Default model for agent nodes */
 const DEFAULT_MODEL = 'openai/gpt-4o-mini';
 
+/** Maximum number of tool call iterations to prevent infinite loops */
+const MAX_TOOL_ITERATIONS = 10;
+
 /**
  * Agent Node Extension
  *
@@ -174,20 +177,118 @@ export const AgentNodeExtension: NodeExtension = {
             messages.push({ role: 'user' as const, content: userContent as any });
         }
 
-        // Call LLM with streaming
-        const result = await provider.chat(model, messages, {
-            temperature: data.temperature,
-            maxTokens: data.maxTokens,
-            tools: data.tools?.map((t) => ({ type: 'function', function: { name: t } })),
-            onToken: (token) => {
-                if (context.onToken) {
-                    context.onToken(token);
+        // Build tools array from node config and global context tools
+        const nodeToolNames = data.tools || [];
+        const globalTools = context.tools || [];
+        
+        // Create a map of tool handlers from global tools
+        const toolHandlers = new Map<string, (args: any) => Promise<string> | string>();
+        for (const tool of globalTools) {
+            if (tool.handler) {
+                toolHandlers.set(tool.function.name, tool.handler);
+            }
+        }
+        
+        // Build tools for LLM - either from node config (basic) or global tools (full)
+        let toolsForLLM: any[] | undefined;
+        if (nodeToolNames.length > 0) {
+            // Node specifies tool names - find matching tools from global registry
+            toolsForLLM = nodeToolNames.map(name => {
+                const globalTool = globalTools.find(t => t.function.name === name);
+                if (globalTool) {
+                    return { type: 'function', function: globalTool.function };
                 }
-            },
-            signal: context.signal,
-        });
+                // Fallback: basic tool definition without schema
+                return { type: 'function', function: { name } };
+            });
+        } else if (globalTools.length > 0) {
+            // Use all global tools
+            toolsForLLM = globalTools.map(t => ({ type: 'function', function: t.function }));
+        }
 
-        const output = result.content || '';
+        // Run LLM loop - execute tool calls until done or max iterations
+        let currentMessages = [...messages];
+        let toolIterations = 0;
+        let finalContent = '';
+
+        while (toolIterations < MAX_TOOL_ITERATIONS) {
+            // Call LLM with streaming
+            const result = await provider.chat(model, currentMessages, {
+                temperature: data.temperature,
+                maxTokens: data.maxTokens,
+                tools: toolsForLLM,
+                onToken: (token) => {
+                    if (context.onToken) {
+                        context.onToken(token);
+                    }
+                },
+                signal: context.signal,
+            });
+
+            // If no tool calls, we're done
+            if (!result.toolCalls || result.toolCalls.length === 0) {
+                finalContent = result.content || '';
+                break;
+            }
+
+            // Add assistant message with tool calls to conversation
+            // Note: We store content even if there are tool calls, as some models send both
+            currentMessages.push({
+                role: 'assistant' as const,
+                content: result.content || '',
+            });
+
+            // Execute each tool call
+            for (const toolCall of result.toolCalls) {
+                const toolName = toolCall.function?.name;
+                const toolArgs = toolCall.function?.arguments;
+                
+                let parsedArgs: any;
+                try {
+                    parsedArgs = typeof toolArgs === 'string' 
+                        ? JSON.parse(toolArgs) 
+                        : toolArgs;
+                } catch {
+                    parsedArgs = toolArgs;
+                }
+
+                let toolResult: string;
+                
+                // Try to find and execute the tool handler
+                const handler = toolHandlers.get(toolName);
+                if (handler) {
+                    try {
+                        toolResult = await handler(parsedArgs);
+                    } catch (err) {
+                        toolResult = `Error executing tool ${toolName}: ${err instanceof Error ? err.message : String(err)}`;
+                    }
+                } else if (context.onToolCall) {
+                    // Fallback to global onToolCall handler
+                    try {
+                        toolResult = await context.onToolCall(toolName, parsedArgs);
+                    } catch (err) {
+                        toolResult = `Error executing tool ${toolName}: ${err instanceof Error ? err.message : String(err)}`;
+                    }
+                } else {
+                    toolResult = `Tool ${toolName} not found or no handler registered`;
+                }
+
+                // Add tool result as a user message (simplified approach)
+                // Note: OpenAI format uses 'tool' role, but for compatibility we use 'user'
+                currentMessages.push({
+                    role: 'user' as const,
+                    content: `Tool ${toolName} result: ${toolResult}`,
+                });
+            }
+
+            toolIterations++;
+        }
+
+        if (toolIterations >= MAX_TOOL_ITERATIONS) {
+            finalContent = `Warning: Maximum tool iterations (${MAX_TOOL_ITERATIONS}) reached. Last content: ${finalContent}`;
+        }
+
+        const output = finalContent;
         
         // Calculate next nodes
         const outgoingEdges = context.getOutgoingEdges(node.id, 'output');

@@ -903,6 +903,8 @@ export interface ExecutionContext {
     subflowDepth?: number;
     /** Maximum subflow nesting depth (from ExecutionOptions) */
     maxSubflowDepth?: number;
+    /** Global tools available to all agents */
+    tools?: ToolDefinition[];
 }
 
 /** Chat message for conversation history */
