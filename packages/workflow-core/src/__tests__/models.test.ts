@@ -432,6 +432,8 @@ describe('DEFAULT_MODELS', () => {
         const modelIds = DEFAULT_MODELS.map((m) => m.id);
         expect(modelIds).toContain('openai/gpt-5.1');
         expect(modelIds).toContain('google/gemini-3-pro-preview');
+        expect(modelIds).toContain('z-ai/glm-4.6');
+        expect(modelIds).toContain('moonshotai/kimi-k2-thinking');
     });
 
     it('should have valid model structure', () => {

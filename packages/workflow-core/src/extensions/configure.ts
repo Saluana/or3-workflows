@@ -170,7 +170,7 @@ export function createConfigurableExtension<
             validate: config.validate || (() => []),
             execute:
                 config.execute ||
-                (async () => ({ content: '', output: '', nextNodes: [] })),
+                (async () => ({ output: '', nextNodes: [] })),
 
             onCreate: config.onCreate
                 ? () => config.onCreate!(options)

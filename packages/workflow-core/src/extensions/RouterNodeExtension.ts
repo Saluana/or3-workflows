@@ -68,10 +68,7 @@ export const RouterNodeExtension: NodeExtension = {
         label: 'Router',
         model: undefined, // Uses default model if not specified
         prompt: '', // Custom routing instructions
-        routes: [
-            { id: 'route-1', label: 'Route 1' },
-            { id: 'route-2', label: 'Route 2' },
-        ],
+        // Routes are derived from connected edges, not stored in defaultData
     },
 
     /**
@@ -181,31 +178,36 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
             },
         ];
 
-        // Debug logging
-        console.log(
-            '[Router] Routes found:',
-            routeOptions.map((r) => ({
-                name: r.name,
-                description: r.description,
-            }))
-        );
-        console.log('[Router] System prompt:', systemPrompt);
-        console.log('[Router] User input:', context.input);
+        // Debug logging - only log if debug is enabled to reduce noise and PII exposure
+        const debug = context.debug ?? false;
+        if (debug) {
+            console.log(
+                '[Router] Routes found:',
+                routeOptions.map((r) => ({
+                    name: r.name,
+                    description: r.description,
+                }))
+            );
+            console.log('[Router] System prompt:', systemPrompt);
+            console.log('[Router] User input:', context.input);
+        }
 
         const messagesForLLM: ChatMessage[] = [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: context.input },
         ];
 
-        console.log('[Router] Sending request to LLM:', {
-            model,
-            messages: messagesForLLM,
-            tools,
-            toolChoice: {
-                type: 'function',
-                function: { name: 'select_route' },
-            },
-        });
+        if (debug) {
+            console.log('[Router] Sending request to LLM:', {
+                model,
+                messages: messagesForLLM,
+                tools,
+                toolChoice: {
+                    type: 'function',
+                    function: { name: 'select_route' },
+                },
+            });
+        }
 
         const result = await provider.chat(model, messagesForLLM, {
             temperature: 0, // Deterministic for consistent routing
@@ -218,10 +220,12 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
             },
         });
 
-        console.log(
-            '[Router] Raw LLM result:',
-            JSON.stringify(result, null, 2)
-        );
+        if (debug) {
+            console.log(
+                '[Router] Raw LLM result:',
+                JSON.stringify(result, null, 2)
+            );
+        }
 
         let selectedRouteId: string | undefined;
         let reasoning = '';
@@ -244,20 +248,26 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
                     selectedRouteId = route.id;
                 }
 
-                console.log('[Router] Tool call result:', {
-                    selectedId,
-                    reasoning,
-                    valid: !!route,
-                });
+                if (debug) {
+                    console.log('[Router] Tool call result:', {
+                        selectedId,
+                        reasoning,
+                        valid: !!route,
+                    });
+                }
             } catch (e) {
-                console.error('[Router] Failed to parse tool arguments:', e);
+                if (debug) {
+                    console.error('[Router] Failed to parse tool arguments:', e);
+                }
             }
         } else {
             const content = result.content?.trim() || '1';
-            console.log(
-                '[Router] No tool call, falling back to text:',
-                content
-            );
+            if (debug) {
+                console.log(
+                    '[Router] No tool call, falling back to text:',
+                    content
+                );
+            }
             // Extract number from response
             const match = content.match(/\d+/);
             const choiceIndex = match ? parseInt(match[0], 10) - 1 : 0;
@@ -270,28 +280,37 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
         if (!selectedRouteId) {
             // Fallback to first route
             selectedRouteId = routeOptions[0].id;
-            console.log('[Router] Fallback to default route');
+            if (debug) {
+                console.log('[Router] Fallback to default route');
+            }
         }
 
-        console.log('[Router] Selected route ID:', selectedRouteId);
+        if (debug) {
+            console.log('[Router] Selected route ID:', selectedRouteId);
+        }
 
         const selectedOption = routeOptions.find(
             (r) => r.id === selectedRouteId
         );
 
-        console.log('[Router] Selected option:', selectedOption);
+        if (debug) {
+            console.log('[Router] Selected option:', selectedOption);
+        }
 
         const nextNodes =
             selectedOption && selectedOption.nodeId
                 ? [selectedOption.nodeId]
                 : [];
 
-        console.log('[Router] Next nodes to execute:', nextNodes);
+        if (debug) {
+            console.log('[Router] Next nodes to execute:', nextNodes);
+        }
 
         return {
             output: `Routed to ${selectedOption?.name || selectedRouteId}`,
             nextNodes,
             metadata: {
+                selectedRoute: selectedRouteId,
                 selectedRouteId,
                 selectedNodeId: selectedOption?.nodeId,
                 selectedName: selectedOption?.name,

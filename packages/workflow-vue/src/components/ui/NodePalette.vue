@@ -39,6 +39,16 @@ const nodeTypes = [
         },
     },
     {
+        type: 'tool',
+        label: 'Tool Node',
+        description: 'Execute external tool',
+        colorVar: '--or3-color-secondary',
+        defaultData: {
+            label: 'Tool',
+            toolId: '',
+        },
+    },
+    {
         type: 'memory',
         label: 'Memory Node',
         description: 'Store or query long-term memory',
@@ -88,6 +98,9 @@ const nodeTypes = [
         },
     },
 ];
+
+// Note: Start node is intentionally omitted as it should be added programmatically
+// when creating a new workflow. Only one start node should exist per workflow.
 
 const onDragStart = (
     event: DragEvent,
@@ -168,6 +181,15 @@ const onDragStart = (
                         <circle cx="18" cy="18" r="3"></circle>
                         <circle cx="6" cy="6" r="3"></circle>
                         <path d="M6 21V9a9 9 0 0 0 9 9"></path>
+                    </svg>
+                    <svg
+                        v-else-if="node.type === 'tool'"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                    >
+                        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
                     </svg>
                     <svg
                         v-else-if="node.type === 'memory'"

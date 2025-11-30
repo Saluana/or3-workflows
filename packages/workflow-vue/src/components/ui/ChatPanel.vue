@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue';
-import { useExecutionState } from '../../composables/useExecutionState';
+import { ref, watch, nextTick, computed } from 'vue';
+import { useExecutionState, type UseExecutionStateReturn } from '../../composables/useExecutionState';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -11,6 +11,13 @@ export interface ChatMessage {
 const props = defineProps<{
   messages?: ChatMessage[];
   streamingContent?: string;
+  /**
+   * Optional execution state instance.
+   * Pass a state created via `createExecutionState()` to avoid sharing state
+   * between multiple ChatPanel instances or workflows.
+   * If not provided, uses a shared singleton (legacy behavior).
+   */
+  executionState?: UseExecutionStateReturn;
 }>();
 
 const emit = defineEmits<{
@@ -18,7 +25,22 @@ const emit = defineEmits<{
   (e: 'clear'): void;
 }>();
 
-const { state, reset } = useExecutionState();
+// Initialize fallback state lazily
+let cachedFallback: UseExecutionStateReturn | null = null;
+const getExecutionState = (): UseExecutionStateReturn => {
+  if (props.executionState) {
+    return props.executionState;
+  }
+  if (!cachedFallback) {
+    cachedFallback = useExecutionState();
+  }
+  return cachedFallback;
+};
+
+// Use computed to keep reactivity with the chosen state
+const activeState = computed(() => getExecutionState());
+const state = computed(() => activeState.value.state);
+const reset = () => activeState.value.reset();
 
 const input = ref('');
 const messagesContainer = ref<HTMLElement | null>(null);
@@ -41,7 +63,7 @@ const scrollToBottom = () => {
 };
 
 const sendMessage = () => {
-  if (!input.value.trim() || state.value.isRunning) return;
+  if (!input.value.trim() || state.value.value.isRunning) return;
   emit('send', input.value.trim());
   input.value = '';
 };
@@ -101,7 +123,7 @@ const handleKeydown = (e: KeyboardEvent) => {
       </div>
       
       <!-- Streaming indicator -->
-      <div v-if="streamingContent || state.streamingContent" class="message assistant streaming">
+      <div v-if="streamingContent || state.value.streamingContent" class="message assistant streaming">
         <div class="message-avatar">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="3" y="11" width="18" height="10" rx="2"></rect>
@@ -110,7 +132,7 @@ const handleKeydown = (e: KeyboardEvent) => {
           </svg>
         </div>
         <div class="message-body">
-          <div class="message-content">{{ streamingContent || state.streamingContent }}<span class="cursor">|</span></div>
+          <div class="message-content">{{ streamingContent || state.value.streamingContent }}<span class="cursor">|</span></div>
         </div>
       </div>
     </div>
@@ -120,15 +142,15 @@ const handleKeydown = (e: KeyboardEvent) => {
         v-model="input"
         @keydown="handleKeydown"
         placeholder="Type a message..."
-        :disabled="state.isRunning"
+        :disabled="state.value.isRunning"
         rows="1"
       ></textarea>
       <button 
         class="send-btn" 
         @click="sendMessage" 
-        :disabled="!input.trim() || state.isRunning"
+        :disabled="!input.trim() || state.value.isRunning"
       >
-        <svg v-if="state.isRunning" class="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <svg v-if="state.value.isRunning" class="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 12a9 9 0 11-6.219-8.56"></path>
         </svg>
         <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
