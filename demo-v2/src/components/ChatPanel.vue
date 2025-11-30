@@ -5,6 +5,7 @@ import type { ChatMessage } from '../composables';
 const props = defineProps<{
     messages: ChatMessage[];
     nodeStatuses: Record<string, string>;
+    nodeLabels?: Record<string, string>;
     streamingContent: string;
     isRunning: boolean;
     chatInput: string;
@@ -17,6 +18,15 @@ const emit = defineEmits<{
 }>();
 
 const messagesContainer = ref<HTMLElement | null>(null);
+
+// Get display name for a node (label or fall back to truncated ID)
+const getNodeDisplayName = (nodeId: string): string => {
+    if (props.nodeLabels?.[nodeId]) {
+        return props.nodeLabels[nodeId];
+    }
+    // Fall back to showing truncated ID if no label
+    return nodeId.length > 12 ? `${nodeId.slice(0, 8)}...` : nodeId;
+};
 
 // Auto-scroll to bottom when new messages arrive
 watch(
@@ -111,9 +121,10 @@ const totalNodeCount = () => {
                     :key="nodeId"
                     class="node-chip"
                     :class="status"
+                    :title="nodeId"
                 >
                     <span class="chip-dot"></span>
-                    {{ nodeId }}
+                    {{ getNodeDisplayName(nodeId as string) }}
                 </span>
             </div>
         </div>

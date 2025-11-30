@@ -113,6 +113,19 @@ const canRedo = computed(() => editor.value?.canRedo() ?? false);
 const hasApiKey = computed(() => !!apiKey.value);
 const nodeStatuses = computed(() => executionState.value.nodeStatuses);
 const isRunning = computed(() => executionState.value.isRunning);
+
+// Build a map of node ID -> label for display in ChatPanel
+const nodeLabels = computed(() => {
+    if (!editor.value) return {};
+    const nodes = editor.value.getNodes();
+    const labels: Record<string, string> = {};
+    for (const node of nodes) {
+        if (node.data?.label) {
+            labels[node.id] = node.data.label;
+        }
+    }
+    return labels;
+});
 const streamingContent = computed(() => executionState.value.streamingContent);
 
 // ============================================================================
@@ -720,6 +733,7 @@ function syncMetaToEditor() {
                 v-model:chat-input="chatInput"
                 :messages="messages"
                 :node-statuses="nodeStatuses"
+                :node-labels="nodeLabels"
                 :streaming-content="streamingContent"
                 :is-running="isRunning"
                 @send="handleSendMessage"

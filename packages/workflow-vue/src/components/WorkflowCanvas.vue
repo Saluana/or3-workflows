@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted } from 'vue';
 import {
     VueFlow,
     useVueFlow,
@@ -192,6 +192,15 @@ const syncFromEditor = () => {
         }
     }
 };
+
+// Watch for nodeStatuses changes to update node visuals during execution
+watch(
+    () => props.nodeStatuses,
+    () => {
+        syncFromEditor();
+    },
+    { deep: true }
+);
 
 let unsubUpdate: (() => void) | null = null;
 let unsubSelection: (() => void) | null = null;
@@ -494,7 +503,6 @@ defineExpose({
 .vue-flow__handle:hover {
     background: var(--or3-color-accent, #8b5cf6) !important;
     border-color: var(--or3-color-accent, #8b5cf6) !important;
-    transform: scale(1.2);
 }
 
 .vue-flow__controls {

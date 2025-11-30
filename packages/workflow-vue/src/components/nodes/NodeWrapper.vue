@@ -103,13 +103,19 @@ const classes = computed(() => [
 /* Hover effect */
 .node-wrapper:hover {
     border-color: var(--or3-color-border-hover, rgba(255, 255, 255, 0.15));
-    transform: translateY(-1px);
 }
 
-.status-active:hover,
-.status-completed:hover,
+/* Preserve status border colors on hover */
+.status-active:hover {
+    border-color: var(--or3-color-accent, #8b5cf6);
+}
+
+.status-completed:hover {
+    border-color: var(--or3-color-success, #22c55e);
+}
+
 .status-error:hover {
-    border-color: inherit;
+    border-color: var(--or3-color-error, #ef4444);
 }
 
 /* Secondary variant */
