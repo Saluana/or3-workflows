@@ -397,7 +397,7 @@ _Requirements: 6.1_
     -   [x] Format selector
     -   [x] Template editor with {{nodeId}} syntax
     -   [x] Include metadata toggle
-    -   [ ] JSON schema editor (advanced) - deferred
+    -   [x] JSON schema editor (advanced)
 
 -   [x] Add to NodePalette
 

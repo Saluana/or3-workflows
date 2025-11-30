@@ -215,14 +215,35 @@ const outputData = computed<{
     format: OutputFormat;
     template: string;
     includeMetadata: boolean;
+    schema: Record<string, unknown> | null;
 }>(() => {
     const data = selectedNode.value?.data as any;
     return {
         format: data?.format ?? 'text',
         template: data?.template ?? '',
         includeMetadata: data?.includeMetadata ?? false,
+        schema: data?.schema ?? null,
     };
 });
+
+// JSON Schema editor state
+const schemaExpanded = ref(false);
+const schemaText = ref('');
+const schemaError = ref<string | null>(null);
+
+// Sync schemaText when node changes
+watch(
+    () => outputData.value.schema,
+    (schema) => {
+        if (schema) {
+            schemaText.value = JSON.stringify(schema, null, 2);
+        } else {
+            schemaText.value = '';
+        }
+        schemaError.value = null;
+    },
+    { immediate: true }
+);
 const subflowData = computed(() => {
     const data = selectedNode.value?.data as any;
     return {
@@ -490,6 +511,78 @@ const toggleIncludeMetadata = () => {
     props.editor.commands.updateNodeData(selectedNode.value.id, {
         includeMetadata: !outputData.value.includeMetadata,
     });
+};
+
+const updateSchema = () => {
+    if (!selectedNode.value) return;
+    const text = schemaText.value.trim();
+
+    if (!text) {
+        // Clear schema
+        schemaError.value = null;
+        props.editor.commands.updateNodeData(selectedNode.value.id, {
+            schema: undefined,
+        });
+        return;
+    }
+
+    try {
+        const parsed = JSON.parse(text);
+        if (typeof parsed !== 'object' || parsed === null) {
+            schemaError.value = 'Schema must be a JSON object';
+            return;
+        }
+        schemaError.value = null;
+        props.editor.commands.updateNodeData(selectedNode.value.id, {
+            schema: parsed,
+        });
+    } catch (e) {
+        schemaError.value = `Invalid JSON: ${(e as Error).message}`;
+    }
+};
+
+const formatSchema = () => {
+    try {
+        const parsed = JSON.parse(schemaText.value);
+        schemaText.value = JSON.stringify(parsed, null, 2);
+        schemaError.value = null;
+    } catch (e) {
+        schemaError.value = `Cannot format: ${(e as Error).message}`;
+    }
+};
+
+const applySchemaPreset = (preset: 'object' | 'array' | 'string') => {
+    const presets = {
+        object: {
+            type: 'object',
+            properties: {
+                result: { type: 'string', description: 'The result' },
+            },
+            required: ['result'],
+        },
+        array: {
+            type: 'array',
+            items: { type: 'string' },
+            minItems: 1,
+        },
+        string: {
+            type: 'string',
+            minLength: 1,
+        },
+    };
+    schemaText.value = JSON.stringify(presets[preset], null, 2);
+    schemaError.value = null;
+    updateSchema();
+};
+
+const clearSchema = () => {
+    schemaText.value = '';
+    schemaError.value = null;
+    if (selectedNode.value) {
+        props.editor.commands.updateNodeData(selectedNode.value.id, {
+            schema: undefined,
+        });
+    }
 };
 
 const handleDelete = () => {
@@ -1256,6 +1349,101 @@ const handleDelete = () => {
                     </p>
                 </div>
 
+                <!-- JSON Schema Editor (only for JSON format) -->
+                <div v-if="outputData.format === 'json'" class="schema-section">
+                    <button
+                        class="schema-toggle"
+                        @click="schemaExpanded = !schemaExpanded"
+                    >
+                        <svg
+                            class="toggle-chevron"
+                            :class="{ expanded: schemaExpanded }"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <polyline points="9 18 15 12 9 6"></polyline>
+                        </svg>
+                        <span>JSON Schema Validation</span>
+                        <span v-if="outputData.schema" class="schema-badge"
+                            >Active</span
+                        >
+                    </button>
+
+                    <div v-if="schemaExpanded" class="schema-editor">
+                        <div class="schema-toolbar">
+                            <span class="toolbar-label">Presets:</span>
+                            <button
+                                class="preset-btn"
+                                @click="applySchemaPreset('object')"
+                                title="Object schema"
+                            >
+                                { }
+                            </button>
+                            <button
+                                class="preset-btn"
+                                @click="applySchemaPreset('array')"
+                                title="Array schema"
+                            >
+                                [ ]
+                            </button>
+                            <button
+                                class="preset-btn"
+                                @click="applySchemaPreset('string')"
+                                title="String schema"
+                            >
+                                " "
+                            </button>
+                            <div class="toolbar-spacer"></div>
+                            <button
+                                class="action-btn"
+                                @click="formatSchema"
+                                title="Format JSON"
+                            >
+                                Format
+                            </button>
+                            <button
+                                class="action-btn danger"
+                                @click="clearSchema"
+                                title="Clear schema"
+                            >
+                                Clear
+                            </button>
+                        </div>
+
+                        <textarea
+                            class="schema-textarea"
+                            :class="{ 'has-error': schemaError }"
+                            v-model="schemaText"
+                            placeholder='{
+  "type": "object",
+  "properties": {
+    "result": { "type": "string" }
+  }
+}'
+                            @blur="updateSchema"
+                            rows="8"
+                        ></textarea>
+
+                        <p v-if="schemaError" class="schema-error">
+                            {{ schemaError }}
+                        </p>
+
+                        <p class="field-hint">
+                            Define a
+                            <a
+                                href="https://json-schema.org/learn/getting-started-step-by-step"
+                                target="_blank"
+                                rel="noopener"
+                                >JSON Schema</a
+                            >
+                            to validate the output structure. The output will be
+                            validated before being returned.
+                        </p>
+                    </div>
+                </div>
+
                 <div class="info-box">
                     <p><strong>Output Node</strong></p>
                     <p style="margin-top: 8px; color: var(--text-secondary)">
@@ -1892,5 +2080,169 @@ const handleDelete = () => {
     display: flex;
     flex-direction: column;
     gap: var(--or3-spacing-xs, 4px);
+}
+
+/* Schema Editor */
+.schema-section {
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.1));
+    border-radius: var(--or3-radius-md, 8px);
+    overflow: hidden;
+}
+
+.schema-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
+    border: none;
+    color: var(--or3-color-text, rgba(255, 255, 255, 0.95));
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s;
+}
+
+.schema-toggle:hover {
+    background: var(--or3-color-bg-tertiary, rgba(255, 255, 255, 0.08));
+}
+
+.toggle-chevron {
+    width: 16px;
+    height: 16px;
+    transition: transform 0.2s ease;
+}
+
+.toggle-chevron.expanded {
+    transform: rotate(90deg);
+}
+
+.schema-badge {
+    margin-left: auto;
+    background: var(--or3-color-success, #22c55e);
+    color: white;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.schema-editor {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border-top: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.1));
+}
+
+.schema-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.toolbar-label {
+    font-size: 11px;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+    margin-right: 4px;
+}
+
+.toolbar-spacer {
+    flex: 1;
+}
+
+.preset-btn {
+    padding: 4px 8px;
+    background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.1));
+    border-radius: 4px;
+    color: var(--or3-color-text, rgba(255, 255, 255, 0.95));
+    font-family: monospace;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.preset-btn:hover {
+    background: var(--or3-color-bg-tertiary, rgba(255, 255, 255, 0.1));
+    border-color: var(--or3-color-accent, #8b5cf6);
+}
+
+.action-btn {
+    padding: 4px 10px;
+    background: transparent;
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.1));
+    border-radius: 4px;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.action-btn:hover {
+    background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
+    color: var(--or3-color-text, rgba(255, 255, 255, 0.95));
+}
+
+.action-btn.danger:hover {
+    background: color-mix(
+        in srgb,
+        var(--or3-color-error, #ef4444) 15%,
+        transparent
+    );
+    border-color: var(--or3-color-error, #ef4444);
+    color: var(--or3-color-error, #ef4444);
+}
+
+.schema-textarea {
+    width: 100%;
+    min-height: 120px;
+    padding: 10px;
+    background: var(--or3-color-bg-primary, rgba(0, 0, 0, 0.3));
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.1));
+    border-radius: var(--or3-radius-sm, 6px);
+    color: var(--or3-color-text, rgba(255, 255, 255, 0.95));
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    resize: vertical;
+    transition: border-color 0.15s;
+}
+
+.schema-textarea:focus {
+    outline: none;
+    border-color: var(--or3-color-accent, #8b5cf6);
+}
+
+.schema-textarea.has-error {
+    border-color: var(--or3-color-error, #ef4444);
+}
+
+.schema-textarea::placeholder {
+    color: var(--or3-color-text-tertiary, rgba(255, 255, 255, 0.35));
+}
+
+.schema-error {
+    margin: 0;
+    padding: 8px 10px;
+    background: color-mix(
+        in srgb,
+        var(--or3-color-error, #ef4444) 12%,
+        transparent
+    );
+    border-radius: var(--or3-radius-sm, 6px);
+    color: var(--or3-color-error, #ef4444);
+    font-size: 12px;
+}
+
+.schema-editor .field-hint a {
+    color: var(--or3-color-accent, #8b5cf6);
+    text-decoration: none;
+}
+
+.schema-editor .field-hint a:hover {
+    text-decoration: underline;
 }
 </style>
