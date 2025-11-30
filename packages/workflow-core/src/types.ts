@@ -704,16 +704,60 @@ export interface ExecutionCallbacks {
     onRouteSelected?: (nodeId: string, routeId: string) => void;
 
     /**
+     * Called when token usage is estimated for an LLM request.
+     * Use this to display token counts and remaining context.
+     * @param nodeId - The ID of the node producing the usage.
+     * @param usage - Estimated token usage details.
+     */
+    onTokenUsage?: (nodeId: string, usage: TokenUsageDetails) => void;
+
+    /**
      * Called when context compaction occurs.
      * Optional - use this to log or display compaction events.
-     *
-     * Note: This callback is currently defined but not yet wired up in the
-     * OpenRouterExecutionAdapter. It will be called once compaction integration
-     * is implemented.
-     *
      * @param result - Details about the compaction operation.
      */
     onContextCompacted?: (result: CompactionResult) => void;
+
+    /**
+     * Called for each streaming token from a parallel branch.
+     * Use this to display real-time streaming for individual branches.
+     * @param nodeId - The ID of the parallel node.
+     * @param branchId - The ID of the branch.
+     * @param branchLabel - The display label of the branch.
+     * @param token - The token/chunk of text received.
+     */
+    onBranchToken?: (
+        nodeId: string,
+        branchId: string,
+        branchLabel: string,
+        token: string
+    ) => void;
+
+    /**
+     * Called when a parallel branch starts execution.
+     * @param nodeId - The ID of the parallel node.
+     * @param branchId - The ID of the branch.
+     * @param branchLabel - The display label of the branch.
+     */
+    onBranchStart?: (
+        nodeId: string,
+        branchId: string,
+        branchLabel: string
+    ) => void;
+
+    /**
+     * Called when a parallel branch completes execution.
+     * @param nodeId - The ID of the parallel node.
+     * @param branchId - The ID of the branch.
+     * @param branchLabel - The display label of the branch.
+     * @param output - The final output of the branch.
+     */
+    onBranchComplete?: (
+        nodeId: string,
+        branchId: string,
+        branchLabel: string,
+        output: string
+    ) => void;
 }
 
 /**
@@ -753,6 +797,9 @@ export interface ExecutionResult {
 
     /** Token usage statistics (if available from the LLM provider). */
     usage?: TokenUsage;
+
+    /** Per-request token usage details (estimated). */
+    tokenUsageDetails?: Array<TokenUsageDetails & { nodeId: string }>;
 }
 
 /** Token usage statistics */
@@ -760,6 +807,20 @@ export interface TokenUsage {
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
+}
+
+/** Token usage enriched with model limits */
+export interface TokenUsageDetails extends TokenUsage {
+    /** Model used for the request */
+    model: string;
+    /** Maximum context window for the model */
+    contextLimit: number;
+    /** Compaction threshold in tokens (if enabled) */
+    compactionThreshold?: number;
+    /** Remaining tokens before compaction would trigger */
+    remainingBeforeCompaction?: number;
+    /** Remaining tokens before hitting model context limit */
+    remainingContext: number;
 }
 
 /** Options for execution adapter */
@@ -936,6 +997,26 @@ export interface ExecutionContext {
     ) => Promise<import('./hitl').HITLResponse>;
     /** Current workflow name for HITL context */
     workflowName?: string;
+    /** Token counter instance for estimating usage */
+    tokenCounter?: TokenCounter;
+    /** Compaction configuration (if enabled) */
+    compaction?: CompactionConfig;
+    /** Callback to report token usage for the current node */
+    onTokenUsage?: (usage: TokenUsageDetails) => void;
+    /** Callback for parallel branch token streaming */
+    onBranchToken?: (
+        branchId: string,
+        branchLabel: string,
+        token: string
+    ) => void;
+    /** Callback when a parallel branch starts */
+    onBranchStart?: (branchId: string, branchLabel: string) => void;
+    /** Callback when a parallel branch completes */
+    onBranchComplete?: (
+        branchId: string,
+        branchLabel: string,
+        output: string
+    ) => void;
 }
 
 /** Chat message for conversation history */

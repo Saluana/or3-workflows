@@ -10,6 +10,7 @@ import {
     type HITLResponse,
     type CompactionResult,
     type SubflowRegistry,
+    type TokenUsageDetails,
 } from '@or3/workflow-core';
 
 export interface ChatMessage extends CoreChatMessage {
@@ -33,6 +34,25 @@ export interface ExecutionCallbacks {
         nodeId: string,
         iteration: number,
         maxIterations: number
+    ) => void;
+    onTokenUsage?: (nodeId: string, usage: TokenUsageDetails) => void;
+    // Branch streaming callbacks for parallel nodes
+    onBranchStart?: (
+        nodeId: string,
+        branchId: string,
+        branchLabel: string
+    ) => void;
+    onBranchToken?: (
+        nodeId: string,
+        branchId: string,
+        branchLabel: string,
+        token: string
+    ) => void;
+    onBranchComplete?: (
+        nodeId: string,
+        branchId: string,
+        branchLabel: string,
+        output: string
     ) => void;
 }
 
@@ -231,6 +251,10 @@ export function useWorkflowExecution() {
             },
             onRouteSelected: callbacks.onRouteSelected,
             onContextCompacted: callbacks.onContextCompacted,
+            onTokenUsage: callbacks.onTokenUsage,
+            onBranchStart: callbacks.onBranchStart,
+            onBranchToken: callbacks.onBranchToken,
+            onBranchComplete: callbacks.onBranchComplete,
         };
 
         const result = await coreExecute(

@@ -9,6 +9,7 @@ import type {
     ValidationError,
     ValidationWarning,
 } from '../types';
+import { estimateTokenUsage } from '../compaction';
 
 const DEFAULT_MODEL = 'openai/gpt-4o-mini';
 
@@ -152,6 +153,27 @@ Respond with only "continue" or "done".`;
                     temperature: 0,
                     maxTokens: 10,
                 });
+
+                if (context.tokenCounter && context.onTokenUsage) {
+                    let usage = estimateTokenUsage({
+                        model,
+                        messages,
+                        output: result.content || '',
+                        tokenCounter: context.tokenCounter,
+                        compaction: context.compaction,
+                    });
+
+                    if (result.usage) {
+                        usage = {
+                            ...usage,
+                            promptTokens: result.usage.promptTokens,
+                            completionTokens: result.usage.completionTokens,
+                            totalTokens: result.usage.totalTokens,
+                        };
+                    }
+
+                    context.onTokenUsage(usage);
+                }
 
                 const decision = result.content?.trim().toLowerCase() || '';
                 return decision.includes('continue');

@@ -10,6 +10,7 @@ import type {
     ChatMessage,
 } from '../types';
 import type { HITLRequest } from '../hitl';
+import { estimateTokenUsage } from '../compaction';
 
 /** Default model for agent nodes */
 const DEFAULT_MODEL = 'openai/gpt-4o-mini';
@@ -61,6 +62,7 @@ async function runToolLoop(
     let finalContent = '';
 
     while (iterations < maxIterations) {
+        const requestMessages = [...currentMessages];
         const result = await provider.chat(model, currentMessages, {
             temperature: data.temperature,
             maxTokens: data.maxTokens,
@@ -72,6 +74,28 @@ async function runToolLoop(
             },
             signal: context.signal,
         });
+
+        // Report token usage for this call
+        if (context.tokenCounter && context.onTokenUsage) {
+            let usage = estimateTokenUsage({
+                model,
+                messages: requestMessages,
+                output: result.content || '',
+                tokenCounter: context.tokenCounter,
+                compaction: context.compaction,
+            });
+
+            if (result.usage) {
+                usage = {
+                    ...usage,
+                    promptTokens: result.usage.promptTokens,
+                    completionTokens: result.usage.completionTokens,
+                    totalTokens: result.usage.totalTokens,
+                };
+            }
+
+            context.onTokenUsage(usage);
+        }
 
         // If no tool calls, we're done
         if (!result.toolCalls || result.toolCalls.length === 0) {

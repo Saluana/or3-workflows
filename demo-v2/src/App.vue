@@ -3,7 +3,11 @@ import { ref, computed, onMounted, watch } from 'vue';
 import type { Node, Edge } from '@vue-flow/core';
 
 // Import from our v2 packages
-import { type WorkflowData, validateWorkflow } from '@or3/workflow-core';
+import {
+    type WorkflowData,
+    type TokenUsageDetails,
+    validateWorkflow,
+} from '@or3/workflow-core';
 import {
     WorkflowCanvas,
     NodePalette,
@@ -86,6 +90,20 @@ const tempApiKey = ref('');
 const messages = ref<ChatMessage[]>([]);
 const chatInput = ref('');
 const conversationHistory = ref<Array<{ role: string; content: string }>>([]);
+const tokenUsage = ref<{ nodeId: string; usage: TokenUsageDetails } | null>(
+    null
+);
+
+// Parallel branch streaming state
+export interface BranchStream {
+    nodeId: string;
+    branchId: string;
+    label: string;
+    content: string;
+    status: 'streaming' | 'completed' | 'error';
+    expanded: boolean;
+}
+const branchStreams = ref<Record<string, BranchStream>>({});
 
 // Workflow name
 const workflowName = ref('My Workflow');
@@ -461,7 +479,9 @@ async function handleSendMessage() {
 
     setRunning(true);
     setStreamingContent('');
+    tokenUsage.value = null;
     error.value = null;
+    branchStreams.value = {}; // Reset branch streams
 
     try {
         const finalOutput = await executeWorkflowFn(
@@ -483,6 +503,35 @@ async function handleSendMessage() {
                     console.log(
                         `[Compaction] Reduced from ${result.tokensBefore} to ${result.tokensAfter} tokens`
                     );
+                },
+                onTokenUsage: (nodeId, usage) => {
+                    tokenUsage.value = { nodeId, usage };
+                },
+                // Branch streaming callbacks
+                onBranchStart: (nodeId, branchId, branchLabel) => {
+                    const key = `${nodeId}-${branchId}`;
+                    branchStreams.value[key] = {
+                        nodeId,
+                        branchId,
+                        label: branchLabel,
+                        content: '',
+                        status: 'streaming',
+                        expanded: true, // Auto-expand when starting
+                    };
+                },
+                onBranchToken: (nodeId, branchId, _branchLabel, token) => {
+                    const key = `${nodeId}-${branchId}`;
+                    if (branchStreams.value[key]) {
+                        branchStreams.value[key].content += token;
+                    }
+                },
+                onBranchComplete: (nodeId, branchId, _branchLabel, output) => {
+                    const key = `${nodeId}-${branchId}`;
+                    if (branchStreams.value[key]) {
+                        branchStreams.value[key].content = output;
+                        branchStreams.value[key].status = 'completed';
+                        // Keep expanded so user can review - they can collapse manually
+                    }
                 },
             }
         );
@@ -586,6 +635,7 @@ function handleRedo() {
 function clearMessages() {
     messages.value = [];
     conversationHistory.value = [];
+    tokenUsage.value = null;
     resetExecution();
 }
 
@@ -741,8 +791,15 @@ function syncMetaToEditor() {
                 :node-labels="nodeLabels"
                 :streaming-content="streamingContent"
                 :is-running="isRunning"
+                :token-usage="tokenUsage"
+                :branch-streams="branchStreams"
                 @send="handleSendMessage"
                 @clear="clearMessages"
+                @toggle-branch="(key: string) => {
+                    if (branchStreams[key]) {
+                        branchStreams[key].expanded = !branchStreams[key].expanded;
+                    }
+                }"
             />
 
             <!-- Mobile Bottom Navigation -->

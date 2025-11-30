@@ -15,6 +15,8 @@ import type {
     LLMProvider,
     ExecutionContext,
     ChatMessage,
+    TokenUsage,
+    TokenUsageDetails,
 } from './types';
 import {
     AgentNodeExtension,
@@ -142,6 +144,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     private running = false;
     private memory: MemoryAdapter;
     private tokenCounter: TokenCounter;
+    private tokenUsageEvents: Array<{
+        nodeId: string;
+        usage: TokenUsageDetails;
+    }> = [];
 
     /**
      * Create a new OpenRouterExecutionAdapter.
@@ -200,6 +206,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         }
         this.abortController = new AbortController();
         this.running = true;
+        this.tokenUsageEvents = [];
 
         const startTime = Date.now();
         const nodeOutputs: Record<string, string> = {};
@@ -371,6 +378,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 output: finalOutput,
                 nodeOutputs,
                 duration: Date.now() - startTime,
+                usage: this.getTokenUsageSummary(),
+                tokenUsageDetails: this.tokenUsageEvents.map((entry) => ({
+                    nodeId: entry.nodeId,
+                    ...entry.usage,
+                })),
             };
         } catch (error) {
             const err =
@@ -381,6 +393,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 nodeOutputs,
                 error: err,
                 duration: Date.now() - startTime,
+                usage: this.getTokenUsageSummary(),
+                tokenUsageDetails: this.tokenUsageEvents.map((entry) => ({
+                    nodeId: entry.nodeId,
+                    ...entry.usage,
+                })),
             };
         } finally {
             this.running = false;
@@ -539,10 +556,45 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             onMaxToolIterations: this.options.onMaxToolIterations,
             onHITLRequest: this.options.onHITLRequest,
             workflowName: context.workflowName,
+            tokenCounter: this.tokenCounter,
+            compaction: this.options.compaction,
+            onTokenUsage: (usage) => {
+                if (callbacks.onTokenUsage) {
+                    callbacks.onTokenUsage(nodeId, usage);
+                }
+                this.tokenUsageEvents.push({ nodeId, usage });
+            },
 
             onToken: (token: string) => {
                 callbacks.onToken(nodeId, token);
             },
+
+            // Branch streaming callbacks for parallel nodes
+            onBranchToken: callbacks.onBranchToken
+                ? (branchId: string, branchLabel: string, token: string) => {
+                      callbacks.onBranchToken!(
+                          nodeId,
+                          branchId,
+                          branchLabel,
+                          token
+                      );
+                  }
+                : undefined,
+            onBranchStart: callbacks.onBranchStart
+                ? (branchId: string, branchLabel: string) => {
+                      callbacks.onBranchStart!(nodeId, branchId, branchLabel);
+                  }
+                : undefined,
+            onBranchComplete: callbacks.onBranchComplete
+                ? (branchId: string, branchLabel: string, output: string) => {
+                      callbacks.onBranchComplete!(
+                          nodeId,
+                          branchId,
+                          branchLabel,
+                          output
+                      );
+                  }
+                : undefined,
 
             getNode: (id: string) => graph.nodeMap.get(id),
 
@@ -691,6 +743,26 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
         callbacks.onNodeFinish(nodeId, result.output);
         return { output: result.output, nextNodes: result.nextNodes };
+    }
+    private getTokenUsageSummary(): TokenUsage | undefined {
+        if (this.tokenUsageEvents.length === 0) {
+            return undefined;
+        }
+
+        const promptTokens = this.tokenUsageEvents.reduce(
+            (sum, entry) => sum + entry.usage.promptTokens,
+            0
+        );
+        const completionTokens = this.tokenUsageEvents.reduce(
+            (sum, entry) => sum + entry.usage.completionTokens,
+            0
+        );
+
+        return {
+            promptTokens,
+            completionTokens,
+            totalTokens: promptTokens + completionTokens,
+        };
     }
 
     /**
