@@ -8,6 +8,8 @@ import {
     type HITLConfig,
     type HITLMode,
     type OutputFormat,
+    modelRegistry,
+    registerDefaultModels,
 } from '@or3/workflow-core';
 
 // Type guard for configurable node data
@@ -48,53 +50,19 @@ const activeTab = ref<
     'prompt' | 'model' | 'tools' | 'errors' | 'hitl' | 'subflow' | 'output'
 >('prompt');
 
-// Available models
-const availableModels = [
-    { id: 'openai/gpt-4o', name: 'GPT-4o', provider: 'OpenAI' },
-    { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini', provider: 'OpenAI' },
-    { id: 'openai/gpt-4-turbo', name: 'GPT-4 Turbo', provider: 'OpenAI' },
-    {
-        id: 'anthropic/claude-3.5-sonnet',
-        name: 'Claude 3.5 Sonnet',
-        provider: 'Anthropic',
-    },
-    {
-        id: 'anthropic/claude-3-opus',
-        name: 'Claude 3 Opus',
-        provider: 'Anthropic',
-    },
-    {
-        id: 'anthropic/claude-3-haiku',
-        name: 'Claude 3 Haiku',
-        provider: 'Anthropic',
-    },
-    { id: 'google/gemini-pro-1.5', name: 'Gemini Pro 1.5', provider: 'Google' },
-    {
-        id: 'google/gemini-flash-1.5',
-        name: 'Gemini Flash 1.5',
-        provider: 'Google',
-    },
-    {
-        id: 'meta-llama/llama-3.1-70b-instruct',
-        name: 'Llama 3.1 70B',
-        provider: 'Meta',
-    },
-    {
-        id: 'meta-llama/llama-3.1-8b-instruct',
-        name: 'Llama 3.1 8B',
-        provider: 'Meta',
-    },
-    {
-        id: 'mistralai/mistral-large',
-        name: 'Mistral Large',
-        provider: 'Mistral',
-    },
-    {
-        id: 'mistralai/mixtral-8x7b-instruct',
-        name: 'Mixtral 8x7B',
-        provider: 'Mistral',
-    },
-];
+// Available models from registry
+// Register defaults if registry is empty
+if (modelRegistry.size === 0) {
+    registerDefaultModels();
+}
+
+const availableModels = computed(() => {
+    return modelRegistry.getAllInfo().map(m => ({
+        id: m.id,
+        name: m.name,
+        provider: m.provider,
+    }));
+});
 
 // Available tools
 const availableTools = [

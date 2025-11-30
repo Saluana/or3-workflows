@@ -161,3 +161,30 @@ export {
     buildSummarizationPrompt,
     isCompactionConfig,
 } from './compaction';
+
+// Model Registry
+export {
+    // Types
+    type ModelInputModality,
+    type ModelOutputModality,
+    type ModelTokenizer,
+    type ModelInstructType,
+    type ModelParameter,
+    type ModelArchitecture,
+    type ModelPricing,
+    type ModelTopProvider,
+    type ModelPerRequestLimits,
+    type ModelDefaultParameters,
+    type OpenRouterModel,
+    type ModelInfo,
+    type ModelQuery,
+    // Class and instance
+    ModelRegistry,
+    modelRegistry,
+    // Utility functions
+    extractProvider,
+    toModelInfo,
+    // Default models
+    DEFAULT_MODELS,
+    registerDefaultModels,
+} from './models';
