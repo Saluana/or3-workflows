@@ -256,7 +256,8 @@ export const ParallelNodeExtension: NodeExtension = {
                 errors.push({
                     type: 'warning',
                     code: 'DEAD_END_NODE',
-                    message: 'Parallel node has no outgoing connection from merged output',
+                    message:
+                        'Parallel node has no outgoing connection from merged output',
                     nodeId: node.id,
                 });
             }
