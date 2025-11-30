@@ -9,6 +9,7 @@ import type {
     NodeExecutionResult,
     ValidationError,
     ValidationWarning,
+    ChatMessage,
 } from '../types';
 
 /** Default model for router classification */
@@ -68,14 +69,13 @@ export const RouterNodeExtension: NodeExtension = {
         model: undefined, // Uses default model if not specified
         prompt: '', // Custom routing instructions
         routes: [
-            { id: 'route-1', label: 'Option A' },
-            { id: 'route-2', label: 'Option B' },
-        ] as RouteDefinition[],
+            { id: 'route-1', label: 'Route 1' },
+            { id: 'route-2', label: 'Route 2' },
+        ],
     },
 
     /**
      * Execute the router node.
-     * Actual routing is handled by OpenRouterExecutionAdapter.
      */
     /**
      * Execute the router node.
@@ -86,39 +86,37 @@ export const RouterNodeExtension: NodeExtension = {
         provider?: LLMProvider
     ): Promise<NodeExecutionResult> {
         const data = node.data as RouterNodeData;
-        const routes = data.routes || [];
 
-        // If no routes, error
-        if (routes.length === 0) {
+        // Get outgoing edges to determine connected routes
+        const outgoingEdges = context.getOutgoingEdges(node.id);
+
+        // Filter to only route edges (exclude error/rejected handles)
+        const routeEdges = outgoingEdges.filter(
+            (e) => e.sourceHandle !== 'error' && e.sourceHandle !== 'rejected'
+        );
+
+        // If no route edges, error
+        if (routeEdges.length === 0) {
             throw new Error('Router node has no routes defined');
         }
 
-        // Get outgoing edges to determine connected routes
-        // Note: We need all outgoing edges from this node
-        // ExecutionContext.getOutgoingEdges(nodeId) should return all edges if handle is not specified?
-        // The signature I added was getOutgoingEdges(nodeId, sourceHandle?).
-        // If I pass undefined for sourceHandle, it should return all.
-        // I need to verify if I implemented it that way in the Adapter... I haven't implemented the adapter part yet!
-        // But I defined the interface. I will implement it in Adapter later.
-
-        const outgoingEdges = context.getOutgoingEdges(node.id);
-
-        // Build route options based on configured routes and connected edges
-        const routeOptions = routes.map((route, index) => {
-            const edge = outgoingEdges.find((e) => e.sourceHandle === route.id);
-            const targetNode = edge ? context.getNode(edge.target) : undefined;
+        // Build route options from edges - use target node info for routing
+        const routeOptions = routeEdges.map((edge, index) => {
+            const targetNode = context.getNode(edge.target);
+            const targetData = targetNode?.data as
+                | { label?: string; description?: string }
+                | undefined;
 
             return {
                 index,
-                id: route.id,
-                label: route.label,
-                // Description helps the LLM understand what this route leads to
-                description: targetNode?.data.label || edge?.label || '',
-                targetNodeId: edge?.target,
+                id: edge.sourceHandle || `route-${index}`,
+                nodeId: edge.target,
+                // Use target node's label as the route name
+                name: targetData?.label || edge.label || `Route ${index + 1}`,
+                // Use target node's description for routing context
+                description: targetData?.description || '',
             };
         });
-
-        let selectedRouteId: string | null = null;
 
         // Use provided model or fall back to default
         const model = data.model || DEFAULT_MODEL;
@@ -130,63 +128,173 @@ export const RouterNodeExtension: NodeExtension = {
 
         const customInstructions = data.prompt || '';
 
-        // Build route descriptions for prompt
+        // Build route descriptions for prompt - include id, name, and description
         const routeDescriptions = routeOptions
-            .map((opt, i) => {
-                const desc = opt.description
-                    ? ` (leads to: ${opt.description})`
-                    : '';
-                return `${i + 1}. ${opt.label}${desc}`;
+            .map((opt) => {
+                let routeInfo = `Route ID: "${opt.id}"\nName: "${opt.name}"`;
+                if (opt.description) {
+                    routeInfo += `\nDescription: ${opt.description}`;
+                }
+                return routeInfo;
             })
-            .join('\n');
+            .join('\n\n');
 
-        const systemPrompt = `You are a routing assistant. Based on the user's message, determine which route to take.
+        // Stable base system prompt with optional custom instructions
+        const systemPrompt = `You are a routing classifier. Your task is to select which route best handles the user's message.
 
-Available routes:
+## Routes
+
 ${routeDescriptions}
-${customInstructions ? `\nRouting instructions:\n${customInstructions}` : ''}
+${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
 
-Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do not explain.`;
+## Instructions
 
-        const messagesForLLM: any[] = [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: `User message: "${context.input}"` },
+- Analyze the user's message.
+- Select the most appropriate route based on the descriptions and rules.
+- Use the 'select_route' tool to make your decision.`;
+
+        // Define the tool for route selection
+        const tools = [
+            {
+                type: 'function',
+                function: {
+                    name: 'select_route',
+                    description:
+                        'Selects the appropriate route for the user input',
+                    parameters: {
+                        type: 'object',
+                        properties: {
+                            route_id: {
+                                type: 'string',
+                                description: 'The ID of the selected route',
+                                enum: routeOptions.map((r) => r.id),
+                            },
+                            reasoning: {
+                                type: 'string',
+                                description:
+                                    'Brief explanation for why this route was selected',
+                            },
+                        },
+                        required: ['route_id', 'reasoning'],
+                    },
+                },
+            },
         ];
 
-        const result = await provider.chat(model, messagesForLLM, {
-            temperature: 0, // Deterministic
-            maxTokens: 10,
+        // Debug logging
+        console.log(
+            '[Router] Routes found:',
+            routeOptions.map((r) => ({
+                name: r.name,
+                description: r.description,
+            }))
+        );
+        console.log('[Router] System prompt:', systemPrompt);
+        console.log('[Router] User input:', context.input);
+
+        const messagesForLLM: ChatMessage[] = [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: context.input },
+        ];
+
+        console.log('[Router] Sending request to LLM:', {
+            model,
+            messages: messagesForLLM,
+            tools,
+            toolChoice: {
+                type: 'function',
+                function: { name: 'select_route' },
+            },
         });
 
-        const content = result.content?.trim() || '1';
-        // extract number
-        const match = content.match(/\d+/);
-        const choiceIndex = match ? parseInt(match[0], 10) - 1 : 0;
+        const result = await provider.chat(model, messagesForLLM, {
+            temperature: 0, // Deterministic for consistent routing
+            maxTokens: 100,
+            tools,
+            // toolChoice might not be strictly typed yet
+            toolChoice: {
+                type: 'function',
+                function: { name: 'select_route' },
+            },
+        });
 
-        if (choiceIndex >= 0 && choiceIndex < routeOptions.length) {
-            selectedRouteId = routeOptions[choiceIndex].id;
+        console.log(
+            '[Router] Raw LLM result:',
+            JSON.stringify(result, null, 2)
+        );
+
+        let selectedRouteId: string | undefined;
+        let reasoning = '';
+
+        if (result.toolCalls && result.toolCalls.length > 0) {
+            const call = result.toolCalls[0];
+            try {
+                // Handle both parsed object and string arguments
+                const args =
+                    typeof call.function.arguments === 'string'
+                        ? JSON.parse(call.function.arguments)
+                        : call.function.arguments;
+
+                const selectedId = args.route_id;
+                reasoning = args.reasoning || '';
+
+                // Verify the ID exists
+                const route = routeOptions.find((r) => r.id === selectedId);
+                if (route) {
+                    selectedRouteId = route.id;
+                }
+
+                console.log('[Router] Tool call result:', {
+                    selectedId,
+                    reasoning,
+                    valid: !!route,
+                });
+            } catch (e) {
+                console.error('[Router] Failed to parse tool arguments:', e);
+            }
         } else {
-            // Fallback to first
-            selectedRouteId = routeOptions[0].id;
+            const content = result.content?.trim() || '1';
+            console.log(
+                '[Router] No tool call, falling back to text:',
+                content
+            );
+            // Extract number from response
+            const match = content.match(/\d+/);
+            const choiceIndex = match ? parseInt(match[0], 10) - 1 : 0;
+
+            if (choiceIndex >= 0 && choiceIndex < routeOptions.length) {
+                selectedRouteId = routeOptions[choiceIndex].id;
+            }
         }
 
-        if (!selectedRouteId && routeOptions.length > 0) {
+        if (!selectedRouteId) {
+            // Fallback to first route
             selectedRouteId = routeOptions[0].id;
+            console.log('[Router] Fallback to default route');
         }
+
+        console.log('[Router] Selected route ID:', selectedRouteId);
 
         const selectedOption = routeOptions.find(
             (r) => r.id === selectedRouteId
         );
+
+        console.log('[Router] Selected option:', selectedOption);
+
         const nextNodes =
-            selectedOption && selectedOption.targetNodeId
-                ? [selectedOption.targetNodeId]
+            selectedOption && selectedOption.nodeId
+                ? [selectedOption.nodeId]
                 : [];
 
+        console.log('[Router] Next nodes to execute:', nextNodes);
+
         return {
-            output: `Routed to ${selectedOption?.label || selectedRouteId}`,
+            output: `Routed to ${selectedOption?.name || selectedRouteId}`,
             nextNodes,
             metadata: {
                 selectedRouteId,
+                selectedNodeId: selectedOption?.nodeId,
+                selectedName: selectedOption?.name,
             },
         };
     },
@@ -199,18 +307,6 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
         edges: WorkflowEdge[]
     ): (ValidationError | ValidationWarning)[] {
         const errors: (ValidationError | ValidationWarning)[] = [];
-        const data = node.data as RouterNodeData;
-        const routes = data.routes || [];
-
-        // Check for at least one route
-        if (routes.length === 0) {
-            errors.push({
-                type: 'error',
-                code: 'MISSING_REQUIRED_PORT',
-                message: 'Router node must have at least one route defined',
-                nodeId: node.id,
-            });
-        }
 
         // Check for incoming connections
         const incomingEdges = edges.filter((e) => e.target === node.id);
@@ -223,29 +319,29 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
             });
         }
 
-        // Check that each route has an outgoing edge
+        // Check for outgoing route edges (exclude error/rejected)
         const outgoingEdges = edges.filter((e) => e.source === node.id);
-        routes.forEach((route: RouteDefinition) => {
-            const hasEdge = outgoingEdges.some(
-                (e) => e.sourceHandle === route.id
-            );
-            if (!hasEdge) {
-                errors.push({
-                    type: 'warning',
-                    code: 'MISSING_EDGE_LABEL',
-                    message: `Route "${route.label}" has no connected node`,
-                    nodeId: node.id,
-                });
-            }
-        });
+        const routeEdges = outgoingEdges.filter(
+            (e) => e.sourceHandle !== 'error' && e.sourceHandle !== 'rejected'
+        );
 
-        // Check for edges without labels
-        outgoingEdges.forEach((edge) => {
-            if (!edge.label && !edge.sourceHandle) {
+        if (routeEdges.length === 0) {
+            errors.push({
+                type: 'error',
+                code: 'MISSING_REQUIRED_PORT',
+                message: 'Router node must have at least one route connected',
+                nodeId: node.id,
+            });
+        }
+
+        // Warn if routes don't have labels (helps LLM make better decisions)
+        routeEdges.forEach((edge) => {
+            if (!edge.label) {
                 errors.push({
                     type: 'warning',
                     code: 'MISSING_EDGE_LABEL',
-                    message: 'Router edge is missing a label',
+                    message:
+                        'Router edge is missing a label - consider adding one to help routing decisions',
                     nodeId: node.id,
                     edgeId: edge.id,
                 });

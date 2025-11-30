@@ -673,6 +673,23 @@ function syncMetaToEditor() {
 
             <!-- Canvas -->
             <div class="canvas-container">
+                <button
+                    v-if="!showLeftSidebar && !isMobile"
+                    class="sidebar-expand-btn"
+                    @click="showLeftSidebar = true"
+                    title="Expand sidebar"
+                >
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        class="icon"
+                    >
+                        <polyline points="13 17 18 12 13 7"></polyline>
+                        <polyline points="6 17 11 12 6 7"></polyline>
+                    </svg>
+                </button>
                 <WorkflowCanvas
                     v-if="editor"
                     :editor="editor"
@@ -1130,6 +1147,37 @@ function syncMetaToEditor() {
 .sidebar-collapse-btn:hover {
     background: var(--or3-color-surface, rgba(26, 26, 36, 0.8));
     color: var(--or3-color-text, rgba(255, 255, 255, 0.87));
+}
+
+.sidebar-expand-btn {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    background: var(--or3-color-bg-secondary, #12121a);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--or3-radius-sm, 6px);
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.sidebar-expand-btn:hover {
+    background: var(--or3-color-surface, rgba(26, 26, 36, 0.8));
+    color: var(--or3-color-text, rgba(255, 255, 255, 0.87));
+    border-color: var(--or3-color-accent, #8b5cf6);
+}
+
+.sidebar-expand-btn .icon {
+    width: 16px;
+    height: 16px;
 }
 
 .sidebar-collapse-btn .icon {

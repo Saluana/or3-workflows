@@ -241,6 +241,8 @@ export function isStartNodeData(data: NodeData): data is StartNodeData {
 export interface BaseNodeData {
     /** Display label for the node */
     label: string;
+    /** Description of what this node does - used by router for routing decisions */
+    description?: string;
     /** Current execution status */
     status?: NodeStatus;
 }
@@ -435,6 +437,7 @@ export interface LLMProvider {
             temperature?: number;
             maxTokens?: number;
             tools?: any[]; // TODO: Define strict tool types
+            toolChoice?: any; // Allow tool choice configuration
             responseFormat?: { type: 'json_object' | 'text' };
             onToken?: (token: string) => void;
             signal?: AbortSignal;

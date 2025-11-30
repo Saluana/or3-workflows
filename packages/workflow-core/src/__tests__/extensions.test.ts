@@ -227,16 +227,16 @@ describe('RouterNodeExtension', () => {
         expect(RouterNodeExtension.type).toBe('node');
     });
 
-    it('should have default routes', () => {
-        expect(RouterNodeExtension.defaultData?.routes).toHaveLength(2);
+    it('should not have hardcoded default routes (routes derived from edges)', () => {
+        expect(RouterNodeExtension.defaultData?.routes).toBeUndefined();
     });
 
     describe('validate', () => {
-        it('should error if router has no routes', () => {
+        it('should error if router has no outgoing route edges', () => {
             const node = createNode('router', 'router-1', {
                 label: 'Router',
-                routes: [],
             });
+            // Only incoming edge, no outgoing routes
             const edges = [createEdge('start-1', 'router-1')];
 
             const errors = RouterNodeExtension.validate!(node, edges);
@@ -246,12 +246,19 @@ describe('RouterNodeExtension', () => {
             );
         });
 
-        it('should warn if route has no connected node', () => {
+        it('should warn if route edge has no label', () => {
             const node = createNode('router', 'router-1', {
                 label: 'Router',
-                routes: [{ id: 'route-1', label: 'Route 1' }],
             });
-            const edges = [createEdge('start-1', 'router-1')];
+            // Has incoming and outgoing edges, but outgoing has no label
+            const edges = [
+                createEdge('start-1', 'router-1'),
+                {
+                    ...createEdge('router-1', 'agent-1'),
+                    sourceHandle: 'route-1',
+                    label: undefined,
+                },
+            ];
 
             const errors = RouterNodeExtension.validate!(node, edges);
 
@@ -261,6 +268,31 @@ describe('RouterNodeExtension', () => {
                     type: 'warning',
                 })
             );
+        });
+
+        it('should pass validation with labeled route edges', () => {
+            const node = createNode('router', 'router-1', {
+                label: 'Router',
+            });
+            const edges = [
+                createEdge('start-1', 'router-1'),
+                {
+                    ...createEdge('router-1', 'agent-1'),
+                    sourceHandle: 'route-1',
+                    label: 'Technical questions',
+                },
+                {
+                    ...createEdge('router-1', 'agent-2'),
+                    sourceHandle: 'route-2',
+                    label: 'General questions',
+                },
+            ];
+
+            const errors = RouterNodeExtension.validate!(node, edges);
+
+            // Should have no errors (only warnings about labels are acceptable)
+            const actualErrors = errors.filter((e) => e.type === 'error');
+            expect(actualErrors).toHaveLength(0);
         });
     });
 

@@ -47,7 +47,14 @@ const emit = defineEmits<{
 
 const selectedNode = ref<WorkflowNode | null>(null);
 const activeTab = ref<
-    'prompt' | 'model' | 'tools' | 'errors' | 'hitl' | 'subflow' | 'output'
+    | 'prompt'
+    | 'model'
+    | 'tools'
+    | 'errors'
+    | 'hitl'
+    | 'subflow'
+    | 'output'
+    | 'routes'
 >('prompt');
 
 // Available models from registry
@@ -103,14 +110,23 @@ const updateSelection = () => {
     if (selected.length === 1) {
         const node =
             props.editor.getNodes().find((n) => n.id === selected[0]) || null;
+
+        const previousId = selectedNode.value?.id;
         selectedNode.value = node;
+
         // Sync tools from node data using type guard
         if (node) {
             selectedTools.value = getToolsArray(node.data);
-            if (node.type === 'tool') {
-                activeTab.value = hasErrorHandling.value ? 'errors' : 'prompt';
-            } else {
-                activeTab.value = 'prompt';
+
+            // Only reset tab if selection changed
+            if (previousId !== node.id) {
+                if (node.type === 'tool') {
+                    activeTab.value = hasErrorHandling.value
+                        ? 'errors'
+                        : 'prompt';
+                } else {
+                    activeTab.value = 'prompt';
+                }
             }
         }
     } else {
@@ -221,6 +237,35 @@ const subflowData = computed(() => {
     };
 });
 
+const routerData = computed(() => {
+    const data = selectedNode.value?.data as any;
+    return {
+        routes: Array.isArray(data?.routes) ? data.routes : [],
+    };
+});
+
+const addRoute = () => {
+    if (!selectedNode.value) return;
+    const routes = [...routerData.value.routes];
+    const id = `route-${Date.now()}`;
+    routes.push({ id, label: `Route ${routes.length + 1}` });
+    props.editor.commands.updateNodeData(selectedNode.value.id, { routes });
+};
+
+const removeRoute = (routeId: string) => {
+    if (!selectedNode.value) return;
+    const routes = routerData.value.routes.filter((r: any) => r.id !== routeId);
+    props.editor.commands.updateNodeData(selectedNode.value.id, { routes });
+};
+
+const updateRouteLabel = (routeId: string, label: string) => {
+    if (!selectedNode.value) return;
+    const routes = routerData.value.routes.map((r: any) =>
+        r.id === routeId ? { ...r, label } : r
+    );
+    props.editor.commands.updateNodeData(selectedNode.value.id, { routes });
+};
+
 const errorHandling = computed<NodeErrorConfig>(() => {
     const data = selectedNode.value?.data as
         | { errorHandling?: NodeErrorConfig }
@@ -290,6 +335,10 @@ const debouncedUpdate = (field: string, value: unknown) => {
 
 const updateLabel = (event: Event) => {
     debouncedUpdate('label', (event.target as HTMLInputElement).value);
+};
+
+const updateDescription = (event: Event) => {
+    debouncedUpdate('description', (event.target as HTMLTextAreaElement).value);
 };
 
 const updateModel = (event: Event) => {
@@ -652,6 +701,36 @@ const handleDelete = () => {
             </button>
         </div>
 
+        <!-- Description field - helps router understand what this node does -->
+        <div v-if="isConfigurable" class="description-section">
+            <label class="description-label">
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                >
+                    <path
+                        d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                    ></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                    <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+                Description
+                <span class="description-hint"
+                    >(used by router for decisions)</span
+                >
+            </label>
+            <textarea
+                class="description-textarea"
+                :value="nodeData.description || ''"
+                placeholder="Describe what this node does... e.g., 'Handles complex math problems and coding questions'"
+                @input="updateDescription"
+            ></textarea>
+        </div>
+
         <!-- Tabs for Agent/Router/Parallel nodes -->
         <div v-if="isConfigurable || hasErrorHandling" class="tabs">
             <button
@@ -709,6 +788,23 @@ const handleDelete = () => {
                     <line x1="1" y1="14" x2="4" y2="14"></line>
                 </svg>
                 Model
+            </button>
+            <button
+                v-if="isRouterNode"
+                class="tab"
+                :class="{ active: activeTab === 'routes' }"
+                @click="activeTab = 'routes'"
+            >
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                >
+                    <path d="M9 18l6-6-6-6"></path>
+                </svg>
+                Routes
+                <span class="tool-count">{{ routerData.routes.length }}</span>
             </button>
             <button
                 v-if="isAgentNode"
@@ -943,6 +1039,66 @@ const handleDelete = () => {
                                 : nodeData.model || 'openai/gpt-4o-mini'
                         }}
                     </code>
+                </div>
+            </div>
+
+            <!-- Routes Tab -->
+            <div
+                v-if="activeTab === 'routes' && isRouterNode"
+                class="routes-tab"
+            >
+                <div class="routes-header">
+                    <label class="field-label">Defined Routes</label>
+                    <button class="add-btn" @click="addRoute">
+                        <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                        Add Route
+                    </button>
+                </div>
+                <p class="field-hint">
+                    Define the possible routes for this node. Each route creates
+                    an output handle.
+                </p>
+
+                <div class="routes-list">
+                    <div
+                        v-for="route in routerData.routes"
+                        :key="route.id"
+                        class="route-item"
+                    >
+                        <div class="route-inputs">
+                            <input
+                                type="text"
+                                class="text-input route-label"
+                                :value="route.label"
+                                @input="(e) => updateRouteLabel(route.id, (e.target as HTMLInputElement).value)"
+                                placeholder="Route Label"
+                            />
+                            <code class="route-id">{{ route.id }}</code>
+                        </div>
+                        <button
+                            class="delete-btn"
+                            @click="removeRoute(route.id)"
+                            title="Remove route"
+                        >
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -1567,9 +1723,63 @@ const handleDelete = () => {
     height: 16px;
 }
 
+/* Description Section */
+.description-section {
+    padding-bottom: var(--or3-spacing-md, 16px);
+    margin-bottom: var(--or3-spacing-sm, 8px);
+}
+
+.description-label {
+    display: flex;
+    align-items: center;
+    gap: var(--or3-spacing-xs, 4px);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.7));
+    margin-bottom: var(--or3-spacing-xs, 4px);
+}
+
+.description-label svg {
+    width: 14px;
+    height: 14px;
+    opacity: 0.6;
+}
+
+.description-hint {
+    font-weight: 400;
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+    font-size: 11px;
+}
+
+.description-textarea {
+    width: 100%;
+    min-height: 60px;
+    max-height: 100px;
+    padding: var(--or3-spacing-sm, 8px);
+    background: var(--or3-color-surface, rgba(255, 255, 255, 0.03));
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--or3-radius-sm, 6px);
+    font-size: 13px;
+    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
+    resize: vertical;
+    font-family: inherit;
+    line-height: 1.5;
+}
+
+.description-textarea::placeholder {
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.3));
+}
+
+.description-textarea:focus {
+    outline: none;
+    border-color: var(--or3-color-accent, #3b82f6);
+    background: var(--or3-color-surface-hover, rgba(255, 255, 255, 0.05));
+}
+
 /* Tabs */
 .tabs {
     display: flex;
+    flex-wrap: wrap;
     gap: var(--or3-spacing-xs, 4px);
     padding-bottom: var(--or3-spacing-md, 16px);
     border-bottom: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
@@ -2212,5 +2422,99 @@ const handleDelete = () => {
 
 .schema-editor .field-hint a:hover {
     text-decoration: underline;
+}
+
+/* Routes Tab */
+.routes-tab {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-md, 16px);
+}
+
+.routes-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.add-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--or3-color-primary, #6366f1);
+    color: white;
+    border: none;
+    border-radius: var(--or3-radius-sm, 6px);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.add-btn:hover {
+    background: var(--or3-color-primary-hover, #4f46e5);
+}
+
+.add-btn svg {
+    width: 14px;
+    height: 14px;
+}
+
+.routes-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-sm, 8px);
+}
+
+.route-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--or3-radius-md, 8px);
+}
+
+.route-inputs {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.route-label {
+    font-weight: 500;
+}
+
+.route-id {
+    font-size: 10px;
+    font-family: monospace;
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+}
+
+.delete-btn {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.delete-btn:hover {
+    background: var(--or3-color-error-bg, rgba(239, 68, 68, 0.1));
+    color: var(--or3-color-error, #ef4444);
+}
+
+.delete-btn svg {
+    width: 16px;
+    height: 16px;
 }
 </style>

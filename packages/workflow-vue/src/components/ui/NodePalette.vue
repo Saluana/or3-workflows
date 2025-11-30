@@ -24,6 +24,7 @@ const nodeTypes = [
         colorVar: '--or3-color-warning',
         defaultData: {
             label: 'Router',
+            // Routes are derived from connected edges
         },
     },
     {
