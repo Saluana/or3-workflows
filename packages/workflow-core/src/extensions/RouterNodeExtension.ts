@@ -42,6 +42,12 @@ export const RouterNodeExtension: NodeExtension = {
       label: 'Route 2',
       dataType: 'any',
     },
+    {
+      id: 'error',
+      type: 'output',
+      label: 'Error',
+      dataType: 'any',
+    },
   ],
 
   // Default data for new nodes

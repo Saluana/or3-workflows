@@ -39,6 +39,12 @@ const status = computed(() => props.data.status || 'idle');
     </div>
     
     <Handle type="source" :position="Position.Bottom" class="handle" />
+    <Handle
+      type="source"
+      :position="Position.Right"
+      id="error"
+      class="handle error-handle"
+    />
   </NodeWrapper>
 </template>
 
@@ -113,6 +119,15 @@ const status = computed(() => props.data.status || 'idle');
 .handle:hover {
   background: #ec4899 !important;
   border-color: #ec4899 !important;
+}
+
+.error-handle {
+  border-color: var(--or3-color-error, #ef4444) !important;
+}
+
+.error-handle:hover {
+  background: var(--or3-color-error, #ef4444) !important;
+  border-color: var(--or3-color-error, #ef4444) !important;
 }
 
 @keyframes spin {

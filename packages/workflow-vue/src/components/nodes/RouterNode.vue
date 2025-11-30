@@ -66,6 +66,12 @@ const handlePositions = computed(() => {
       class="handle"
       :style="{ left: `${handlePositions[index]}%` }"
     />
+    <Handle
+      type="source"
+      :position="Position.Right"
+      id="error"
+      class="handle error-handle"
+    />
   </NodeWrapper>
 </template>
 
@@ -140,6 +146,15 @@ const handlePositions = computed(() => {
 .handle:hover {
   background: var(--or3-color-warning, #f59e0b) !important;
   border-color: var(--or3-color-warning, #f59e0b) !important;
+}
+
+.error-handle {
+  border-color: var(--or3-color-error, #ef4444) !important;
+}
+
+.error-handle:hover {
+  background: var(--or3-color-error, #ef4444) !important;
+  border-color: var(--or3-color-error, #ef4444) !important;
 }
 
 @keyframes spin {

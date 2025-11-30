@@ -19,8 +19,18 @@ import type {
   RouteDefinition,
   BranchDefinition,
   ToolNodeData,
+  MemoryNodeData,
 } from './types';
 import { toolRegistry } from './extensions/ToolNodeExtension';
+import { InMemoryAdapter, type MemoryAdapter, type MemoryEntry } from './memory';
+import { ExecutionSession, type Session } from './session';
+import {
+  classifyError,
+  wrapError as wrapExecutionError,
+  type ExecutionError,
+  type NodeErrorConfig,
+  type NodeRetryConfig,
+} from './errors';
 
 // ============================================================================
 // Constants
@@ -78,10 +88,11 @@ interface InternalExecutionContext {
   currentInput: string;
   originalInput: string;
   attachments: Attachment[];
-  history: ChatMessage[];
   outputs: Record<string, string>;
   nodeChain: string[];
   signal: AbortSignal;
+  session: Session;
+  memory: MemoryAdapter;
 }
 
 // ============================================================================
@@ -112,6 +123,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
   private abortController: AbortController | null = null;
   private running = false;
   private modelCapabilitiesCache: Map<string, ModelCapabilities | null> = new Map();
+  private memory: MemoryAdapter;
 
   /**
    * Create a new OpenRouterExecutionAdapter.
@@ -142,6 +154,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
       retryDelayMs: DEFAULT_RETRY_DELAY_MS,
       ...options,
     };
+    this.memory = this.options.memory || new InMemoryAdapter();
   }
 
   // ==========================================================================
@@ -176,15 +189,19 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
       }
 
       // Initialize execution context
+      const session = new ExecutionSession(this.options.sessionId);
+      session.addMessage({ role: 'user', content: input.text });
+
       const context: InternalExecutionContext = {
         input: input.text,
         currentInput: input.text,
         originalInput: input.text,
         attachments: input.attachments || [],
-        history: [],
         outputs: {},
         nodeChain: [],
         signal: this.abortController.signal,
+        session,
+        memory: this.memory,
       };
 
       // BFS execution through the graph
@@ -245,7 +262,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         executed.add(currentId);
 
         // Execute the node
-        const result = await this.executeNode(
+        const result = await this.executeNodeWithErrorHandling(
           currentId,
           context,
           graph,
@@ -287,6 +304,13 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
       if (iterations >= maxIterations) {
         throw new Error('Workflow execution exceeded maximum iterations - check for cycles');
+      }
+
+      if (finalOutput) {
+        const lastMessage = context.session.messages[context.session.messages.length - 1];
+        if (!(lastMessage && lastMessage.role === 'assistant' && lastMessage.content === finalOutput)) {
+          context.session.addMessage({ role: 'assistant', content: finalOutput });
+        }
       }
 
       return {
@@ -467,7 +491,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
   /**
    * Execute a single node in the workflow.
    */
-  private async executeNode(
+  private async executeNodeInternal(
     nodeId: string,
     context: InternalExecutionContext,
     graph: WorkflowGraph,
@@ -481,70 +505,149 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
     callbacks.onNodeStart(nodeId);
 
-    try {
-      let output = '';
-      let nextNodes: string[] = [];
+    let output = '';
+    let nextNodes: string[] = [];
 
-      switch (node.type) {
-        case 'start':
-          output = context.currentInput;
-          nextNodes = childEdges.map(c => c.nodeId);
-          break;
+    switch (node.type) {
+      case 'start':
+        output = context.currentInput;
+        nextNodes = childEdges.map(c => c.nodeId);
+        break;
 
-        case 'agent':
-          output = await this.withRetry(() =>
-            this.executeAgentNode(node, context, graph.nodeMap, callbacks)
-          );
-          nextNodes = childEdges.map(c => c.nodeId);
-          context.outputs[nodeId] = output;
-          context.nodeChain.push(nodeId);
-          context.currentInput = output;
-          break;
+      case 'agent':
+        output = await this.executeAgentNode(node, context, graph.nodeMap, callbacks);
+        nextNodes = childEdges.map(c => c.nodeId);
+        context.outputs[nodeId] = output;
+        context.nodeChain.push(nodeId);
+        context.currentInput = output;
+        context.session.addMessage({ role: 'assistant', content: output });
+        break;
 
-        case 'tool':
-          output = await this.withRetry(() =>
-            this.executeToolNode(node, context)
-          );
-          nextNodes = childEdges.map(c => c.nodeId);
-          context.outputs[nodeId] = output;
-          context.nodeChain.push(nodeId);
-          context.currentInput = output;
-          break;
+      case 'tool':
+        output = await this.executeToolNode(node, context);
+        nextNodes = childEdges.map(c => c.nodeId);
+        context.outputs[nodeId] = output;
+        context.nodeChain.push(nodeId);
+        context.currentInput = output;
+        break;
 
-        case 'router':
-        case 'condition': // Support legacy name
-          const routeResult = await this.withRetry(() =>
-            this.executeRouterNode(node, childEdges, context, graph.nodeMap, edges, callbacks)
-          );
-          output = `Routed to: ${routeResult.selectedRoute}`;
-          nextNodes = routeResult.nextNodes;
-          break;
+      case 'memory':
+        output = await this.executeMemoryNode(node, context);
+        nextNodes = childEdges.map(c => c.nodeId);
+        context.outputs[nodeId] = output;
+        context.nodeChain.push(nodeId);
+        context.currentInput = output;
+        break;
 
-        case 'parallel':
-          const parallelResult = await this.executeParallelNode(
-            node,
-            childEdges,
-            context,
-            graph,
-            edges,
-            callbacks
-          );
-          output = parallelResult.output;
-          nextNodes = parallelResult.nextNodes;
-          context.history.push({ role: 'assistant', content: output });
-          break;
+      case 'router':
+      case 'condition': // Support legacy name
+        const routeResult = await this.executeRouterNode(node, childEdges, context, graph.nodeMap, edges, callbacks);
+        output = `Routed to: ${routeResult.selectedRoute}`;
+        nextNodes = routeResult.nextNodes;
+        break;
 
-        default:
-          nextNodes = childEdges.map(c => c.nodeId);
-      }
+      case 'parallel':
+        const parallelResult = await this.executeParallelNode(
+          node,
+          childEdges,
+          context,
+          graph,
+          edges,
+          callbacks
+        );
+        output = parallelResult.output;
+        nextNodes = parallelResult.nextNodes;
+        context.session.addMessage({ role: 'assistant', content: output });
+        break;
 
-      callbacks.onNodeFinish(nodeId, output);
-      return { output, nextNodes };
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      callbacks.onNodeError(nodeId, err);
-      throw err;
+      default:
+        nextNodes = childEdges.map(c => c.nodeId);
     }
+
+    callbacks.onNodeFinish(nodeId, output);
+    return { output, nextNodes };
+  }
+
+  /**
+   * Execute a node with retry/error-handling semantics.
+   */
+  private async executeNodeWithErrorHandling(
+    nodeId: string,
+    context: InternalExecutionContext,
+    graph: WorkflowGraph,
+    edges: WorkflowEdge[],
+    callbacks: ExecutionCallbacks
+  ): Promise<{ output: string; nextNodes: string[] }> {
+    const node = graph.nodeMap.get(nodeId);
+    const errorConfig = (node?.data as any)?.errorHandling as NodeErrorConfig | undefined;
+    const retryConfig = errorConfig?.retry;
+    const resolvedRetry: NodeRetryConfig | undefined = retryConfig ?? (
+      this.options.maxRetries !== undefined
+        ? {
+            maxRetries: this.options.maxRetries,
+            baseDelay: this.options.retryDelayMs || DEFAULT_RETRY_DELAY_MS,
+          }
+        : undefined
+    );
+    const errorEdge = edges.find(e => e.source === nodeId && e.sourceHandle === 'error');
+
+    let lastError: ExecutionError | null = null;
+    const retryHistory: Array<{ attempt: number; error: string; timestamp: string }> = [];
+    const maxAttempts = (resolvedRetry?.maxRetries ?? 0) + 1;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await this.executeNodeInternal(nodeId, context, graph, edges, callbacks);
+      } catch (error) {
+        const execError = wrapExecutionError(error, nodeId, attempt, maxAttempts, retryHistory);
+        execError.code = classifyError(error);
+        execError.retry = {
+          attempts: attempt,
+          maxAttempts,
+          history: [...retryHistory, { attempt, error: execError.message, timestamp: new Date().toISOString() }],
+        };
+        lastError = execError;
+
+        const shouldRetry = attempt < maxAttempts && this.shouldRetry(execError, resolvedRetry);
+        if (shouldRetry) {
+          const delay = Math.min(
+            (resolvedRetry?.baseDelay || DEFAULT_RETRY_DELAY_MS) * Math.pow(2, attempt - 1),
+            resolvedRetry?.maxDelay || 30000
+          );
+          await this.sleep(delay);
+          retryHistory.push({
+            attempt,
+            error: execError.message,
+            timestamp: new Date().toISOString(),
+          });
+          continue;
+        }
+
+        const mode = errorConfig?.mode || 'stop';
+
+        if (mode === 'branch' && errorEdge) {
+          context.outputs[`${nodeId}_error`] = JSON.stringify(execError);
+          callbacks.onNodeError(nodeId, execError);
+          return {
+            output: '',
+            nextNodes: [errorEdge.target],
+          };
+        }
+
+        if (mode === 'continue') {
+          callbacks.onNodeError(nodeId, execError);
+          return {
+            output: '',
+            nextNodes: this.getChildNodes(nodeId, edges),
+          };
+        }
+
+        callbacks.onNodeError(nodeId, execError);
+        throw execError;
+      }
+    }
+
+    throw lastError!;
   }
 
   /**
@@ -585,8 +688,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     // Build messages
     const chatMessages: ChatMessageParam[] = [
       { role: 'system', content: systemPrompt + contextInfo },
-      ...context.history.map(h => ({
-        role: h.role as 'user' | 'assistant',
+      ...context.session.messages.map(h => ({
+        role: h.role,
         content: h.content,
       })),
       { role: 'user', content: userContent },
@@ -641,6 +744,57 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     }
 
     return tool.handler(context.currentInput, data.config);
+  }
+
+  /**
+   * Execute a memory node using the configured memory adapter.
+   */
+  private async executeMemoryNode(
+    node: WorkflowNode,
+    context: InternalExecutionContext
+  ): Promise<string> {
+    const data = node.data as MemoryNodeData;
+    const operation = data.operation || 'query';
+    const content = data.text ?? context.currentInput;
+
+    if (operation === 'store') {
+      const source = (data.metadata?.['source'] as MemoryEntry['metadata']['source']) || 'agent';
+      const entry: MemoryEntry = {
+        id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `mem-${Date.now()}`,
+        content,
+        metadata: {
+          timestamp: new Date().toISOString(),
+          source,
+          nodeId: node.id,
+          sessionId: context.session.id,
+          ...data.metadata,
+        },
+      };
+
+      await context.memory.store(entry);
+      return content;
+    }
+
+    const results = await context.memory.query({
+      text: data.text || context.currentInput,
+      limit: data.limit,
+      filter: data.filter,
+      sessionId: context.session.id,
+    });
+
+    if (!results.length) {
+      return data.fallback || 'No memories found.';
+    }
+
+    return results
+      .map(r => {
+        const time = r.metadata.timestamp ? `[${r.metadata.timestamp}] ` : '';
+        const label = r.metadata.nodeId ? `[${r.metadata.nodeId}] ` : '';
+        return `${time}${label}${r.content}`;
+      })
+      .join('\n');
   }
 
   /**
@@ -751,7 +905,6 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
       // Create isolated context for this branch
       const branchContext: InternalExecutionContext = {
         ...context,
-        history: [...context.history],
         outputs: { ...context.outputs },
         nodeChain: [...context.nodeChain],
       };
@@ -772,7 +925,7 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
       }
 
       // Execute the branch node
-      const result = await this.executeNode(
+      const result = await this.executeNodeWithErrorHandling(
         child.nodeId,
         branchContext,
         { ...graph, nodeMap: branchNodeMap },
@@ -926,6 +1079,28 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
   // ==========================================================================
   // Retry Logic
   // ==========================================================================
+
+  private shouldRetry(error: ExecutionError, config?: NodeRetryConfig): boolean {
+    if (!config) return false;
+
+    if (config.skipOn?.includes(error.code)) return false;
+
+    if (config.retryOn?.length && !config.retryOn.includes(error.code)) return false;
+
+    if (error.code === 'VALIDATION') return false;
+
+    return true;
+  }
+
+  private async sleep(ms: number): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  private getChildNodes(nodeId: string, edges: WorkflowEdge[]): string[] {
+    return edges
+      .filter(e => e.source === nodeId && e.sourceHandle !== 'error')
+      .map(e => e.target);
+  }
 
   /**
    * Retry helper with exponential backoff.

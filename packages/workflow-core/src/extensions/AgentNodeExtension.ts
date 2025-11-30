@@ -38,6 +38,12 @@ export const AgentNodeExtension: NodeExtension = {
       dataType: 'string',
       multiple: true,
     },
+    {
+      id: 'error',
+      type: 'output',
+      label: 'Error',
+      dataType: 'string',
+    },
   ],
 
   // Default data for new nodes

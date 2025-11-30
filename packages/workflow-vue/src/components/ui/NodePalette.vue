@@ -37,6 +37,18 @@ const nodeTypes = [
       prompt: 'Combine the outputs into a coherent response.',
     }
   },
+  {
+    type: 'memory',
+    label: 'Memory Node',
+    description: 'Store or query long-term memory',
+    colorVar: '--or3-color-info',
+    defaultData: {
+      label: 'Memory',
+      operation: 'query',
+      limit: 5,
+      fallback: 'No memories found.',
+    }
+  },
 ];
 
 const onDragStart = (event: DragEvent, nodeType: string, defaultData: Record<string, unknown>) => {
@@ -82,6 +94,10 @@ const onDragStart = (event: DragEvent, nodeType: string, defaultData: Record<str
             <circle cx="18" cy="18" r="3"></circle>
             <circle cx="6" cy="6" r="3"></circle>
             <path d="M6 21V9a9 9 0 0 0 9 9"></path>
+          </svg>
+          <svg v-else-if="node.type === 'memory'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="4" y="4" width="16" height="16" rx="3"></rect>
+            <path d="M8 9h8M8 12h8M8 15h6"></path>
           </svg>
         </div>
         <div class="node-info">

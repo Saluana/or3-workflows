@@ -49,6 +49,12 @@ const modelShort = computed(() => {
     </div>
     
     <Handle type="source" :position="Position.Bottom" class="handle" />
+    <Handle
+      type="source"
+      :position="Position.Right"
+      id="error"
+      class="handle error-handle"
+    />
   </NodeWrapper>
 </template>
 
@@ -123,6 +129,15 @@ const modelShort = computed(() => {
 .handle:hover {
   background: var(--or3-color-accent, #8b5cf6) !important;
   border-color: var(--or3-color-accent, #8b5cf6) !important;
+}
+
+.error-handle {
+  border-color: var(--or3-color-error, #ef4444) !important;
+}
+
+.error-handle:hover {
+  background: var(--or3-color-error, #ef4444) !important;
+  border-color: var(--or3-color-error, #ef4444) !important;
 }
 
 @keyframes spin {

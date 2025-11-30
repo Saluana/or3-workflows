@@ -12,59 +12,59 @@ Implementation plan following TipTap's architecture philosophy. Features are bui
 
 _Requirements: 1.1, 1.2, 1.3_
 
--   [ ] Create `packages/workflow-core/src/memory.ts`
+-   [x] Create `packages/workflow-core/src/memory.ts`
 
-    -   [ ] Define `MemoryEntry` interface
-    -   [ ] Define `MemoryQuery` interface
-    -   [ ] Define `MemoryAdapter` interface (minimal: store, query, delete, clear)
-    -   [ ] Implement `InMemoryAdapter` as default
-    -   [ ] Add JSDoc with example implementations (Redis, Postgres, Pinecone)
-    -   [ ] Write unit tests for InMemoryAdapter
+    -   [x] Define `MemoryEntry` interface
+    -   [x] Define `MemoryQuery` interface
+    -   [x] Define `MemoryAdapter` interface (minimal: store, query, delete, clear)
+    -   [x] Implement `InMemoryAdapter` as default
+    -   [x] Add JSDoc with example implementations (Redis, Postgres, Pinecone)
+    -   [x] Write unit tests for InMemoryAdapter
 
--   [ ] Create `packages/workflow-core/src/session.ts`
+-   [x] Create `packages/workflow-core/src/session.ts`
 
-    -   [ ] Define `Session` interface
-    -   [ ] Implement `ExecutionSession` class
-    -   [ ] Add `addMessage()`, `getRecent()`, `clear()` methods
-    -   [ ] Add `messageCount` and `tokenCount` getters
-    -   [ ] Write unit tests
+    -   [x] Define `Session` interface
+    -   [x] Implement `ExecutionSession` class
+    -   [x] Add `addMessage()`, `getRecent()`, `clear()` methods
+    -   [x] Add `messageCount` and `tokenCount` getters
+    -   [x] Write unit tests
 
--   [ ] Integrate into ExecutionContext
+-   [x] Integrate into ExecutionContext
 
-    -   [ ] Add `session: Session` to `ExecutionContext` in `types.ts`
-    -   [ ] Add `memory: MemoryAdapter` to `ExecutionContext`
-    -   [ ] Update `OpenRouterExecutionAdapter` constructor to accept `memory` option
-    -   [ ] Default to `InMemoryAdapter` when not provided
-    -   [ ] Initialize session in `execute()` method
+    -   [x] Add `session: Session` to `ExecutionContext` in `types.ts`
+    -   [x] Add `memory: MemoryAdapter` to `ExecutionContext`
+    -   [x] Update `OpenRouterExecutionAdapter` constructor to accept `memory` option
+    -   [x] Default to `InMemoryAdapter` when not provided
+    -   [x] Initialize session in `execute()` method
 
--   [ ] Update execution flow
-    -   [ ] Auto-add user message to session at execution start
-    -   [ ] Auto-add assistant response to session at execution end
-    -   [ ] Pass session to agent nodes for context building
-    -   [ ] Write integration tests
+-   [x] Update execution flow
+    -   [x] Auto-add user message to session at execution start
+    -   [x] Auto-add assistant response to session at execution end
+    -   [x] Pass session to agent nodes for context building
+    -   [x] Write integration tests
 
 ### 1.2 Memory Node Extension (Optional)
 
 _Requirements: 1.3_
 
--   [ ] Create `packages/workflow-core/src/extensions/MemoryNodeExtension.ts`
+-   [x] Create `packages/workflow-core/src/extensions/MemoryNodeExtension.ts`
 
-    -   [ ] Define `MemoryNodeData` interface (operation: query/store)
-    -   [ ] Implement node extension
-    -   [ ] Add validation
-    -   [ ] Write unit tests
+    -   [x] Define `MemoryNodeData` interface (operation: query/store)
+    -   [x] Implement node extension
+    -   [x] Add validation
+    -   [x] Write unit tests
 
--   [ ] Add Memory node execution
+-   [x] Add Memory node execution
 
-    -   [ ] Add `executeMemoryNode()` to adapter
-    -   [ ] Handle query with configurable limit
-    -   [ ] Handle store with metadata
-    -   [ ] Write integration tests
+    -   [x] Add `executeMemoryNode()` to adapter
+    -   [x] Handle query with configurable limit
+    -   [x] Handle store with metadata
+    -   [x] Write integration tests
 
--   [ ] Create Memory Vue component
-    -   [ ] Create `packages/workflow-vue/src/components/nodes/MemoryNode.vue`
-    -   [ ] Add operation selector
-    -   [ ] Add to NodePalette
+-   [x] Create Memory Vue component
+    -   [x] Create `packages/workflow-vue/src/components/nodes/MemoryNode.vue`
+    -   [x] Add operation selector
+    -   [x] Add to NodePalette
 
 ---
 
@@ -74,58 +74,58 @@ _Requirements: 1.3_
 
 _Requirements: 3.1, 3.2, 3.3_
 
--   [ ] Create `packages/workflow-core/src/errors.ts`
-    -   [ ] Define `NodeRetryConfig` interface
-    -   [ ] Define `ExecutionError` interface (extends Error)
-    -   [ ] Define error codes: `LLM_ERROR`, `TIMEOUT`, `RATE_LIMIT`, `VALIDATION`, `NETWORK`, `UNKNOWN`
-    -   [ ] Define `ErrorHandlingMode` type: `'stop' | 'continue' | 'branch'`
-    -   [ ] Define `NodeErrorConfig` interface
-    -   [ ] Implement `wrapError()` helper
-    -   [ ] Implement `classifyError()` helper
-    -   [ ] Write unit tests
+-   [x] Create `packages/workflow-core/src/errors.ts`
+    -   [x] Define `NodeRetryConfig` interface
+    -   [x] Define `ExecutionError` interface (extends Error)
+    -   [x] Define error codes: `LLM_ERROR`, `TIMEOUT`, `RATE_LIMIT`, `VALIDATION`, `NETWORK`, `UNKNOWN`
+    -   [x] Define `ErrorHandlingMode` type: `'stop' | 'continue' | 'branch'`
+    -   [x] Define `NodeErrorConfig` interface
+    -   [x] Implement `wrapError()` helper
+    -   [x] Implement `classifyError()` helper
+    -   [x] Write unit tests
 
 ### 2.2 Per-Node Retry Configuration
 
 _Requirements: 3.1_
 
--   [ ] Extend node data types
+-   [x] Extend node data types
 
-    -   [ ] Add `errorHandling?: NodeErrorConfig` to `AgentNodeData`
-    -   [ ] Add `errorHandling?: NodeErrorConfig` to `ToolNodeData`
-    -   [ ] Add `errorHandling?: NodeErrorConfig` to `RouterNodeData`
+    -   [x] Add `errorHandling?: NodeErrorConfig` to `AgentNodeData`
+    -   [x] Add `errorHandling?: NodeErrorConfig` to `ToolNodeData`
+    -   [x] Add `errorHandling?: NodeErrorConfig` to `RouterNodeData`
 
--   [ ] Update execution with retry logic
-    -   [ ] Create `executeNodeWithErrorHandling()` wrapper
-    -   [ ] Implement exponential backoff
-    -   [ ] Track retry history in error context
-    -   [ ] Respect `retryOn` and `skipOn` filters
-    -   [ ] Write integration tests
+-   [x] Update execution with retry logic
+    -   [x] Create `executeNodeWithErrorHandling()` wrapper
+    -   [x] Implement exponential backoff
+    -   [x] Track retry history in error context
+    -   [x] Respect `retryOn` and `skipOn` filters
+    -   [x] Write integration tests
 
 ### 2.3 Error Branch Routing
 
 _Requirements: 3.2_
 
--   [ ] Add error output handle to nodes
+-   [x] Add error output handle to nodes
 
-    -   [ ] Update `AgentNodeExtension` outputs to include optional `error` handle
-    -   [ ] Update `ToolNodeExtension` outputs
-    -   [ ] Update `RouterNodeExtension` outputs
+    -   [x] Update `AgentNodeExtension` outputs to include optional `error` handle
+    -   [x] Update `ToolNodeExtension` outputs
+    -   [x] Update `RouterNodeExtension` outputs
 
--   [ ] Implement error branch routing
-    -   [ ] Check for connected error branch in `executeNodeWithErrorHandling()`
-    -   [ ] Route to error branch when `mode: 'branch'`
-    -   [ ] Pass serialized error context to error branch
-    -   [ ] Write integration tests
+-   [x] Implement error branch routing
+    -   [x] Check for connected error branch in `executeNodeWithErrorHandling()`
+    -   [x] Route to error branch when `mode: 'branch'`
+    -   [x] Pass serialized error context to error branch
+    -   [x] Write integration tests
 
 ### 2.4 Error Handling UI
 
 _Requirements: 3.1, 3.2_
 
--   [ ] Update NodeInspector with error config
-    -   [ ] Add "Error Handling" section/tab
-    -   [ ] Add mode selector (stop/continue/branch)
-    -   [ ] Add retry config inputs (maxRetries, baseDelay, maxDelay)
-    -   [ ] Add retryOn error code checkboxes
+-   [x] Update NodeInspector with error config
+    -   [x] Add "Error Handling" section/tab
+    -   [x] Add mode selector (stop/continue/branch)
+    -   [x] Add retry config inputs (maxRetries, baseDelay, maxDelay)
+    -   [x] Add retryOn error code checkboxes
 
 ---
 

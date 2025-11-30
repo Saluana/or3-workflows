@@ -302,3 +302,190 @@ describe('OpenRouterExecutionAdapter - Router Node', () => {
     expect(callbacks.onNodeStart).not.toHaveBeenCalledWith('agent-general');
   });
 });
+
+describe('OpenRouterExecutionAdapter - Memory Node', () => {
+  let adapter: OpenRouterExecutionAdapter;
+  let mockClient: ReturnType<typeof createMockClient>;
+  let callbacks: ExecutionCallbacks;
+
+  beforeEach(() => {
+    mockClient = createMockClient();
+    callbacks = {
+      onNodeStart: vi.fn(),
+      onNodeFinish: vi.fn(),
+      onNodeError: vi.fn(),
+      onToken: vi.fn(),
+      onRouteSelected: vi.fn(),
+    };
+  });
+
+  it('uses adapter to query memory', async () => {
+    const memory = {
+      store: vi.fn(),
+      query: vi.fn(async () => [
+        {
+          id: 'mem-1',
+          content: 'Remember this fact',
+          metadata: { timestamp: new Date().toISOString(), source: 'user' },
+        },
+      ]),
+      delete: vi.fn(),
+      clear: vi.fn(),
+    };
+
+    adapter = new OpenRouterExecutionAdapter(mockClient as any, { memory });
+
+    const workflow: WorkflowData = {
+      meta: { version: '2.0.0', name: 'Memory Query' },
+      nodes: [
+        { id: 'start-1', type: 'start', position: { x: 0, y: 0 }, data: { label: 'Start' } },
+        {
+          id: 'memory-1',
+          type: 'memory',
+          position: { x: 200, y: 0 },
+          data: { label: 'Memory', operation: 'query', limit: 3 },
+        },
+      ],
+      edges: [{ id: 'e1', source: 'start-1', target: 'memory-1' }],
+    };
+
+    const result = await adapter.execute(workflow, { text: 'fact' }, callbacks);
+
+    expect(result.success).toBe(true);
+    expect(memory.query).toHaveBeenCalled();
+    expect(result.output).toContain('Remember this fact');
+  });
+
+  it('stores input via memory node', async () => {
+    const memory = {
+      store: vi.fn(async () => {}),
+      query: vi.fn(),
+      delete: vi.fn(),
+      clear: vi.fn(),
+    };
+
+    adapter = new OpenRouterExecutionAdapter(mockClient as any, { memory });
+
+    const workflow: WorkflowData = {
+      meta: { version: '2.0.0', name: 'Memory Store' },
+      nodes: [
+        { id: 'start-1', type: 'start', position: { x: 0, y: 0 }, data: { label: 'Start' } },
+        {
+          id: 'memory-1',
+          type: 'memory',
+          position: { x: 200, y: 0 },
+          data: { label: 'Save', operation: 'store' },
+        },
+      ],
+      edges: [{ id: 'e1', source: 'start-1', target: 'memory-1' }],
+    };
+
+    const result = await adapter.execute(workflow, { text: 'store this' }, callbacks);
+    expect(result.output).toBe('store this');
+    expect(memory.store).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: 'store this',
+        metadata: expect.objectContaining({ nodeId: 'memory-1', sessionId: expect.any(String) }),
+      })
+    );
+  });
+});
+
+describe('OpenRouterExecutionAdapter - Error Handling', () => {
+  let adapter: OpenRouterExecutionAdapter;
+  let mockClient: ReturnType<typeof createMockClient>;
+  let callbacks: ExecutionCallbacks;
+
+  beforeEach(() => {
+    mockClient = createMockClient();
+    callbacks = {
+      onNodeStart: vi.fn(),
+      onNodeFinish: vi.fn(),
+      onNodeError: vi.fn(),
+      onToken: vi.fn(),
+      onRouteSelected: vi.fn(),
+    };
+  });
+
+  it('branches to error handle when configured', async () => {
+    adapter = new OpenRouterExecutionAdapter(mockClient as any, {
+      onToolCall: async (toolId: string) => {
+        if (toolId === 'fail') {
+          throw new Error('boom');
+        }
+        return 'recovered';
+      },
+    });
+
+    const workflow: WorkflowData = {
+      meta: { version: '2.0.0', name: 'Error Branch' },
+      nodes: [
+        { id: 'start-1', type: 'start', position: { x: 0, y: 0 }, data: { label: 'Start' } },
+        {
+          id: 'tool-1',
+          type: 'tool',
+          position: { x: 200, y: 0 },
+          data: { label: 'Primary', toolId: 'fail', errorHandling: { mode: 'branch' } },
+        },
+        {
+          id: 'tool-2',
+          type: 'tool',
+          position: { x: 400, y: 0 },
+          data: { label: 'Recovery', toolId: 'recover' },
+        },
+      ],
+      edges: [
+        { id: 'e1', source: 'start-1', target: 'tool-1' },
+        { id: 'e2', source: 'tool-1', target: 'tool-2', sourceHandle: 'error' },
+      ],
+    };
+
+    const result = await adapter.execute(workflow, { text: 'go' }, callbacks);
+    expect(result.success).toBe(true);
+    expect(result.output).toBe('recovered');
+    expect(callbacks.onNodeError).toHaveBeenCalledWith(
+      'tool-1',
+      expect.objectContaining({ message: 'boom' })
+    );
+  });
+
+  it('retries nodes according to config', async () => {
+    let attempts = 0;
+    adapter = new OpenRouterExecutionAdapter(mockClient as any, {
+      onToolCall: async () => {
+        attempts++;
+        if (attempts === 1) {
+          throw new Error('temporary');
+        }
+        return 'ok';
+      },
+    });
+
+    const workflow: WorkflowData = {
+      meta: { version: '2.0.0', name: 'Retry Test' },
+      nodes: [
+        { id: 'start-1', type: 'start', position: { x: 0, y: 0 }, data: { label: 'Start' } },
+        {
+          id: 'tool-1',
+          type: 'tool',
+          position: { x: 200, y: 0 },
+          data: {
+            label: 'Flaky',
+            toolId: 'flaky',
+            errorHandling: {
+              mode: 'stop',
+              retry: { maxRetries: 1, baseDelay: 0 },
+            },
+          },
+        },
+      ],
+      edges: [{ id: 'e1', source: 'start-1', target: 'tool-1' }],
+    };
+
+    const result = await adapter.execute(workflow, { text: 'retry' }, callbacks);
+    expect(result.success).toBe(true);
+    expect(result.output).toBe('ok');
+    expect(attempts).toBe(2);
+    expect(callbacks.onNodeError).not.toHaveBeenCalled();
+  });
+});

@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, watch, watchEffect } from 'vue';
-import { WorkflowEditor, WorkflowNode } from '@or3/workflow-core';
+import {
+    WorkflowEditor,
+    WorkflowNode,
+    type NodeErrorConfig,
+    type NodeRetryConfig,
+} from '@or3/workflow-core';
 
 // Type guard for configurable node data
 interface ConfigurableNodeData {
@@ -36,7 +41,7 @@ const emit = defineEmits<{
 }>();
 
 const selectedNode = ref<WorkflowNode | null>(null);
-const activeTab = ref<'prompt' | 'model' | 'tools'>('prompt');
+const activeTab = ref<'prompt' | 'model' | 'tools' | 'errors'>('prompt');
 
 // Available models
 const availableModels = [
@@ -129,6 +134,11 @@ const updateSelection = () => {
         // Sync tools from node data using type guard
         if (node) {
             selectedTools.value = getToolsArray(node.data);
+            if (node.type === 'tool') {
+                activeTab.value = hasErrorHandling.value ? 'errors' : 'prompt';
+            } else {
+                activeTab.value = 'prompt';
+            }
         }
     } else {
         selectedNode.value = null;
@@ -162,6 +172,7 @@ watchEffect((onCleanup) => {
 const isAgentNode = computed(() => selectedNode.value?.type === 'agent');
 const isRouterNode = computed(() => selectedNode.value?.type === 'router');
 const isParallelNode = computed(() => selectedNode.value?.type === 'parallel');
+const isToolNode = computed(() => selectedNode.value?.type === 'tool');
 const isStartNode = computed(() => selectedNode.value?.type === 'start');
 const canDelete = computed(
     () => selectedNode.value && selectedNode.value.type !== 'start'
@@ -169,11 +180,38 @@ const canDelete = computed(
 const isConfigurable = computed(
     () => isAgentNode.value || isRouterNode.value || isParallelNode.value
 );
+const hasErrorHandling = computed(
+    () => isAgentNode.value || isRouterNode.value || isToolNode.value
+);
 
 const nodeData = computed<ConfigurableNodeData>(() => {
     const data = selectedNode.value?.data;
     return isConfigurableData(data) ? data : { label: 'Unknown' };
 });
+
+const errorHandling = computed<NodeErrorConfig>(() => {
+    const data = selectedNode.value?.data as { errorHandling?: NodeErrorConfig } | undefined;
+    return data?.errorHandling ?? { mode: 'stop' };
+});
+
+const retryConfig = computed<NodeRetryConfig>(() => {
+    const retry = errorHandling.value.retry || {};
+    return {
+        maxRetries: retry.maxRetries ?? 0,
+        baseDelay: retry.baseDelay ?? 1000,
+        maxDelay: retry.maxDelay,
+        retryOn: retry.retryOn ?? [],
+        skipOn: retry.skipOn,
+    };
+});
+
+const errorCodes = [
+    { id: 'RATE_LIMIT', label: 'Rate Limit' },
+    { id: 'TIMEOUT', label: 'Timeout' },
+    { id: 'NETWORK', label: 'Network' },
+    { id: 'LLM_ERROR', label: 'LLM Error' },
+    { id: 'VALIDATION', label: 'Validation' },
+];
 
 // Update handlers with debounce
 let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -214,6 +252,48 @@ const toggleTool = (toolId: string) => {
     props.editor.commands.updateNodeData(selectedNode.value.id, {
         tools: [...selectedTools.value],
     });
+};
+
+const updateErrorHandling = (partial: Partial<NodeErrorConfig>) => {
+    if (!selectedNode.value) return;
+    const current = errorHandling.value;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        errorHandling: {
+            ...current,
+            ...partial,
+        },
+    });
+};
+
+const updateRetryConfig = (changes: Partial<NodeRetryConfig>) => {
+    updateErrorHandling({
+        retry: {
+            ...retryConfig.value,
+            ...changes,
+        },
+    });
+};
+
+const updateErrorMode = (mode: NodeErrorConfig['mode']) => {
+    updateErrorHandling({ mode });
+};
+
+const toggleRetryOn = (code: string) => {
+    const current = retryConfig.value.retryOn || [];
+    const updated = current.includes(code)
+        ? current.filter((c) => c !== code)
+        : [...current, code];
+    updateRetryConfig({ retryOn: updated });
+};
+
+const onRetryNumberChange = (
+    field: 'maxRetries' | 'baseDelay' | 'maxDelay',
+    event: Event
+) => {
+    const value = Number((event.target as HTMLInputElement).value);
+    updateRetryConfig({
+        [field]: Number.isFinite(value) ? value : undefined,
+    } as Partial<NodeRetryConfig>);
 };
 
 const handleDelete = () => {
@@ -315,12 +395,13 @@ const handleDelete = () => {
             </button>
         </div>
 
-        <!-- Tabs for Agent nodes -->
-        <div v-if="isConfigurable" class="tabs">
+        <!-- Tabs for Agent/Router/Parallel nodes -->
+        <div v-if="isConfigurable || hasErrorHandling" class="tabs">
             <button
                 class="tab"
                 :class="{ active: activeTab === 'prompt' }"
                 @click="activeTab = 'prompt'"
+                v-if="isConfigurable"
             >
                 <svg
                     viewBox="0 0 24 24"
@@ -338,6 +419,7 @@ const handleDelete = () => {
                 class="tab"
                 :class="{ active: activeTab === 'model' }"
                 @click="activeTab = 'model'"
+                v-if="isConfigurable"
             >
                 <svg
                     viewBox="0 0 24 24"
@@ -386,12 +468,32 @@ const handleDelete = () => {
                     selectedTools.length
                 }}</span>
             </button>
+            <button
+                v-if="hasErrorHandling"
+                class="tab"
+                :class="{ active: activeTab === 'errors' }"
+                @click="activeTab = 'errors'"
+            >
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                >
+                    <path
+                        d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                    ></path>
+                    <line x1="12" y1="9" x2="12" y2="13"></line>
+                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+                Errors
+            </button>
         </div>
 
         <!-- Tab Content -->
-        <div v-if="isConfigurable" class="tab-content">
+        <div v-if="isConfigurable || hasErrorHandling" class="tab-content">
             <!-- Prompt Tab -->
-            <div v-if="activeTab === 'prompt'" class="prompt-tab">
+            <div v-if="activeTab === 'prompt' && isConfigurable" class="prompt-tab">
                 <label class="field-label">
                     {{
                         isRouterNode
@@ -505,6 +607,93 @@ const handleDelete = () => {
                         </span>
                     </div>
                 </div>
+            </div>
+
+            <!-- Error Handling Tab -->
+            <div
+                v-if="activeTab === 'errors' && hasErrorHandling"
+                class="errors-tab"
+            >
+                <label class="field-label">Error handling mode</label>
+                <div class="mode-buttons">
+                    <button
+                        class="mode-button"
+                        :class="{ active: errorHandling.mode === 'stop' }"
+                        @click="updateErrorMode('stop')"
+                    >
+                        Stop on error
+                    </button>
+                    <button
+                        class="mode-button"
+                        :class="{ active: errorHandling.mode === 'continue' }"
+                        @click="updateErrorMode('continue')"
+                    >
+                        Continue
+                    </button>
+                    <button
+                        class="mode-button"
+                        :class="{ active: errorHandling.mode === 'branch' }"
+                        @click="updateErrorMode('branch')"
+                    >
+                        Branch to error
+                    </button>
+                </div>
+
+                <div class="retry-grid">
+                    <div class="field-group">
+                        <label class="field-label">Max retries</label>
+                        <input
+                            type="number"
+                            min="0"
+                            class="text-input"
+                            :value="retryConfig.maxRetries"
+                            @input="onRetryNumberChange('maxRetries', $event)"
+                        />
+                    </div>
+                    <div class="field-group">
+                        <label class="field-label">Base delay (ms)</label>
+                        <input
+                            type="number"
+                            min="0"
+                            class="text-input"
+                            :value="retryConfig.baseDelay"
+                            @input="onRetryNumberChange('baseDelay', $event)"
+                        />
+                    </div>
+                    <div class="field-group">
+                        <label class="field-label">Max delay (ms)</label>
+                        <input
+                            type="number"
+                            min="0"
+                            class="text-input"
+                            :value="retryConfig.maxDelay ?? ''"
+                            @input="onRetryNumberChange('maxDelay', $event)"
+                        />
+                    </div>
+                </div>
+
+                <div class="checkbox-group">
+                    <label class="field-label">Retry on codes</label>
+                    <div class="checkboxes">
+                        <label
+                            v-for="code in errorCodes"
+                            :key="code.id"
+                            class="checkbox-item"
+                        >
+                            <input
+                                type="checkbox"
+                                :checked="(retryConfig.retryOn || []).includes(code.id)"
+                                @change="toggleRetryOn(code.id)"
+                            />
+                            <span>{{ code.label }}</span>
+                        </label>
+                    </div>
+                </div>
+
+                <p class="field-hint">
+                    Branch mode sends errors to the "error" handle if connected.
+                    Continue mode logs the error and moves forward.
+                </p>
             </div>
         </div>
 
@@ -850,6 +1039,85 @@ const handleDelete = () => {
     border-radius: var(--or3-radius-sm, 6px);
     font-size: 12px;
     font-weight: 500;
+}
+
+/* Errors Tab */
+.errors-tab {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-md, 16px);
+}
+
+.mode-buttons {
+    display: flex;
+    gap: var(--or3-spacing-xs, 4px);
+    flex-wrap: wrap;
+}
+
+.mode-button {
+    padding: 6px 10px;
+    border-radius: var(--or3-radius-sm, 6px);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.03));
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.mode-button.active {
+    border-color: var(--or3-color-warning, #f59e0b);
+    color: var(--or3-color-warning, #f59e0b);
+    background: color-mix(
+        in srgb,
+        var(--or3-color-warning, #f59e0b) 12%,
+        transparent
+    );
+}
+
+.retry-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: var(--or3-spacing-sm, 8px);
+}
+
+.field-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-xs, 4px);
+}
+
+.text-input {
+    width: 100%;
+    padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 12px);
+    background: var(--or3-color-bg-tertiary, #1a1a24);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--or3-radius-md, 10px);
+    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
+    font-size: 13px;
+}
+
+.text-input:focus {
+    outline: none;
+    border-color: var(--or3-color-warning, #f59e0b);
+}
+
+.checkbox-group .checkboxes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--or3-spacing-xs, 4px);
+}
+
+.checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--or3-color-bg-tertiary, #1a1a24);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--or3-radius-sm, 6px);
+    font-size: 12px;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
 }
 
 .chip-remove {

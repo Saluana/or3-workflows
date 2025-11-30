@@ -9,6 +9,7 @@ export {
   type RouterNodeData,
   type ParallelNodeData,
   type ToolNodeData,
+  type MemoryNodeData,
   type StartNodeData,
   type ExecutionInput,
   type ExecutionResult,
@@ -26,12 +27,26 @@ export {
   isRouterNodeData,
   isParallelNodeData,
   isToolNodeData,
+  isMemoryNodeData,
   isStartNodeData,
   // Utility functions
   generateWorkflowId,
   isVersionCompatible,
   parseVersion,
 } from './types';
+export {
+  type MemoryAdapter,
+  type MemoryEntry,
+  type MemoryQuery,
+  InMemoryAdapter,
+} from './memory';
+export { type Session, ExecutionSession } from './session';
+export {
+  type NodeRetryConfig,
+  type ExecutionError,
+  type ErrorHandlingMode,
+  type NodeErrorConfig,
+} from './errors';
 
 // Editor and state management
 export { createWorkflowEditor, WorkflowEditor, type EditorOptions } from './editor';
@@ -54,4 +69,5 @@ export {
   ToolRegistry,
   toolRegistry,
   type RegisteredTool,
+  MemoryNodeExtension,
 } from './extensions';

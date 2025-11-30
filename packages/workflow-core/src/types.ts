@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import type { MemoryAdapter } from './memory';
+import type { Session } from './session';
+import type { NodeErrorConfig } from './errors';
 
 export const SCHEMA_VERSION = '2.0.0';
 
@@ -131,7 +134,8 @@ export type NodeData =
   | AgentNodeData
   | RouterNodeData
   | ParallelNodeData
-  | ToolNodeData;
+  | ToolNodeData
+  | MemoryNodeData;
 
 // ============================================================================
 // Type Guards for Node Data
@@ -166,11 +170,18 @@ export function isToolNodeData(data: NodeData): data is ToolNodeData {
 }
 
 /**
+ * Type guard to check if node data is MemoryNodeData.
+ */
+export function isMemoryNodeData(data: NodeData): data is MemoryNodeData {
+  return 'operation' in data && 'fallback' in data;
+}
+
+/**
  * Type guard to check if node data is StartNodeData.
  * Start nodes have minimal data - only label and optional status.
  */
 export function isStartNodeData(data: NodeData): data is StartNodeData {
-  return !isAgentNodeData(data) && !isRouterNodeData(data) && !isParallelNodeData(data) && !isToolNodeData(data);
+  return !isAgentNodeData(data) && !isRouterNodeData(data) && !isParallelNodeData(data) && !isToolNodeData(data) && !isMemoryNodeData(data);
 }
 
 /**
@@ -209,6 +220,7 @@ export interface AgentNodeData extends BaseNodeData {
   acceptsAudio?: boolean;
   acceptsVideo?: boolean;
   acceptsFiles?: boolean;
+  errorHandling?: NodeErrorConfig;
 }
 
 /**
@@ -219,6 +231,7 @@ export interface RouterNodeData extends BaseNodeData {
   model?: string;
   prompt?: string;
   routes: RouteDefinition[];
+  errorHandling?: NodeErrorConfig;
 }
 
 /**
@@ -267,6 +280,20 @@ export interface BranchDefinition {
 export interface ToolNodeData extends BaseNodeData {
   toolId: string;
   config?: Record<string, any>;
+  errorHandling?: NodeErrorConfig;
+}
+
+/**
+ * Data for a Memory node.
+ * Supports querying or storing long-term memories via configured adapters.
+ */
+export interface MemoryNodeData extends BaseNodeData {
+  operation: 'query' | 'store';
+  text?: string;
+  limit?: number;
+  filter?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  fallback?: string;
 }
 
 /**
@@ -510,6 +537,10 @@ export interface ExecutionOptions {
   maxIterations?: number;
   /** Global tool call handler */
   onToolCall?: (name: string, args: any) => Promise<string>;
+  /** Pluggable long-term memory adapter */
+  memory?: MemoryAdapter;
+  /** Provide an existing session ID to reuse */
+  sessionId?: string;
 }
 
 /** Tool definition in OpenRouter/OpenAI format */
@@ -541,6 +572,10 @@ export interface ExecutionContext {
   nodeChain: string[];
   /** Abort signal for cancellation */
   signal: AbortSignal;
+  /** Current session (in-memory conversation history) */
+  session: Session;
+  /** Long-term memory adapter (developer-provided or default) */
+  memory: MemoryAdapter;
 }
 
 /** Chat message for conversation history */
