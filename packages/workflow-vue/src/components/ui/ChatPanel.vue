@@ -25,10 +25,22 @@ const emit = defineEmits<{
   (e: 'clear'): void;
 }>();
 
-// Use provided state or fall back to shared singleton for backward compatibility
-const executionStateInternal = computed(() => props.executionState ?? useExecutionState());
-const state = computed(() => executionStateInternal.value.state);
-const reset = () => executionStateInternal.value.reset();
+// Initialize fallback state lazily
+let cachedFallback: UseExecutionStateReturn | null = null;
+const getExecutionState = (): UseExecutionStateReturn => {
+  if (props.executionState) {
+    return props.executionState;
+  }
+  if (!cachedFallback) {
+    cachedFallback = useExecutionState();
+  }
+  return cachedFallback;
+};
+
+// Use computed to keep reactivity with the chosen state
+const activeState = computed(() => getExecutionState());
+const state = computed(() => activeState.value.state);
+const reset = () => activeState.value.reset();
 
 const input = ref('');
 const messagesContainer = ref<HTMLElement | null>(null);

@@ -30,12 +30,9 @@ export class LocalStorageAdapter implements StorageAdapter {
   private storageKey: string;
 
   constructor(storageKey: string = DEFAULT_STORAGE_KEY) {
-    // Check for localStorage availability - works in browser and when mocked in tests
-    try {
-      if (typeof localStorage === 'undefined') {
-        throw new Error('localStorage is not available');
-      }
-    } catch {
+    // Check for localStorage availability
+    // Using typeof check to avoid ReferenceError in environments where localStorage is not defined
+    if (typeof localStorage === 'undefined') {
       throw new Error(
         'LocalStorageAdapter is browser-only. For Node.js/SSR, implement a custom StorageAdapter.'
       );
@@ -281,12 +278,9 @@ export class IndexedDBAdapter implements StorageAdapter {
   private db: IDBDatabase | null = null;
 
   constructor(dbName: string = 'or3-workflows', storeName: string = 'workflows') {
-    // Check for indexedDB availability - works in browser and when mocked in tests
-    try {
-      if (typeof indexedDB === 'undefined') {
-        throw new Error('indexedDB is not available');
-      }
-    } catch {
+    // Check for indexedDB availability
+    // Using typeof check to avoid ReferenceError in environments where indexedDB is not defined
+    if (typeof indexedDB === 'undefined') {
       throw new Error(
         'IndexedDBAdapter is browser-only. For Node.js/SSR, implement a custom StorageAdapter.'
       );
