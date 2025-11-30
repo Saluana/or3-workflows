@@ -100,7 +100,16 @@ export const SubflowExtension: NodeExtension = {
     ): Promise<{ output: string; nextNodes: string[] }> {
         const data = node.data as SubflowNodeData;
 
-        // 1. Get registry from context
+        // 1. Check subflow depth limit
+        const currentDepth = context.subflowDepth ?? 0;
+        const maxDepth = context.maxSubflowDepth ?? 10;
+        if (currentDepth >= maxDepth) {
+            throw new Error(
+                `Maximum subflow depth (${maxDepth}) exceeded. Check for recursive subflows.`
+            );
+        }
+
+        // 2. Get registry from context
         const registry = context.subflowRegistry;
         if (!registry) {
             throw new Error(
@@ -108,7 +117,7 @@ export const SubflowExtension: NodeExtension = {
             );
         }
 
-        // 2. Get subflow definition
+        // 3. Get subflow definition
         const subflow = registry.get(data.subflowId);
         if (!subflow) {
             throw new Error(
@@ -122,7 +131,7 @@ export const SubflowExtension: NodeExtension = {
             );
         }
 
-        // 3. Validate input mappings
+        // 4. Validate input mappings
         const mappingValidation = validateInputMappings(
             subflow,
             data.inputMappings || {}
@@ -135,7 +144,7 @@ export const SubflowExtension: NodeExtension = {
             );
         }
 
-        // 4. Resolve input values
+        // 5. Resolve input values
         const resolvedInputs: Record<string, unknown> = {};
         for (const input of subflow.inputs) {
             const mapping = data.inputMappings?.[input.id];
@@ -175,21 +184,32 @@ export const SubflowExtension: NodeExtension = {
             }
         }
 
-        // 5. Prepare subflow input
+        // 6. Prepare subflow input
         const primaryInput = subflow.inputs[0];
         const subflowInputText = primaryInput
             ? String(resolvedInputs[primaryInput.id] ?? context.input)
             : context.input;
 
-        // 6. Execute subflow
+        // 7. Execute subflow with session sharing and depth tracking
         try {
+            // Build execution options for the subflow
+            const subflowOptions: Record<string, unknown> = {
+                // Track depth for recursive subflow protection
+                _subflowDepth: currentDepth + 1,
+            };
+
+            // Share session if configured
+            if (data.shareSession) {
+                subflowOptions.sessionId = context.sessionId;
+            }
+
             const subflowResult = await context.executeWorkflow(
                 subflow.workflow,
                 {
                     text: subflowInputText,
                     attachments: context.attachments,
-                }
-                // We might want to pass options here, e.g., limiting depth
+                },
+                subflowOptions
             );
 
             const output = subflowResult.output ?? '';

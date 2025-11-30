@@ -84,7 +84,7 @@ export const AgentNodeExtension: NodeExtension = {
         }
 
         const data = node.data as AgentNodeData;
-        const model = data.model || DEFAULT_MODEL;
+        const model = data.model || context.defaultModel || DEFAULT_MODEL;
         const systemPrompt = data.prompt || `You are a helpful assistant named ${data.label}.`;
 
         // Check model capabilities if provider available
@@ -150,11 +150,29 @@ export const AgentNodeExtension: NodeExtension = {
         }
 
         // Construct messages
+        // Check if history already ends with the same user message to avoid duplication
+        const lastMessage = context.history[context.history.length - 1];
+        const inputContentStr = typeof userContent === 'string' 
+            ? userContent 
+            : JSON.stringify(userContent);
+        const lastMessageContentStr = lastMessage 
+            ? (typeof lastMessage.content === 'string' 
+                ? lastMessage.content 
+                : JSON.stringify(lastMessage.content))
+            : '';
+        const isDuplicateUserMessage = 
+            lastMessage?.role === 'user' && 
+            lastMessageContentStr === inputContentStr;
+
         const messages: ChatMessage[] = [
-            { role: 'system', content: systemPrompt + contextInfo },
+            { role: 'system' as const, content: systemPrompt + contextInfo },
             ...context.history,
-            { role: 'user', content: userContent as any },
         ];
+        
+        // Only add user message if it's not already the last message in history
+        if (!isDuplicateUserMessage) {
+            messages.push({ role: 'user' as const, content: userContent as any });
+        }
 
         // Call LLM with streaming
         const result = await provider.chat(model, messages, {

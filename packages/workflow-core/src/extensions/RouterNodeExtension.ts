@@ -116,7 +116,7 @@ export const RouterNodeExtension: NodeExtension = {
         });
 
         // Use provided model or fall back to default
-        const model = data.model || DEFAULT_MODEL;
+        const model = data.model || context.defaultModel || DEFAULT_MODEL;
 
         // LLM-based routing
         if (!provider) {

@@ -14,6 +14,7 @@ import type {
     NodeExtension,
     LLMProvider,
     ExecutionContext,
+    ChatMessage,
 } from './types';
 import {
     AgentNodeExtension,
@@ -43,6 +44,16 @@ import {
     generateHITLRequestId,
     getDefaultApprovalOptions,
 } from './hitl';
+import {
+    ApproximateTokenCounter,
+    countMessageTokens,
+    calculateThreshold,
+    splitMessagesForCompaction,
+    buildSummarizationPrompt,
+    createSummaryMessage,
+    type CompactionResult,
+    type TokenCounter,
+} from './compaction';
 
 // ============================================================================
 // Constants
@@ -129,6 +140,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     private abortController: AbortController | null = null;
     private running = false;
     private memory: MemoryAdapter;
+    private tokenCounter: TokenCounter;
 
     /**
      * Create a new OpenRouterExecutionAdapter.
@@ -161,6 +173,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             ...options,
         };
         this.memory = this.options.memory || new InMemoryAdapter();
+        this.tokenCounter = this.options.tokenCounter || new ApproximateTokenCounter();
     }
 
     private isLLMProvider(obj: any): obj is LLMProvider {
@@ -480,10 +493,33 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             );
         }
 
+        // Apply context compaction for nodes that use LLM with history
+        let historyMessages = context.session.messages;
+        const llmNodeTypes = ['agent', 'router', 'whileLoop'];
+        if (llmNodeTypes.includes(node.type) && this.options.compaction) {
+            const nodeData = node.data as unknown as Record<string, unknown>;
+            const model =
+                (nodeData.model as string) ||
+                (nodeData.conditionModel as string) ||
+                this.options.defaultModel ||
+                DEFAULT_MODEL;
+            const compactionResult = await this.compactHistoryIfNeeded(
+                historyMessages,
+                model,
+                callbacks
+            );
+            historyMessages = compactionResult.messages;
+            // Update session messages if compacted
+            if (compactionResult.result?.compacted) {
+                context.session.messages.length = 0;
+                context.session.messages.push(...historyMessages);
+            }
+        }
+
         // Construct ExecutionContext for extension
         const executionContext: ExecutionContext = {
             input: context.currentInput,
-            history: context.session.messages,
+            history: historyMessages,
             memory: this.memory,
             attachments: context.attachments,
             outputs: context.outputs,
@@ -492,6 +528,9 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             sessionId: context.session.id,
             customEvaluators: this.options.customEvaluators,
             debug: this.options.debug,
+            defaultModel: this.options.defaultModel,
+            subflowDepth: this.options._subflowDepth ?? 0,
+            maxSubflowDepth: this.options.maxSubflowDepth ?? 10,
 
             onToken: (token: string) => {
                 callbacks.onToken(nodeId, token);
@@ -1229,5 +1268,91 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         } catch {
             return JSON.stringify({ message: error.message, code: error.code });
         }
+    }
+
+    /**
+     * Compact conversation history if needed based on compaction configuration.
+     * Returns the compacted messages and result if compaction was performed.
+     */
+    private async compactHistoryIfNeeded(
+        messages: ChatMessage[],
+        model: string,
+        callbacks?: ExecutionCallbacks
+    ): Promise<{ messages: ChatMessage[]; result?: CompactionResult }> {
+        const config = this.options.compaction;
+        if (!config) {
+            return { messages };
+        }
+
+        const threshold = calculateThreshold(config, model, this.tokenCounter);
+        const currentTokens = countMessageTokens(messages, this.tokenCounter);
+
+        // No compaction needed if under threshold
+        if (currentTokens <= threshold) {
+            return { messages };
+        }
+
+        const { toPreserve, toCompact } = splitMessagesForCompaction(
+            messages,
+            config.preserveRecent
+        );
+
+        // No messages to compact
+        if (toCompact.length === 0) {
+            return { messages };
+        }
+
+        let compactedMessages: ChatMessage[];
+        let summary: string | undefined;
+
+        if (config.strategy === 'truncate') {
+            // Simply drop older messages
+            compactedMessages = toPreserve;
+        } else if (config.strategy === 'custom' && config.customCompactor) {
+            // Use custom compactor
+            compactedMessages = await config.customCompactor(
+                messages,
+                threshold
+            );
+        } else {
+            // Default: summarize strategy
+            const summarizeModel = config.summarizeModel || model;
+            const prompt = buildSummarizationPrompt(toCompact, config);
+
+            const summarizationResult = await this.provider.chat(
+                summarizeModel,
+                [
+                    {
+                        role: 'system',
+                        content:
+                            'You are a helpful assistant that summarizes conversation history concisely.',
+                    },
+                    { role: 'user', content: prompt },
+                ],
+                { temperature: 0.3, maxTokens: 500 }
+            );
+
+            summary = summarizationResult.content || '';
+            const summaryMessage = createSummaryMessage(summary);
+            compactedMessages = [summaryMessage, ...toPreserve];
+        }
+
+        const tokensAfter = countMessageTokens(compactedMessages, this.tokenCounter);
+
+        const result: CompactionResult = {
+            compacted: true,
+            messages: compactedMessages,
+            tokensBefore: currentTokens,
+            tokensAfter,
+            messagesCompacted: toCompact.length,
+            summary,
+        };
+
+        // Invoke callback if provided
+        if (callbacks?.onContextCompacted) {
+            callbacks.onContextCompacted(result);
+        }
+
+        return { messages: compactedMessages, result };
     }
 }

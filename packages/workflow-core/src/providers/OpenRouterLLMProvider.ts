@@ -114,8 +114,10 @@ export class OpenRouterLLMProvider implements LLMProvider {
                         const current = toolCallsMap.get(index);
                         if (toolCall.id) current.id = toolCall.id;
                         if (toolCall.type) current.type = toolCall.type;
+                        // Tool names should replace, not concatenate - they're sent once
                         if (toolCall.function?.name)
-                            current.function.name += toolCall.function.name;
+                            current.function.name = toolCall.function.name;
+                        // Arguments are streamed in chunks and should be concatenated
                         if (toolCall.function?.arguments)
                             current.function.arguments +=
                                 toolCall.function.arguments;

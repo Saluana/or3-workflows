@@ -820,6 +820,11 @@ export interface ExecutionOptions {
      * When false (default), noisy logs are suppressed to reduce console output and PII exposure.
      */
     debug?: boolean;
+    /**
+     * Internal: Current subflow depth, used by subflow execution to track nesting.
+     * @internal
+     */
+    _subflowDepth?: number;
 }
 
 /** Tool definition in OpenRouter/OpenAI format */
@@ -892,6 +897,12 @@ export interface ExecutionContext {
     >;
     /** Enable debug logging for LLM calls and routing decisions */
     debug?: boolean;
+    /** Default model to use when node doesn't specify one */
+    defaultModel?: string;
+    /** Current subflow nesting depth (for enforcing maxSubflowDepth) */
+    subflowDepth?: number;
+    /** Maximum subflow nesting depth (from ExecutionOptions) */
+    maxSubflowDepth?: number;
 }
 
 /** Chat message for conversation history */
