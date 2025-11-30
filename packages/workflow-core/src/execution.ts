@@ -395,6 +395,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             };
         } finally {
             this.running = false;
+            // Clear loop states to prevent stale state on re-execution
+            this.loopStates.clear();
         }
     }
 
@@ -1118,6 +1120,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
     /**
      * Wait for HITL response with optional timeout.
+     * Respects abort signal to cancel waiting when execution is stopped.
      */
     private async waitForHITL(
         request: HITLRequest,
@@ -1129,9 +1132,25 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             );
         }
 
+        // Create abort promise that rejects when execution is cancelled
+        const abortPromise = new Promise<HITLResponse>((_, reject) => {
+            const signal = this.abortController?.signal;
+            if (signal?.aborted) {
+                reject(new Error('Workflow cancelled'));
+                return;
+            }
+            const onAbort = () => reject(new Error('Workflow cancelled'));
+            signal?.addEventListener('abort', onAbort, { once: true });
+        });
+
+        const promises: Promise<HITLResponse>[] = [
+            this.options.onHITLRequest(request),
+            abortPromise,
+        ];
+
         if (config.timeout && config.timeout > 0) {
             const timeoutPromise = new Promise<HITLResponse>((resolve) => {
-                setTimeout(() => {
+                const timeoutId = setTimeout(() => {
                     const defaultAction = config.defaultAction || 'reject';
                     resolve({
                         requestId: request.id,
@@ -1144,15 +1163,20 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                         respondedAt: new Date().toISOString(),
                     });
                 }, config.timeout);
-            });
 
-            return Promise.race([
-                this.options.onHITLRequest(request),
-                timeoutPromise,
-            ]);
+                // Clear timeout if execution is aborted
+                this.abortController?.signal.addEventListener(
+                    'abort',
+                    () => {
+                        clearTimeout(timeoutId);
+                    },
+                    { once: true }
+                );
+            });
+            promises.push(timeoutPromise);
         }
 
-        return this.options.onHITLRequest(request);
+        return Promise.race(promises);
     }
 
     // ==========================================================================

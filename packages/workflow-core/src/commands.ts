@@ -28,6 +28,17 @@ export class CommandManager {
         this.editor = editor;
     }
 
+    /**
+     * Clean up pending timeouts. Call before destroying the editor.
+     */
+    public dispose(): void {
+        if (this.historyTimeout) {
+            clearTimeout(this.historyTimeout);
+            this.historyTimeout = null;
+        }
+        this.pendingHistoryPush = false;
+    }
+
     // Node operations
     public createNode(
         type: string,

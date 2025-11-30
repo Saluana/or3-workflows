@@ -11,7 +11,7 @@ import {
     EdgeLabelEditor,
     ValidationOverlay,
     useEditor,
-    useExecutionState,
+    createExecutionState,
 } from '@or3/workflow-vue';
 
 // Local composables
@@ -34,7 +34,7 @@ const {
     setStreamingContent,
     appendStreamingContent,
     reset: resetExecution,
-} = useExecutionState();
+} = createExecutionState();
 
 // ============================================================================
 // UI State
