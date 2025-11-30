@@ -126,6 +126,20 @@ export {
     interpolateTemplate,
     formatOutput,
     extractTemplatePlaceholders,
+    // Extension configuration utilities
+    createConfigurableExtension,
+    makeConfigurable,
+    isConfigurableExtension,
+    type ConfigurableExtension,
+    type ExtensionConfig,
+    type ExtensionOptions,
+    // StarterKit
+    StarterKit,
+    type StarterKitOptions,
+    type StarterKitConfig,
+    type SubflowOptions,
+    type WhileLoopOptions,
+    type AgentOptions,
 } from './extensions';
 
 // Context Compaction

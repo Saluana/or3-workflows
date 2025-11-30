@@ -471,42 +471,54 @@ _Requirements: 7.1_
 
 ---
 
-## Phase 8: TipTap-style Extension Architecture
+## Phase 8: TipTap-style Extension Architecture ✅
 
-### 8.1 Extension Configuration Pattern
-
-_Requirements: All_
-
--   [ ] Create `packages/workflow-core/src/extensions/configure.ts`
-    -   [ ] Define `ExtensionConfig<T>` interface
-    -   [ ] Create `createExtension()` helper for configurable extensions
-    -   [ ] Document extension creation pattern
-
-### 8.2 StarterKit
+### 8.1 Extension Configuration Pattern ✅
 
 _Requirements: All_
 
--   [ ] Create `packages/workflow-core/src/extensions/StarterKit.ts`
-    -   [ ] Define `StarterKitOptions` interface
-    -   [ ] Include all core nodes by default
-    -   [ ] Make new features opt-in by default
-    -   [ ] Support per-extension configuration
-    -   [ ] Export as main entry point
+-   [x] Create `packages/workflow-core/src/extensions/configure.ts`
+    -   [x] Define `ExtensionConfig<T>` interface
+    -   [x] Create `createConfigurableExtension()` helper for configurable extensions
+    -   [x] Create `makeConfigurable()` helper to wrap existing extensions
+    -   [x] Create `isConfigurableExtension()` type guard
+    -   [x] Document extension creation pattern
 
-### 8.3 Update Exports
+### 8.2 StarterKit ✅
 
 _Requirements: All_
 
--   [ ] Update `packages/workflow-core/src/index.ts`
+-   [x] Create `packages/workflow-core/src/extensions/StarterKit.ts`
+    -   [x] Define `StarterKitOptions` interface
+    -   [x] Include all core nodes by default
+    -   [x] Support disabling individual extensions
+    -   [x] Support per-extension configuration (agent, whileLoop, subflow)
+    -   [x] Add `getAvailableExtensions()` helper
+    -   [x] Add `getDefaultOptions()` helper
 
-    -   [ ] Export all new types
-    -   [ ] Export all new extensions
-    -   [ ] Export StarterKit
-    -   [ ] Export adapters and interfaces
+### 8.3 Update Exports ✅
 
--   [ ] Update `packages/workflow-core/src/extensions/index.ts`
-    -   [ ] Export all extensions
-    -   [ ] Export StarterKit
+_Requirements: All_
+
+-   [x] Update `packages/workflow-core/src/index.ts`
+
+    -   [x] Export all new types
+    -   [x] Export configure utilities
+    -   [x] Export StarterKit
+
+-   [x] Update `packages/workflow-core/src/extensions/index.ts`
+    -   [x] Export configure.ts
+    -   [x] Export StarterKit.ts
+
+### 8.4 Unit Tests ✅
+
+-   [x] Add tests to `extensions.test.ts`
+    -   [x] Test `createConfigurableExtension()`
+    -   [x] Test `makeConfigurable()`
+    -   [x] Test `isConfigurableExtension()`
+    -   [x] Test `StarterKit.configure()`
+    -   [x] Test extension configuration options
+    -   [x] Test integration with WorkflowEditor pattern
 
 ---
 
