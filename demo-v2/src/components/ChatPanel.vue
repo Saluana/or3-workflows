@@ -1,17 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue';
 import type { TokenUsageDetails } from '@or3/workflow-core';
-import type { ChatMessage } from '../composables';
-
-// Branch stream type (for live streaming)
-interface BranchStream {
-    nodeId: string;
-    branchId: string;
-    label: string;
-    content: string;
-    status: 'streaming' | 'completed' | 'error';
-    expanded: boolean;
-}
+import type { ChatMessage, BranchStream } from '../composables';
 
 const props = defineProps<{
     messages: ChatMessage[];
@@ -425,6 +415,7 @@ const formatNumber = (value?: number) =>
                         :class="{
                             expanded: branch.expanded,
                             [branch.status]: true,
+                            thinking: branch.isThinking && !branch.content,
                         }"
                     >
                         <button
@@ -441,16 +432,53 @@ const formatNumber = (value?: number) =>
                                 <polyline points="9 18 15 12 9 6"></polyline>
                             </svg>
                             <span class="branch-label">{{ branch.label }}</span>
-                            <span class="branch-status-dot"></span>
                             <span
-                                v-if="branch.status === 'streaming'"
+                                class="branch-status-dot"
+                                :class="{
+                                    thinking:
+                                        branch.isThinking && !branch.content,
+                                }"
+                            ></span>
+                            <span
+                                v-if="branch.isThinking && !branch.content"
+                                class="branch-status-text thinking-text"
+                                >thinking...</span
+                            >
+                            <span
+                                v-else-if="branch.status === 'streaming'"
                                 class="branch-status-text"
                                 >streaming...</span
                             >
                             <span v-else class="branch-status-text">done</span>
                         </button>
                         <div v-show="branch.expanded" class="branch-content">
-                            <div class="branch-text">
+                            <!-- Thinking state for branch -->
+                            <div
+                                v-if="branch.isThinking && !branch.content"
+                                class="branch-thinking"
+                            >
+                                <div class="thinking-label">
+                                    <svg
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                    >
+                                        <path
+                                            d="M21 12a9 9 0 1 1-6.219-8.56"
+                                        ></path>
+                                    </svg>
+                                    <span>Thinking...</span>
+                                </div>
+                                <div
+                                    v-if="branch.thinkingContent"
+                                    class="thinking-preview"
+                                >
+                                    {{ branch.thinkingContent.slice(-150) }}
+                                </div>
+                            </div>
+                            <!-- Normal content -->
+                            <div v-else class="branch-text">
                                 {{ branch.content
                                 }}<span
                                     v-if="branch.status === 'streaming'"
@@ -461,13 +489,18 @@ const formatNumber = (value?: number) =>
                     </div>
                 </div>
 
-                <!-- Thinking Indicator (when model is reasoning) -->
+                <!-- Thinking Indicator OR Streaming Message (mutually exclusive) -->
                 <div
-                    v-if="isThinking && !streamingContent"
-                    class="message assistant thinking"
+                    v-if="isThinking || streamingContent"
+                    class="message assistant"
+                    :class="{
+                        thinking: isThinking && !streamingContent,
+                        streaming: streamingContent,
+                    }"
                 >
                     <div class="message-avatar">
                         <svg
+                            v-if="isThinking && !streamingContent"
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
@@ -477,9 +510,24 @@ const formatNumber = (value?: number) =>
                             <circle cx="12" cy="12" r="10"></circle>
                             <path d="M12 6v6l4 2"></path>
                         </svg>
+                        <svg
+                            v-else
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <path
+                                d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"
+                            ></path>
+                        </svg>
                     </div>
                     <div class="message-content">
-                        <div class="thinking-bubble">
+                        <!-- Thinking state -->
+                        <div
+                            v-if="isThinking && !streamingContent"
+                            class="thinking-bubble"
+                        >
                             <div class="thinking-label">
                                 <svg
                                     viewBox="0 0 24 24"
@@ -500,28 +548,8 @@ const formatNumber = (value?: number) =>
                                 {{ thinkingContent.slice(-200) }}
                             </div>
                         </div>
-                    </div>
-                </div>
-
-                <!-- Streaming Message -->
-                <div
-                    v-if="streamingContent"
-                    class="message assistant streaming"
-                >
-                    <div class="message-avatar">
-                        <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                        >
-                            <path
-                                d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"
-                            ></path>
-                        </svg>
-                    </div>
-                    <div class="message-content">
-                        <div class="message-bubble">
+                        <!-- Streaming state -->
+                        <div v-else class="message-bubble">
                             {{ streamingContent
                             }}<span class="typing-cursor"></span>
                         </div>
@@ -1079,6 +1107,12 @@ const formatNumber = (value?: number) =>
     flex-shrink: 0;
 }
 
+.branch-status-dot.thinking,
+.branch-item.thinking .branch-status-dot {
+    background: var(--or3-color-warning, #f59e0b);
+    animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
 .branch-item.streaming .branch-status-dot {
     background: var(--or3-color-accent, #8b5cf6);
     animation: pulse-dot 1.5s ease-in-out infinite;
@@ -1105,6 +1139,41 @@ const formatNumber = (value?: number) =>
 .branch-status-text {
     font-size: var(--or3-text-xs, 11px);
     color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
+}
+
+.branch-status-text.thinking-text {
+    color: var(--or3-color-warning, #f59e0b);
+}
+
+.branch-thinking {
+    padding: var(--or3-spacing-xs, 4px) 0;
+}
+
+.branch-thinking .thinking-label {
+    display: flex;
+    align-items: center;
+    gap: var(--or3-spacing-xs, 4px);
+    color: var(--or3-color-warning, #f59e0b);
+    font-size: var(--or3-text-xs, 11px);
+    font-weight: var(--or3-font-medium, 500);
+}
+
+.branch-thinking .thinking-label svg {
+    width: 12px;
+    height: 12px;
+    animation: spin 1s linear infinite;
+}
+
+.branch-thinking .thinking-preview {
+    margin-top: var(--or3-spacing-xs, 4px);
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
+    font-size: var(--or3-text-xs, 11px);
+    font-style: italic;
+    max-height: 40px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 .branch-count {

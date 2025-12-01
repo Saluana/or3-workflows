@@ -586,6 +586,16 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                       );
                   }
                 : undefined,
+            onBranchReasoning: callbacks.onBranchReasoning
+                ? (branchId: string, branchLabel: string, token: string) => {
+                      callbacks.onBranchReasoning!(
+                          nodeId,
+                          branchId,
+                          branchLabel,
+                          token
+                      );
+                  }
+                : undefined,
             onBranchStart: callbacks.onBranchStart
                 ? (branchId: string, branchLabel: string) => {
                       callbacks.onBranchStart!(nodeId, branchId, branchLabel);

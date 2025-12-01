@@ -743,6 +743,21 @@ export interface ExecutionCallbacks {
     ) => void;
 
     /**
+     * Called for each reasoning/thinking token from a parallel branch.
+     * Use this to display thinking indicators for individual branches.
+     * @param nodeId - The ID of the parallel node.
+     * @param branchId - The ID of the branch.
+     * @param branchLabel - The display label of the branch.
+     * @param token - The reasoning token/chunk of text received.
+     */
+    onBranchReasoning?: (
+        nodeId: string,
+        branchId: string,
+        branchLabel: string,
+        token: string
+    ) => void;
+
+    /**
      * Called when a parallel branch starts execution.
      * @param nodeId - The ID of the parallel node.
      * @param branchId - The ID of the branch.
@@ -1016,6 +1031,12 @@ export interface ExecutionContext {
     onTokenUsage?: (usage: TokenUsageDetails) => void;
     /** Callback for parallel branch token streaming */
     onBranchToken?: (
+        branchId: string,
+        branchLabel: string,
+        token: string
+    ) => void;
+    /** Callback for parallel branch reasoning/thinking token streaming */
+    onBranchReasoning?: (
         branchId: string,
         branchLabel: string,
         token: string

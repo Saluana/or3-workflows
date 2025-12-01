@@ -105,6 +105,14 @@ export const ParallelNodeExtension: NodeExtension = {
                                 token
                             );
                         },
+                        // Stream reasoning tokens for this branch
+                        onReasoning: (token) => {
+                            context.onBranchReasoning?.(
+                                branch.id,
+                                branch.label,
+                                token
+                            );
+                        },
                     });
 
                     if (context.tokenCounter && context.onTokenUsage) {

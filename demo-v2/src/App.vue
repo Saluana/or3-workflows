@@ -24,6 +24,7 @@ import {
     useWorkflowStorage,
     useMobileNav,
     type ChatMessage,
+    type BranchStream,
 } from './composables';
 import type { WorkflowSummary } from '@or3/workflow-core';
 
@@ -98,17 +99,9 @@ const tokenUsage = ref<{ nodeId: string; usage: TokenUsageDetails } | null>(
 const nodeOutputs = ref<Record<string, { nodeId: string; output: string }>>({});
 
 // Parallel branch streaming state (for live streaming only)
-export interface BranchStream {
-    nodeId: string;
-    branchId: string;
-    label: string;
-    content: string;
-    status: 'streaming' | 'completed' | 'error';
-    expanded: boolean;
-}
 const branchStreams = ref<Record<string, BranchStream>>({});
 
-// Thinking/reasoning state
+// Thinking/reasoning state (for main output)
 const isThinking = ref(false);
 const thinkingContent = ref('');
 
@@ -594,6 +587,7 @@ async function handleSendMessage() {
                     // When we start getting actual content, stop showing thinking
                     if (isThinking.value) {
                         isThinking.value = false;
+                        thinkingContent.value = '';
                     }
                     appendStreamingContent(token);
                 },
@@ -628,12 +622,27 @@ async function handleSendMessage() {
                         content: '',
                         status: 'streaming',
                         expanded: false, // Collapsed by default
+                        isThinking: false,
+                        thinkingContent: '',
                     };
                 },
                 onBranchToken: (nodeId, branchId, _branchLabel, token) => {
                     const key = `${nodeId}-${branchId}`;
                     if (branchStreams.value[key]) {
+                        // When actual content starts, clear thinking state
+                        if (branchStreams.value[key].isThinking) {
+                            branchStreams.value[key].isThinking = false;
+                        }
                         branchStreams.value[key].content += token;
+                    }
+                },
+                onBranchReasoning: (nodeId, branchId, _branchLabel, token) => {
+                    const key = `${nodeId}-${branchId}`;
+                    const stream = branchStreams.value[key];
+                    if (stream) {
+                        stream.isThinking = true;
+                        stream.thinkingContent =
+                            (stream.thinkingContent ?? '') + token;
                     }
                 },
                 onBranchComplete: (nodeId, branchId, _branchLabel, output) => {
@@ -641,6 +650,8 @@ async function handleSendMessage() {
                     if (branchStreams.value[key]) {
                         branchStreams.value[key].content = output;
                         branchStreams.value[key].status = 'completed';
+                        branchStreams.value[key].isThinking = false;
+                        branchStreams.value[key].thinkingContent = '';
                     }
 
                     // Check if all branches for this node are completed
@@ -711,6 +722,8 @@ async function handleSendMessage() {
     } finally {
         setRunning(false);
         setStreamingContent('');
+        isThinking.value = false;
+        thinkingContent.value = '';
     }
 }
 

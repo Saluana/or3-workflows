@@ -126,6 +126,14 @@ export function useWorkflowExecution(): UseWorkflowExecutionReturn {
                     token
                 );
             },
+            onBranchReasoning: (nodeId, branchId, branchLabel, token) => {
+                externalCallbacks?.onBranchReasoning?.(
+                    nodeId,
+                    branchId,
+                    branchLabel,
+                    token
+                );
+            },
             onBranchComplete: (nodeId, branchId, branchLabel, output) => {
                 externalCallbacks?.onBranchComplete?.(
                     nodeId,

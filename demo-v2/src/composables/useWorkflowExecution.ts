@@ -13,6 +13,18 @@ import {
     type TokenUsageDetails,
 } from '@or3/workflow-core';
 
+/** Live streaming state for a parallel branch */
+export interface BranchStream {
+    nodeId: string;
+    branchId: string;
+    label: string;
+    content: string;
+    status: 'streaming' | 'completed' | 'error';
+    expanded: boolean;
+    isThinking: boolean;
+    thinkingContent: string;
+}
+
 export interface BranchData {
     branchId: string;
     label: string;
@@ -62,6 +74,12 @@ export interface ExecutionCallbacks {
         branchLabel: string
     ) => void;
     onBranchToken?: (
+        nodeId: string,
+        branchId: string,
+        branchLabel: string,
+        token: string
+    ) => void;
+    onBranchReasoning?: (
         nodeId: string,
         branchId: string,
         branchLabel: string,
@@ -294,6 +312,7 @@ export function useWorkflowExecution() {
             onTokenUsage: callbacks.onTokenUsage,
             onBranchStart: callbacks.onBranchStart,
             onBranchToken: callbacks.onBranchToken,
+            onBranchReasoning: callbacks.onBranchReasoning,
             onBranchComplete: callbacks.onBranchComplete,
         };
 
