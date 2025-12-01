@@ -106,9 +106,7 @@ export const WhileLoopExtension: NodeExtension = {
                     iteration,
                     outputs,
                     lastOutput:
-                        outputs.length > 0
-                            ? outputs[outputs.length - 1]
-                            : null,
+                        outputs.length > 0 ? outputs[outputs.length - 1] : null,
                 };
                 const evalContext = {
                     currentInput,
@@ -127,11 +125,16 @@ export const WhileLoopExtension: NodeExtension = {
                     );
                 }
 
-                const model = data.conditionModel || context.defaultModel || DEFAULT_MODEL;
-                const inputLabel = iteration > 0 ? 'Last output' : 'Initial input';
-                const previousOutputsInfo = outputs.length > 1 
-                    ? `Previous outputs: ${outputs.length} iterations` 
-                    : '';
+                const model =
+                    data.conditionModel ||
+                    context.defaultModel ||
+                    DEFAULT_MODEL;
+                const inputLabel =
+                    iteration > 0 ? 'Last output' : 'Initial input';
+                const previousOutputsInfo =
+                    outputs.length > 1
+                        ? `Previous outputs: ${outputs.length} iterations`
+                        : '';
                 const prompt = `${data.conditionPrompt}
 
 Current iteration: ${iteration}

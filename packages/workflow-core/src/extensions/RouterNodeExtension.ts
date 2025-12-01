@@ -279,7 +279,10 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
                 }
             } catch (e) {
                 if (debug) {
-                    console.error('[Router] Failed to parse tool arguments:', e);
+                    console.error(
+                        '[Router] Failed to parse tool arguments:',
+                        e
+                    );
                 }
             }
         } else {
