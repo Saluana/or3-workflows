@@ -13,15 +13,23 @@ import { CommandManager } from './commands';
 
 /**
  * Type-safe event callback signatures for the editor.
+ * Maps each event type to its corresponding callback signature.
  */
 type EditorEventCallback<T extends EditorEvent = EditorEvent> = 
-    T extends 'update' | 'execute:start' | 'execute:done' | 'selectionUpdate' ? () => void :
-    T extends 'metaUpdate' ? (meta: WorkflowData['meta']) => void :
-    T extends 'viewportUpdate' ? (viewport: { x: number; y: number; zoom: number }) => void :
-    T extends 'nodeCreate' | 'nodeUpdate' | 'nodeDelete' ? (node: WorkflowNode) => void :
-    T extends 'edgeCreate' | 'edgeUpdate' | 'edgeDelete' ? (edge: WorkflowEdge) => void :
-    T extends 'execute:nodeStart' | 'execute:nodeFinish' ? (nodeId: string, output?: string) => void :
-    T extends 'execute:error' ? (error: Error) => void :
+    T extends 'update' | 'execute:start' | 'execute:done' | 'selectionUpdate' 
+        ? () => void :
+    T extends 'metaUpdate' 
+        ? (meta: WorkflowData['meta']) => void :
+    T extends 'viewportUpdate' 
+        ? (viewport: { x: number; y: number; zoom: number }) => void :
+    T extends 'nodeCreate' | 'nodeUpdate' | 'nodeDelete' 
+        ? (node: WorkflowNode) => void :
+    T extends 'edgeCreate' | 'edgeUpdate' | 'edgeDelete' 
+        ? (edge: WorkflowEdge) => void :
+    T extends 'execute:nodeStart' | 'execute:nodeFinish' 
+        ? (nodeId: string, output?: string) => void :
+    T extends 'execute:error' 
+        ? (error: Error) => void :
     (...args: any[]) => void;
 
 export interface EditorOptions {
@@ -230,8 +238,10 @@ export class WorkflowEditor {
             this.listeners.set(event, new Set());
         }
         
-        const callbacks = this.listeners.get(event)!;
-        callbacks.add(callback as EditorEventCallback);
+        const callbacks = this.listeners.get(event);
+        if (callbacks) {
+            callbacks.add(callback as EditorEventCallback);
+        }
         
         // Return unsubscribe function
         return () => this.off(event, callback);
@@ -294,10 +304,8 @@ export class WorkflowEditor {
         
         // Clear extensions and commands
         this._extensions.clear();
-        // Clear extension commands by creating a new empty object
-        for (const key in this._extensionCommands) {
-            delete this._extensionCommands[key];
-        }
+        // Clear extension commands efficiently
+        this._extensionCommands = {};
         
         // Clear data
         this.nodes = [];
@@ -343,9 +351,9 @@ export class WorkflowEditor {
         this.meta = {
             ...this.meta,
             ...meta,
-            version: meta.version || this.meta.version,
-            createdAt: meta.createdAt || this.meta.createdAt,
-            updatedAt: shouldTouch ? now : (meta.updatedAt || this.meta.updatedAt),
+            version: meta.version ?? this.meta.version,
+            createdAt: meta.createdAt ?? this.meta.createdAt,
+            updatedAt: shouldTouch ? now : (meta.updatedAt ?? this.meta.updatedAt),
         };
 
         this.emit('metaUpdate', this.meta);
