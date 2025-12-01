@@ -64,8 +64,10 @@ export function parseVersion(version: string): {
 // Multimodal Types
 // ============================================================================
 
-export type InputModality = 'text' | 'image' | 'file' | 'audio' | 'video';
-export type OutputModality = 'text' | 'image' | 'embeddings';
+// Re-export modality types from models.ts for consistency
+import type { ModelInputModality, ModelOutputModality } from './models';
+export type InputModality = ModelInputModality;
+export type OutputModality = ModelOutputModality;
 
 export interface Attachment {
     id: string;

@@ -17,244 +17,60 @@
  * // Or register individual models
  * modelRegistry.register({
  *   id: "openai/gpt-4",
- *   canonical_slug: "openai/gpt-4",
+ *   canonicalSlug: "openai/gpt-4",
  *   name: "GPT-4",
  *   created: 1692901234,
  *   pricing: { prompt: "0.00003", completion: "0.00006" },
- *   context_length: 8192,
+ *   contextLength: 8192,
  *   architecture: {
  *     modality: "text->text",
- *     input_modalities: ["text"],
- *     output_modalities: ["text"],
+ *     inputModalities: ["text"],
+ *     outputModalities: ["text"],
  *   },
- *   top_provider: { is_moderated: true },
- *   per_request_limits: null,
- *   supported_parameters: ["temperature", "top_p", "max_tokens"],
- *   default_parameters: null,
+ *   topProvider: { isModerated: true },
+ *   perRequestLimits: null,
+ *   supportedParameters: ["temperature", "top_p", "max_tokens"],
+ *   defaultParameters: null,
  * });
  * ```
  */
 
 // ============================================================================
-// Types matching OpenRouter SDK
+// Re-export types from OpenRouter SDK
 // ============================================================================
 
-/**
- * Supported input modalities for models.
- * Matches OpenRouter SDK InputModality type.
- */
-export type ModelInputModality = 'text' | 'image' | 'file' | 'audio' | 'video';
+// Import SDK types - these use camelCase
+import type {
+    Model as SDKModel,
+    InputModality as SDKInputModality,
+    OutputModality as SDKOutputModality,
+    Parameter as SDKParameter,
+    ModelArchitecture as SDKModelArchitecture,
+    PublicPricing as SDKPublicPricing,
+    TopProviderInfo as SDKTopProviderInfo,
+    PerRequestLimits as SDKPerRequestLimits,
+    DefaultParameters as SDKDefaultParameters,
+    ModelGroup as SDKModelGroup,
+    ModelArchitectureInstructType as SDKInstructType,
+} from '@openrouter/sdk/models';
+
+// Re-export SDK types with our naming for backward compatibility
+export type ModelInputModality = SDKInputModality;
+export type ModelOutputModality = SDKOutputModality;
+export type ModelParameter = SDKParameter;
+export type ModelTokenizer = SDKModelGroup;
+export type ModelInstructType = SDKInstructType;
+export type ModelArchitecture = SDKModelArchitecture;
+export type ModelPricing = SDKPublicPricing;
+export type ModelTopProvider = SDKTopProviderInfo;
+export type ModelPerRequestLimits = SDKPerRequestLimits;
+export type ModelDefaultParameters = SDKDefaultParameters;
 
 /**
- * Supported output modalities for models.
- * Matches OpenRouter SDK OutputModality type.
+ * OpenRouter Model type - directly from the SDK.
+ * Uses camelCase property names as returned by the SDK.
  */
-export type ModelOutputModality = 'text' | 'image' | 'embeddings';
-
-/**
- * Tokenizer type used by the model.
- * Matches OpenRouter SDK ModelGroup type.
- */
-export type ModelTokenizer =
-    | 'Router'
-    | 'Media'
-    | 'Other'
-    | 'GPT'
-    | 'Claude'
-    | 'Gemini'
-    | 'Grok'
-    | 'Cohere'
-    | 'Nova'
-    | 'Qwen'
-    | 'Yi'
-    | 'DeepSeek'
-    | 'Mistral'
-    | 'Llama2'
-    | 'Llama3'
-    | 'Llama4'
-    | 'PaLM'
-    | 'RWKV'
-    | 'Qwen3'
-    | string;
-
-/**
- * Instruction format type.
- * Matches OpenRouter SDK ModelArchitectureInstructType.
- */
-export type ModelInstructType =
-    | 'none'
-    | 'airoboros'
-    | 'alpaca'
-    | 'alpaca-modif'
-    | 'chatml'
-    | 'claude'
-    | 'code-llama'
-    | 'gemma'
-    | 'llama2'
-    | 'llama3'
-    | 'mistral'
-    | 'nemotron'
-    | 'neural'
-    | 'openchat'
-    | 'phi3'
-    | 'rwkv'
-    | 'vicuna'
-    | 'zephyr'
-    | 'deepseek-r1'
-    | 'deepseek-v3.1'
-    | 'qwq'
-    | 'qwen3'
-    | string;
-
-/**
- * Supported model parameters.
- * Matches OpenRouter SDK Parameter type.
- */
-export type ModelParameter =
-    | 'temperature'
-    | 'top_p'
-    | 'top_k'
-    | 'min_p'
-    | 'top_a'
-    | 'frequency_penalty'
-    | 'presence_penalty'
-    | 'repetition_penalty'
-    | 'max_tokens'
-    | 'logit_bias'
-    | 'logprobs'
-    | 'top_logprobs'
-    | 'seed'
-    | 'response_format'
-    | 'structured_outputs'
-    | 'stop'
-    | 'tools'
-    | 'tool_choice'
-    | 'parallel_tool_calls'
-    | 'include_reasoning'
-    | 'reasoning'
-    | 'web_search_options'
-    | 'verbosity'
-    | string;
-
-/**
- * Model architecture information.
- * Matches OpenRouter SDK ModelArchitecture type.
- */
-export interface ModelArchitecture {
-    /** Tokenizer type used by the model */
-    tokenizer?: ModelTokenizer;
-    /** Instruction format type */
-    instruct_type?: ModelInstructType | null;
-    /** Primary modality of the model (e.g., "text->text") */
-    modality: string;
-    /** Supported input modalities */
-    input_modalities: ModelInputModality[];
-    /** Supported output modalities */
-    output_modalities: ModelOutputModality[];
-}
-
-/**
- * Pricing information for the model.
- * Values are strings or numbers representing USD price per million tokens.
- * Matches OpenRouter SDK PublicPricing type.
- */
-export interface ModelPricing {
-    /** Price per prompt token (USD per million) */
-    prompt: string | number;
-    /** Price per completion token (USD per million) */
-    completion: string | number;
-    /** Price per request (optional) */
-    request?: string | number;
-    /** Price per image (optional) */
-    image?: string | number;
-    /** Price per image token (optional) */
-    image_token?: string | number;
-    /** Price per image output (optional) */
-    image_output?: string | number;
-    /** Price per audio token (optional) */
-    audio?: string | number;
-    /** Price per cached audio input (optional) */
-    input_audio_cache?: string | number;
-    /** Price per web search (optional) */
-    web_search?: string | number;
-    /** Price for internal reasoning (optional) */
-    internal_reasoning?: string | number;
-    /** Price for reading from cache (optional) */
-    input_cache_read?: string | number;
-    /** Price for writing to cache (optional) */
-    input_cache_write?: string | number;
-    /** Discount percentage (optional) */
-    discount?: number;
-}
-
-/**
- * Information about the top provider for this model.
- * Matches OpenRouter SDK TopProviderInfo type.
- */
-export interface ModelTopProvider {
-    /** Context length from the top provider */
-    context_length?: number;
-    /** Maximum completion tokens from the top provider */
-    max_completion_tokens?: number;
-    /** Whether the top provider moderates content */
-    is_moderated: boolean;
-}
-
-/**
- * Per-request token limits.
- * Matches OpenRouter SDK PerRequestLimits type.
- */
-export interface ModelPerRequestLimits {
-    /** Maximum prompt tokens per request */
-    prompt_tokens: number;
-    /** Maximum completion tokens per request */
-    completion_tokens: number;
-}
-
-/**
- * Default parameters for this model.
- * Matches OpenRouter SDK DefaultParameters type.
- */
-export interface ModelDefaultParameters {
-    temperature?: number | null;
-    top_p?: number | null;
-    frequency_penalty?: number | null;
-}
-
-/**
- * Information about an AI model available on OpenRouter.
- * This interface matches the OpenRouter SDK Model type.
- *
- * @see https://openrouter.ai/docs/sdks/typescript/models/model
- */
-export interface OpenRouterModel {
-    /** Unique identifier for the model (e.g., "openai/gpt-4") */
-    id: string;
-    /** Canonical slug for the model */
-    canonical_slug: string;
-    /** Hugging Face model identifier, if applicable */
-    hugging_face_id?: string;
-    /** Display name of the model */
-    name: string;
-    /** Unix timestamp of when the model was created */
-    created: number;
-    /** Description of the model */
-    description?: string;
-    /** Pricing information for the model */
-    pricing: ModelPricing;
-    /** Maximum context length in tokens */
-    context_length: number;
-    /** Model architecture information */
-    architecture: ModelArchitecture;
-    /** Information about the top provider for this model */
-    top_provider: ModelTopProvider;
-    /** Per-request token limits (null if no limits) */
-    per_request_limits: ModelPerRequestLimits | null;
-    /** List of supported parameters for this model */
-    supported_parameters: ModelParameter[];
-    /** Default parameters for this model (null if no defaults) */
-    default_parameters: ModelDefaultParameters | null;
-}
+export type OpenRouterModel = SDKModel;
 
 // ============================================================================
 // Simplified Model Info for UI
@@ -350,10 +166,10 @@ export function toModelInfo(model: OpenRouterModel): ModelInfo {
         id: model.id,
         name: model.name,
         provider: extractProvider(model.id),
-        inputModalities: model.architecture.input_modalities,
-        outputModalities: model.architecture.output_modalities,
-        contextLength: model.context_length,
-        supportedParameters: model.supported_parameters,
+        inputModalities: model.architecture.inputModalities,
+        outputModalities: model.architecture.outputModalities,
+        contextLength: model.contextLength ?? 0,
+        supportedParameters: model.supportedParameters,
         pricing: {
             prompt: parsePricing(model.pricing.prompt),
             completion: parsePricing(model.pricing.completion),
@@ -475,52 +291,90 @@ export class ModelRegistry {
 
     /**
      * Query models based on filter criteria.
+     * Single-pass filtering for efficiency.
      * @param query - The query options
      * @returns Array of models matching the query
      */
     query(query: ModelQuery): OpenRouterModel[] {
-        let results = this.getAll();
-
-        if (query.provider) {
-            const providerLower = query.provider.toLowerCase();
-            results = results.filter((m) =>
-                m.id.toLowerCase().startsWith(providerLower + '/')
-            );
+        // Early return if no filters
+        if (
+            !query.provider &&
+            !query.inputModality &&
+            !query.outputModality &&
+            query.minContextLength === undefined &&
+            !query.requiredParameter &&
+            !query.search
+        ) {
+            return this.getAll();
         }
 
-        if (query.inputModality) {
-            results = results.filter((m) =>
-                m.architecture.input_modalities.includes(query.inputModality!)
-            );
-        }
+        // Pre-compute lowercase values once
+        const providerLower = query.provider?.toLowerCase();
+        const searchLower = query.search?.toLowerCase();
 
-        if (query.outputModality) {
-            results = results.filter((m) =>
-                m.architecture.output_modalities.includes(query.outputModality!)
-            );
-        }
+        const results: OpenRouterModel[] = [];
 
-        if (query.minContextLength !== undefined) {
-            results = results.filter(
-                (m) => m.context_length >= query.minContextLength!
-            );
-        }
+        for (const model of this.models.values()) {
+            // Check provider filter
+            if (
+                providerLower &&
+                !model.id.toLowerCase().startsWith(providerLower + '/')
+            ) {
+                continue;
+            }
 
-        if (query.requiredParameter) {
-            results = results.filter((m) =>
-                m.supported_parameters.includes(query.requiredParameter!)
-            );
-        }
+            // Check input modality filter
+            if (
+                query.inputModality &&
+                !model.architecture.inputModalities.includes(
+                    query.inputModality
+                )
+            ) {
+                continue;
+            }
 
-        if (query.search) {
-            const searchLower = query.search.toLowerCase();
-            results = results.filter(
-                (m) =>
-                    m.name.toLowerCase().includes(searchLower) ||
-                    m.id.toLowerCase().includes(searchLower) ||
-                    (m.description?.toLowerCase().includes(searchLower) ??
-                        false)
-            );
+            // Check output modality filter
+            if (
+                query.outputModality &&
+                !model.architecture.outputModalities.includes(
+                    query.outputModality
+                )
+            ) {
+                continue;
+            }
+
+            // Check minimum context length
+            if (
+                query.minContextLength !== undefined &&
+                (model.contextLength ?? 0) < query.minContextLength
+            ) {
+                continue;
+            }
+
+            // Check required parameter
+            if (
+                query.requiredParameter &&
+                !model.supportedParameters.includes(query.requiredParameter)
+            ) {
+                continue;
+            }
+
+            // Check search filter
+            if (searchLower) {
+                const nameMatch = model.name
+                    .toLowerCase()
+                    .includes(searchLower);
+                const idMatch = model.id.toLowerCase().includes(searchLower);
+                const descMatch =
+                    model.description?.toLowerCase().includes(searchLower) ??
+                    false;
+                if (!nameMatch && !idMatch && !descMatch) {
+                    continue;
+                }
+            }
+
+            // All filters passed
+            results.push(model);
         }
 
         return results;
@@ -591,7 +445,7 @@ export class ModelRegistry {
         modality: ModelInputModality
     ): boolean {
         const model = this.get(modelId);
-        return model?.architecture.input_modalities.includes(modality) ?? false;
+        return model?.architecture.inputModalities.includes(modality) ?? false;
     }
 
     /**
@@ -601,7 +455,7 @@ export class ModelRegistry {
      */
     supportsTools(modelId: string): boolean {
         const model = this.get(modelId);
-        return model?.supported_parameters.includes('tools') ?? false;
+        return model?.supportedParameters.includes('tools') ?? false;
     }
 
     /**
@@ -610,7 +464,7 @@ export class ModelRegistry {
      * @returns The context length or undefined if model not found
      */
     getContextLength(modelId: string): number | undefined {
-        return this.get(modelId)?.context_length;
+        return this.get(modelId)?.contextLength ?? undefined;
     }
 }
 
@@ -633,40 +487,41 @@ export const modelRegistry = new ModelRegistry();
 /**
  * A set of commonly used models that can be registered as defaults.
  * These are useful for demos or when the full model list isn't available.
+ * Uses the SDK's camelCase format.
  */
 export const DEFAULT_MODELS: OpenRouterModel[] = [
     {
         id: 'openai/gpt-5.1',
-        canonical_slug: 'openai/gpt-5.1-20251113',
-        hugging_face_id: '',
+        canonicalSlug: 'openai/gpt-5.1-20251113',
+        huggingFaceId: '',
         name: 'OpenAI: GPT-5.1',
         created: 1763060305,
         description:
-            'GPT-5.1 is the latest frontier-grade model in the GPT-5 series, offering stronger general-purpose reasoning, improved instruction adherence, and a more natural conversational style compared to GPT-5. It uses adaptive reasoning to allocate computation dynamically, responding quickly to simple queries while spending more depth on complex tasks. The model produces clearer, more grounded explanations with reduced jargon, making it easier to follow even on technical or multi-step problems.\n\nBuilt for broad task coverage, GPT-5.1 delivers consistent gains across math, coding, and structured analysis workloads, with more coherent long-form answers and improved tool-use reliability. It also features refined conversational alignment, enabling warmer, more intuitive responses without compromising precision. GPT-5.1 serves as the primary full-capability successor to GPT-5',
-        context_length: 400000,
+            'GPT-5.1 is the latest frontier-grade model in the GPT-5 series, offering stronger general-purpose reasoning, improved instruction adherence, and a more natural conversational style compared to GPT-5.',
+        contextLength: 400000,
         architecture: {
-            modality: 'text+image-\u003Etext',
-            input_modalities: ['image', 'text', 'file'],
-            output_modalities: ['text'],
+            modality: 'text+image->text',
+            inputModalities: ['image', 'text', 'file'],
+            outputModalities: ['text'],
             tokenizer: 'GPT',
-            instruct_type: null,
+            instructType: null,
         },
         pricing: {
             prompt: '0.00000125',
             completion: '0.00001',
             request: '0',
             image: '0',
-            web_search: '0.01',
-            internal_reasoning: '0',
-            input_cache_read: '0.000000125',
+            webSearch: '0.01',
+            internalReasoning: '0',
+            inputCacheRead: '0.000000125',
         },
-        top_provider: {
-            context_length: 400000,
-            max_completion_tokens: 128000,
-            is_moderated: true,
+        topProvider: {
+            contextLength: 400000,
+            maxCompletionTokens: 128000,
+            isModerated: true,
         },
-        per_request_limits: null,
-        supported_parameters: [
+        perRequestLimits: null,
+        supportedParameters: [
             'frequency_penalty',
             'include_reasoning',
             'logit_bias',
@@ -682,45 +537,45 @@ export const DEFAULT_MODELS: OpenRouterModel[] = [
             'tools',
             'top_logprobs',
         ],
-        default_parameters: {
+        defaultParameters: {
             temperature: null,
-            top_p: null,
-            frequency_penalty: null,
+            topP: null,
+            frequencyPenalty: null,
         },
     },
     {
         id: 'google/gemini-3-pro-preview',
-        canonical_slug: 'google/gemini-3-pro-preview-20251117',
-        hugging_face_id: '',
+        canonicalSlug: 'google/gemini-3-pro-preview-20251117',
+        huggingFaceId: '',
         name: 'Google: Gemini 3 Pro Preview',
         created: 1763474668,
         description:
-            'Gemini 3 Pro is Google’s flagship frontier model for high-precision multimodal reasoning, combining strong performance across text, image, video, audio, and code with a 1M-token context window. Reasoning Details must be preserved when using multi-turn tool calling, see our docs here: https://openrouter.ai/docs/use-cases/reasoning-tokens#preserving-reasoning-blocks. It delivers state-of-the-art benchmark results in general reasoning, STEM problem solving, factual QA, and multimodal understanding, including leading scores on LMArena, GPQA Diamond, MathArena Apex, MMMU-Pro, and Video-MMMU. Interactions emphasize depth and interpretability: the model is designed to infer intent with minimal prompting and produce direct, insight-focused responses.\n\nBuilt for advanced development and agentic workflows, Gemini 3 Pro provides robust tool-calling, long-horizon planning stability, and strong zero-shot generation for complex UI, visualization, and coding tasks. It excels at agentic coding (SWE-Bench Verified, Terminal-Bench 2.0), multimodal analysis, and structured long-form tasks such as research synthesis, planning, and interactive learning experiences. Suitable applications include autonomous agents, coding assistants, multimodal analytics, scientific reasoning, and high-context information processing.',
-        context_length: 1048576,
+            "Gemini 3 Pro is Google's flagship frontier model for high-precision multimodal reasoning, combining strong performance across text, image, video, audio, and code with a 1M-token context window.",
+        contextLength: 1048576,
         architecture: {
-            modality: 'text+image-\u003Etext',
-            input_modalities: ['text', 'image', 'file', 'audio', 'video'],
-            output_modalities: ['text'],
+            modality: 'text+image->text',
+            inputModalities: ['text', 'image', 'file', 'audio', 'video'],
+            outputModalities: ['text'],
             tokenizer: 'Gemini',
-            instruct_type: null,
+            instructType: null,
         },
         pricing: {
             prompt: '0.000002',
             completion: '0.000012',
             request: '0',
             image: '0.008256',
-            web_search: '0',
-            internal_reasoning: '0',
-            input_cache_read: '0.0000002',
-            input_cache_write: '0.000002375',
+            webSearch: '0',
+            internalReasoning: '0',
+            inputCacheRead: '0.0000002',
+            inputCacheWrite: '0.000002375',
         },
-        top_provider: {
-            context_length: 1048576,
-            max_completion_tokens: 65536,
-            is_moderated: false,
+        topProvider: {
+            contextLength: 1048576,
+            maxCompletionTokens: 65536,
+            isModerated: false,
         },
-        per_request_limits: null,
-        supported_parameters: [
+        perRequestLimits: null,
+        supportedParameters: [
             'include_reasoning',
             'max_tokens',
             'reasoning',
@@ -733,43 +588,43 @@ export const DEFAULT_MODELS: OpenRouterModel[] = [
             'tools',
             'top_p',
         ],
-        default_parameters: {
+        defaultParameters: {
             temperature: null,
-            top_p: null,
-            frequency_penalty: null,
+            topP: null,
+            frequencyPenalty: null,
         },
     },
     {
         id: 'z-ai/glm-4.6',
-        canonical_slug: 'z-ai/glm-4.6',
-        hugging_face_id: '',
+        canonicalSlug: 'z-ai/glm-4.6',
+        huggingFaceId: '',
         name: 'Z.AI: GLM 4.6',
         created: 1759235576,
         description:
-            'Compared with GLM-4.5, this generation brings several key improvements:\n\nLonger context window: The context window has been expanded from 128K to 200K tokens, enabling the model to handle more complex agentic tasks.\nSuperior coding performance: The model achieves higher scores on code benchmarks and demonstrates better real-world performance in applications such as Claude Code、Cline、Roo Code and Kilo Code, including improvements in generating visually polished front-end pages.\nAdvanced reasoning: GLM-4.6 shows a clear improvement in reasoning performance and supports tool use during inference, leading to stronger overall capability.\nMore capable agents: GLM-4.6 exhibits stronger performance in tool using and search-based agents, and integrates more effectively within agent frameworks.\nRefined writing: Better aligns with human preferences in style and readability, and performs more naturally in role-playing scenarios.',
-        context_length: 202752,
+            'GLM-4.6 brings longer context (200K), superior coding, advanced reasoning with tool use, and refined writing.',
+        contextLength: 202752,
         architecture: {
-            modality: 'text-\u003Etext',
-            input_modalities: ['text'],
-            output_modalities: ['text'],
+            modality: 'text->text',
+            inputModalities: ['text'],
+            outputModalities: ['text'],
             tokenizer: 'Other',
-            instruct_type: null,
+            instructType: null,
         },
         pricing: {
             prompt: '0.0000004',
             completion: '0.00000175',
             request: '0',
             image: '0',
-            web_search: '0',
-            internal_reasoning: '0',
+            webSearch: '0',
+            internalReasoning: '0',
         },
-        top_provider: {
-            context_length: 202752,
-            max_completion_tokens: 202752,
-            is_moderated: false,
+        topProvider: {
+            contextLength: 202752,
+            maxCompletionTokens: 202752,
+            isModerated: false,
         },
-        per_request_limits: null,
-        supported_parameters: [
+        perRequestLimits: null,
+        supportedParameters: [
             'frequency_penalty',
             'include_reasoning',
             'logit_bias',
@@ -791,43 +646,43 @@ export const DEFAULT_MODELS: OpenRouterModel[] = [
             'top_logprobs',
             'top_p',
         ],
-        default_parameters: {
+        defaultParameters: {
             temperature: 0.6,
-            top_p: null,
-            frequency_penalty: null,
+            topP: null,
+            frequencyPenalty: null,
         },
     },
     {
         id: 'moonshotai/kimi-k2-thinking',
-        canonical_slug: 'moonshotai/kimi-k2-thinking-20251106',
-        hugging_face_id: 'moonshotai/Kimi-K2-Thinking',
+        canonicalSlug: 'moonshotai/kimi-k2-thinking-20251106',
+        huggingFaceId: 'moonshotai/Kimi-K2-Thinking',
         name: 'MoonshotAI: Kimi K2 Thinking',
         created: 1762440622,
         description:
-            'Kimi K2 Thinking is Moonshot AI’s most advanced open reasoning model to date, extending the K2 series into agentic, long-horizon reasoning. Built on the trillion-parameter Mixture-of-Experts (MoE) architecture introduced in Kimi K2, it activates 32 billion parameters per forward pass and supports 256 k-token context windows. The model is optimized for persistent step-by-step thought, dynamic tool invocation, and complex reasoning workflows that span hundreds of turns. It interleaves step-by-step reasoning with tool use, enabling autonomous research, coding, and writing that can persist for hundreds of sequential actions without drift.\n\nIt sets new open-source benchmarks on HLE, BrowseComp, SWE-Multilingual, and LiveCodeBench, while maintaining stable multi-agent behavior through 200–300 tool calls. Built on a large-scale MoE architecture with MuonClip optimization, it combines strong reasoning depth with high inference efficiency for demanding agentic and analytical tasks.',
-        context_length: 262144,
+            "Kimi K2 Thinking is Moonshot AI's most advanced open reasoning model, optimized for persistent step-by-step thought and complex reasoning workflows.",
+        contextLength: 262144,
         architecture: {
-            modality: 'text-\u003Etext',
-            input_modalities: ['text'],
-            output_modalities: ['text'],
+            modality: 'text->text',
+            inputModalities: ['text'],
+            outputModalities: ['text'],
             tokenizer: 'Other',
-            instruct_type: null,
+            instructType: null,
         },
         pricing: {
             prompt: '0.00000045',
             completion: '0.00000235',
             request: '0',
             image: '0',
-            web_search: '0',
-            internal_reasoning: '0',
+            webSearch: '0',
+            internalReasoning: '0',
         },
-        top_provider: {
-            context_length: 262144,
-            max_completion_tokens: 16384,
-            is_moderated: false,
+        topProvider: {
+            contextLength: 262144,
+            maxCompletionTokens: 16384,
+            isModerated: false,
         },
-        per_request_limits: null,
-        supported_parameters: [
+        perRequestLimits: null,
+        supportedParameters: [
             'frequency_penalty',
             'include_reasoning',
             'logit_bias',
@@ -848,43 +703,43 @@ export const DEFAULT_MODELS: OpenRouterModel[] = [
             'top_logprobs',
             'top_p',
         ],
-        default_parameters: {
+        defaultParameters: {
             temperature: null,
-            top_p: null,
-            frequency_penalty: null,
+            topP: null,
+            frequencyPenalty: null,
         },
     },
     {
         id: 'moonshotai/kimi-k2-0905:nitro',
-        canonical_slug: 'moonshotai/kimi-k2-0905',
-        hugging_face_id: 'moonshotai/Kimi-K2-Instruct-0905',
+        canonicalSlug: 'moonshotai/kimi-k2-0905',
+        huggingFaceId: 'moonshotai/Kimi-K2-Instruct-0905',
         name: 'MoonshotAI: Kimi K2 0905',
         created: 1757021147,
         description:
-            'Kimi K2 0905 is the September update of [Kimi K2 0711](moonshotai/kimi-k2). It is a large-scale Mixture-of-Experts (MoE) language model developed by Moonshot AI, featuring 1 trillion total parameters with 32 billion active per forward pass. It supports long-context inference up to 256k tokens, extended from the previous 128k.\n\nThis update improves agentic coding with higher accuracy and better generalization across scaffolds, and enhances frontend coding with more aesthetic and functional outputs for web, 3D, and related tasks. Kimi K2 is optimized for agentic capabilities, including advanced tool use, reasoning, and code synthesis. It excels across coding (LiveCodeBench, SWE-bench), reasoning (ZebraLogic, GPQA), and tool-use (Tau2, AceBench) benchmarks. The model is trained with a novel stack incorporating the MuonClip optimizer for stable large-scale MoE training.',
-        context_length: 262144,
+            'Kimi K2 0905 is a large-scale MoE language model with 1T parameters and 256k context, optimized for agentic coding and tool use.',
+        contextLength: 262144,
         architecture: {
-            modality: 'text-\u003Etext',
-            input_modalities: ['text'],
-            output_modalities: ['text'],
+            modality: 'text->text',
+            inputModalities: ['text'],
+            outputModalities: ['text'],
             tokenizer: 'Other',
-            instruct_type: null,
+            instructType: null,
         },
         pricing: {
             prompt: '0.00000039',
             completion: '0.0000019',
             request: '0',
             image: '0',
-            web_search: '0',
-            internal_reasoning: '0',
+            webSearch: '0',
+            internalReasoning: '0',
         },
-        top_provider: {
-            context_length: 262144,
-            max_completion_tokens: 262144,
-            is_moderated: false,
+        topProvider: {
+            contextLength: 262144,
+            maxCompletionTokens: 262144,
+            isModerated: false,
         },
-        per_request_limits: null,
-        supported_parameters: [
+        perRequestLimits: null,
+        supportedParameters: [
             'frequency_penalty',
             'logit_bias',
             'logprobs',
@@ -903,7 +758,7 @@ export const DEFAULT_MODELS: OpenRouterModel[] = [
             'top_logprobs',
             'top_p',
         ],
-        default_parameters: {},
+        defaultParameters: {},
     },
 ];
 

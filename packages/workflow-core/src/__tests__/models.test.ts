@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import type { Model } from '@openrouter/sdk/models';
 import {
     ModelRegistry,
     modelRegistry,
-    OpenRouterModel,
     ModelInfo,
     extractProvider,
     toModelInfo,
@@ -10,10 +10,10 @@ import {
     registerDefaultModels,
 } from '../models';
 
-// Sample model matching OpenRouter SDK format
-const sampleGPT4Model: OpenRouterModel = {
+// Sample model matching OpenRouter SDK format (camelCase)
+const sampleGPT4Model: Model = {
     id: 'openai/gpt-4',
-    canonical_slug: 'openai/gpt-4',
+    canonicalSlug: 'openai/gpt-4',
     name: 'GPT-4',
     created: 1692901234,
     description: 'GPT-4 is a large multimodal model.',
@@ -21,99 +21,99 @@ const sampleGPT4Model: OpenRouterModel = {
         prompt: '0.00003',
         completion: '0.00006',
     },
-    context_length: 8192,
+    contextLength: 8192,
     architecture: {
         tokenizer: 'GPT',
         modality: 'text->text',
-        input_modalities: ['text'],
-        output_modalities: ['text'],
+        inputModalities: ['text'],
+        outputModalities: ['text'],
     },
-    top_provider: {
-        is_moderated: true,
-        max_completion_tokens: 4096,
+    topProvider: {
+        isModerated: true,
+        maxCompletionTokens: 4096,
     },
-    per_request_limits: null,
-    supported_parameters: ['temperature', 'top_p', 'max_tokens'],
-    default_parameters: { temperature: 0.7 },
+    perRequestLimits: null,
+    supportedParameters: ['temperature', 'top_p', 'max_tokens'],
+    defaultParameters: { temperature: 0.7 },
 };
 
-const sampleVisionModel: OpenRouterModel = {
+const sampleVisionModel: Model = {
     id: 'openai/gpt-4-vision-preview',
-    canonical_slug: 'openai/gpt-4-vision-preview',
+    canonicalSlug: 'openai/gpt-4-vision-preview',
     name: 'GPT-4 Vision',
     created: 1699401600,
     pricing: {
         prompt: '0.00001',
         completion: '0.00003',
     },
-    context_length: 128000,
+    contextLength: 128000,
     architecture: {
         tokenizer: 'GPT',
         modality: 'text+image->text',
-        input_modalities: ['text', 'image'],
-        output_modalities: ['text'],
+        inputModalities: ['text', 'image'],
+        outputModalities: ['text'],
     },
-    top_provider: {
-        is_moderated: true,
+    topProvider: {
+        isModerated: true,
     },
-    per_request_limits: null,
-    supported_parameters: ['temperature', 'top_p', 'max_tokens'],
-    default_parameters: null,
+    perRequestLimits: null,
+    supportedParameters: ['temperature', 'top_p', 'max_tokens'],
+    defaultParameters: null,
 };
 
-const sampleClaudeModel: OpenRouterModel = {
+const sampleClaudeModel: Model = {
     id: 'anthropic/claude-3-opus',
-    canonical_slug: 'anthropic/claude-3-opus',
+    canonicalSlug: 'anthropic/claude-3-opus',
     name: 'Claude 3 Opus',
     created: 1709596800,
     pricing: {
         prompt: '0.000015',
         completion: '0.000075',
     },
-    context_length: 200000,
+    contextLength: 200000,
     architecture: {
         tokenizer: 'Claude',
         modality: 'text+image->text',
-        input_modalities: ['text', 'image'],
-        output_modalities: ['text'],
+        inputModalities: ['text', 'image'],
+        outputModalities: ['text'],
     },
-    top_provider: {
-        is_moderated: true,
-        context_length: 200000,
+    topProvider: {
+        isModerated: true,
+        contextLength: 200000,
     },
-    per_request_limits: null,
-    supported_parameters: [
+    perRequestLimits: null,
+    supportedParameters: [
         'temperature',
         'top_p',
         'top_k',
         'max_tokens',
         'tools',
     ],
-    default_parameters: { temperature: 1 },
+    defaultParameters: { temperature: 1 },
 };
 
-const sampleGeminiModel: OpenRouterModel = {
+const sampleGeminiModel: Model = {
     id: 'google/gemini-pro-1.5',
-    canonical_slug: 'google/gemini-pro-1.5',
+    canonicalSlug: 'google/gemini-pro-1.5',
     name: 'Gemini Pro 1.5',
     created: 1707955200,
     pricing: {
         prompt: '0.00000125',
         completion: '0.000005',
     },
-    context_length: 1000000,
+    contextLength: 1000000,
     architecture: {
         tokenizer: 'Gemini',
         modality: 'text+image+video+audio->text',
-        input_modalities: ['text', 'image', 'video', 'audio'],
-        output_modalities: ['text'],
+        inputModalities: ['text', 'image', 'video', 'audio'],
+        outputModalities: ['text'],
     },
-    top_provider: {
-        is_moderated: true,
+    topProvider: {
+        isModerated: true,
     },
-    per_request_limits: null,
-    supported_parameters: ['temperature', 'top_p', 'max_tokens', 'tools'],
-    default_parameters: null,
+    perRequestLimits: null,
+    supportedParameters: ['temperature', 'top_p', 'max_tokens', 'tools'],
+    defaultParameters: null,
 };
 
 describe('ModelRegistry', () => {
@@ -394,7 +394,7 @@ describe('extractProvider', () => {
 });
 
 describe('toModelInfo', () => {
-    it('should convert OpenRouterModel to ModelInfo', () => {
+    it('should convert Model to ModelInfo', () => {
         const info: ModelInfo = toModelInfo(sampleGPT4Model);
         expect(info.id).toBe('openai/gpt-4');
         expect(info.name).toBe('GPT-4');
@@ -411,7 +411,7 @@ describe('toModelInfo', () => {
     });
 
     it('should handle numeric pricing', () => {
-        const modelWithNumericPricing: OpenRouterModel = {
+        const modelWithNumericPricing: Model = {
             ...sampleGPT4Model,
             pricing: {
                 prompt: 0.00003,
@@ -439,12 +439,12 @@ describe('DEFAULT_MODELS', () => {
     it('should have valid model structure', () => {
         for (const model of DEFAULT_MODELS) {
             expect(model.id).toBeDefined();
-            expect(model.canonical_slug).toBeDefined();
+            expect(model.canonicalSlug).toBeDefined();
             expect(model.name).toBeDefined();
             expect(model.pricing).toBeDefined();
             expect(model.architecture).toBeDefined();
-            expect(model.architecture.input_modalities).toBeDefined();
-            expect(model.architecture.output_modalities).toBeDefined();
+            expect(model.architecture.inputModalities).toBeDefined();
+            expect(model.architecture.outputModalities).toBeDefined();
         }
     });
 });
