@@ -225,7 +225,7 @@ function createDefaultWorkflow() {
                 data: {
                     label: 'Detect Intent',
                     prompt: 'Analyze the user request and route to:\n- "analysis" for questions requiring research or analysis\n- "creative" for creative writing, brainstorming, or idea generation\n- "simple" for quick factual answers',
-                    model: 'openai/gpt-4o-mini',
+                    model: 'z-ai/glm-4.6:exacto',
                 },
             },
             {
@@ -249,7 +249,7 @@ function createDefaultWorkflow() {
                 position: { x: 250, y: 250 },
                 data: {
                     label: 'Creative Agent',
-                    model: 'openai/gpt-4o',
+                    model: 'z-ai/glm-4.6:exacto',
                     prompt: 'You are a creative writer. Generate engaging, imaginative content that inspires and delights.',
                 },
             },
@@ -259,7 +259,7 @@ function createDefaultWorkflow() {
                 position: { x: 500, y: 250 },
                 data: {
                     label: 'Quick Answer',
-                    model: 'openai/gpt-4o-mini',
+                    model: 'z-ai/glm-4.6:exacto',
                     prompt: 'Provide a concise, direct answer. Be helpful but brief.',
                 },
             },
@@ -281,7 +281,7 @@ function createDefaultWorkflow() {
                 position: { x: 250, y: 530 },
                 data: {
                     label: 'Refinement',
-                    model: 'openai/gpt-4o-mini',
+                    model: 'z-ai/glm-4.6:exacto',
                     prompt: 'Review and improve the previous response. Make it more clear, accurate, and helpful. Build on what was good and fix any issues.',
                 },
             },
@@ -538,7 +538,6 @@ async function handleSendMessage() {
             apiKey.value,
             workflow,
             message,
-            conversationHistory.value.slice(0, -1),
             {
                 onNodeStatus: setNodeStatus,
                 onNodeOutput: (nodeId, output) => {
@@ -724,6 +723,7 @@ async function handleSendMessage() {
         setStreamingContent('');
         isThinking.value = false;
         thinkingContent.value = '';
+        branchStreams.value = {};
     }
 }
 

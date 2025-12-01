@@ -15,7 +15,7 @@ const props = defineProps<{
 }>();
 
 const label = computed(() => props.data.label || 'Agent');
-const model = computed(() => props.data.model || 'openai/gpt-4o-mini');
+const model = computed(() => props.data.model || 'z-ai/glm-4.6:exacto');
 const status = computed(() => props.data.status || 'idle');
 
 const modelShort = computed(() => {

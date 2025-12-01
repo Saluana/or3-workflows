@@ -132,7 +132,7 @@ function getDemoSubflowRegistry(): SubflowRegistry {
                     position: { x: 0, y: 100 },
                     data: {
                         label: 'Summarizer',
-                        model: 'openai/gpt-4o-mini',
+                        model: 'z-ai/glm-4.6:exacto',
                         prompt: 'Summarize the following text concisely: {{text}}',
                     },
                 },
@@ -171,7 +171,7 @@ function getDemoSubflowRegistry(): SubflowRegistry {
                     position: { x: 0, y: 100 },
                     data: {
                         label: 'Translator',
-                        model: 'openai/gpt-4o-mini',
+                        model: 'z-ai/glm-4.6:exacto',
                         prompt: 'Translate the following text to {{targetLanguage}}: {{text}}',
                     },
                 },
@@ -239,7 +239,6 @@ export function useWorkflowExecution() {
         apiKey: string,
         workflow: WorkflowData,
         input: string,
-        _conversationHistory: Array<{ role: string; content: string }>,
         callbacks: ExecutionCallbacks
     ): Promise<string> {
         registerDemoTools();

@@ -62,7 +62,7 @@ import {
 // ============================================================================
 
 /** Default model used when no model is specified */
-const DEFAULT_MODEL = 'openai/gpt-4o-mini';
+const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
 
 /** Maximum retry attempts for API calls */
 const DEFAULT_MAX_RETRIES = 2;

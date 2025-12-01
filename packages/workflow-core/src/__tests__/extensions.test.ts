@@ -152,7 +152,7 @@ describe('AgentNodeExtension', () => {
     it('should have default data with model', () => {
         expect(AgentNodeExtension.defaultData).toMatchObject({
             label: 'Agent',
-            model: 'openai/gpt-4o-mini',
+            model: 'z-ai/glm-4.6:exacto',
             prompt: '',
         });
     });

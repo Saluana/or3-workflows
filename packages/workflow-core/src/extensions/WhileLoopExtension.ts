@@ -11,7 +11,7 @@ import type {
 } from '../types';
 import { estimateTokenUsage } from '../compaction';
 
-const DEFAULT_MODEL = 'openai/gpt-4o-mini';
+const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
 
 /**
  * While Loop node extension definition.

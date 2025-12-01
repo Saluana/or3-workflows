@@ -14,7 +14,7 @@ import type {
 import { estimateTokenUsage } from '../compaction';
 
 /** Default model for router classification */
-const DEFAULT_MODEL = 'openai/gpt-4o-mini';
+const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
 
 /**
  * Router Node Extension

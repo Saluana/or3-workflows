@@ -14,7 +14,7 @@ const nodeTypes = [
         colorVar: '--or3-color-accent',
         defaultData: {
             label: 'New Agent',
-            model: 'openai/gpt-4o-mini',
+            model: 'z-ai/glm-4.6:exacto',
             prompt: '',
         },
     },
@@ -37,7 +37,7 @@ const nodeTypes = [
         colorVar: '--or3-color-info',
         defaultData: {
             label: 'Parallel',
-            model: 'openai/gpt-4o-mini',
+            model: 'z-ai/glm-4.6:exacto',
             prompt: 'Combine the outputs into a coherent response.',
             branches: [],
         },

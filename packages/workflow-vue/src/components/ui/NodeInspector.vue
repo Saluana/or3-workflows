@@ -1107,8 +1107,8 @@ const handleDelete = () => {
                     class="model-select"
                     :value="
                         isWhileNode
-                            ? whileData.conditionModel || 'openai/gpt-4o-mini'
-                            : nodeData.model || 'openai/gpt-4o-mini'
+                            ? whileData.conditionModel || 'z-ai/glm-4.6:exacto'
+                            : nodeData.model || 'z-ai/glm-4.6:exacto'
                     "
                     @change="updateModel"
                 >
@@ -1126,8 +1126,8 @@ const handleDelete = () => {
                         {{
                             isWhileNode
                                 ? whileData.conditionModel ||
-                                  'openai/gpt-4o-mini'
-                                : nodeData.model || 'openai/gpt-4o-mini'
+                                  'z-ai/glm-4.6:exacto'
+                                : nodeData.model || 'z-ai/glm-4.6:exacto'
                         }}
                     </code>
                 </div>
@@ -1363,7 +1363,7 @@ const handleDelete = () => {
                                 class="model-select"
                                 :value="
                                     parallelData.mergeModel ||
-                                    'openai/gpt-4o-mini'
+                                    'z-ai/glm-4.6:exacto'
                                 "
                                 @change="(e) => props.editor.commands.updateNodeData(selectedNode!.id, { model: (e.target as HTMLSelectElement).value })"
                             >

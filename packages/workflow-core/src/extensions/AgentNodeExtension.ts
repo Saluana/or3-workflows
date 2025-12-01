@@ -13,7 +13,7 @@ import type { HITLRequest } from '../hitl';
 import { estimateTokenUsage } from '../compaction';
 
 /** Default model for agent nodes */
-const DEFAULT_MODEL = 'openai/gpt-4o-mini';
+const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
 
 /** Default maximum number of tool call iterations to prevent infinite loops */
 const DEFAULT_MAX_TOOL_ITERATIONS = 10;
