@@ -94,7 +94,7 @@ const tokenUsage = ref<{ nodeId: string; usage: TokenUsageDetails } | null>(
     null
 );
 
-// Parallel branch streaming state
+// Parallel branch streaming state (for live streaming only)
 export interface BranchStream {
     nodeId: string;
     branchId: string;
@@ -104,15 +104,6 @@ export interface BranchStream {
     expanded: boolean;
 }
 const branchStreams = ref<Record<string, BranchStream>>({});
-
-// Completed branch collections (persisted in chat)
-export interface CompletedBranchCollection {
-    id: string;
-    nodeId: string;
-    branches: BranchStream[];
-    timestamp: Date;
-}
-const completedBranchCollections = ref<CompletedBranchCollection[]>([]);
 
 // Workflow name
 const workflowName = ref('My Workflow');
@@ -470,18 +461,11 @@ function toggleBranchExpanded(key: string) {
     }
 }
 
-// Handle toggling completed branch expansion
-function toggleCompletedBranchExpanded(payload: {
-    collectionId: string;
-    branchId: string;
-}) {
-    const collection = completedBranchCollections.value.find(
-        (c) => c.id === payload.collectionId
-    );
-    if (collection) {
-        const branch = collection.branches.find(
-            (b) => b.branchId === payload.branchId
-        );
+// Handle toggling branch expansion within a message
+function toggleMessageBranch(payload: { messageId: string; branchId: string }) {
+    const message = messages.value.find((m) => m.id === payload.messageId);
+    if (message?.branches) {
+        const branch = message.branches.find((b) => b.branchId === payload.branchId);
         if (branch) {
             branch.expanded = !branch.expanded;
         }
@@ -516,11 +500,7 @@ async function handleSendMessage() {
     setStreamingContent('');
     tokenUsage.value = null;
     error.value = null;
-    console.log(
-        '[Execution] Resetting active branch streams (keeping completed collections)'
-    );
-    branchStreams.value = {}; // Reset active branch streams only
-    // Note: completedBranchCollections persists until chat is cleared
+    branchStreams.value = {}; // Reset active branch streams
 
     try {
         const finalOutput = await executeWorkflowFn(
@@ -583,31 +563,23 @@ async function handleSendMessage() {
                         );
 
                     if (allCompleted) {
-                        // Move to completed collections for persistence
-                        // Deep copy branches to ensure reactivity works
-                        const branchesCopy = nodeBranches.map((b) => ({
-                            nodeId: b.nodeId,
-                            branchId: b.branchId,
-                            label: b.label,
-                            content: b.content,
-                            status: b.status,
-                            expanded: false, // Start collapsed in completed view
-                        }));
-                        console.log(
-                            '[Branches] Moving completed branches to persistent storage:',
-                            branchesCopy
-                        );
-                        completedBranchCollections.value.push({
+                        // Add a message with embedded branches to the chat
+                        const branchesMessage: ChatMessage = {
                             id: crypto.randomUUID(),
-                            nodeId,
-                            branches: branchesCopy,
+                            role: 'assistant',
+                            content: '', // Empty content - branches are displayed instead
                             timestamp: new Date(),
-                        });
-                        console.log(
-                            '[Branches] completedBranchCollections now has:',
-                            completedBranchCollections.value.length,
-                            'collections'
-                        );
+                            nodeId,
+                            branches: nodeBranches.map((b) => ({
+                                branchId: b.branchId,
+                                label: b.label,
+                                content: b.content,
+                                expanded: false, // Collapsed by default
+                            })),
+                        };
+                        messages.value.push(branchesMessage);
+                        console.log('[Branches] Added branches message to chat:', branchesMessage);
+                        
                         // Clear streaming branches for this node
                         for (const b of nodeBranches) {
                             delete branchStreams.value[
@@ -720,7 +692,6 @@ function clearMessages() {
     conversationHistory.value = [];
     tokenUsage.value = null;
     branchStreams.value = {};
-    completedBranchCollections.value = [];
     resetExecution();
 }
 
@@ -878,11 +849,10 @@ function syncMetaToEditor() {
                 :is-running="isRunning"
                 :token-usage="tokenUsage"
                 :branch-streams="branchStreams"
-                :completed-branch-collections="completedBranchCollections"
                 @send="handleSendMessage"
                 @clear="clearMessages"
                 @toggle-branch="toggleBranchExpanded"
-                @toggle-completed-branch="toggleCompletedBranchExpanded"
+                @toggle-message-branch="toggleMessageBranch"
             />
 
             <!-- Mobile Bottom Navigation -->

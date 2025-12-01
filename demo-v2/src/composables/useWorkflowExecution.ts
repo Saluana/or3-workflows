@@ -13,10 +13,18 @@ import {
     type TokenUsageDetails,
 } from '@or3/workflow-core';
 
+export interface BranchData {
+    branchId: string;
+    label: string;
+    content: string;
+    expanded: boolean;
+}
+
 export interface ChatMessage extends CoreChatMessage {
     id: string;
     timestamp: Date;
     nodeId?: string;
+    branches?: BranchData[]; // Embedded branch data for parallel nodes
 }
 
 // Legacy callbacks expected by App.vue

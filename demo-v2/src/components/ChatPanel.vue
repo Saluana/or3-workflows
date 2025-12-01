@@ -3,7 +3,7 @@ import { ref, watch, nextTick, computed } from 'vue';
 import type { TokenUsageDetails } from '@or3/workflow-core';
 import type { ChatMessage } from '../composables';
 
-// Branch stream type (matches App.vue)
+// Branch stream type (for live streaming)
 interface BranchStream {
     nodeId: string;
     branchId: string;
@@ -11,14 +11,6 @@ interface BranchStream {
     content: string;
     status: 'streaming' | 'completed' | 'error';
     expanded: boolean;
-}
-
-// Completed branch collection type (matches App.vue)
-interface CompletedBranchCollection {
-    id: string;
-    nodeId: string;
-    branches: BranchStream[];
-    timestamp: Date;
 }
 
 const props = defineProps<{
@@ -30,7 +22,6 @@ const props = defineProps<{
     chatInput: string;
     tokenUsage?: { nodeId: string; usage: TokenUsageDetails } | null;
     branchStreams?: Record<string, BranchStream>;
-    completedBranchCollections?: CompletedBranchCollection[];
 }>();
 
 const emit = defineEmits<{
@@ -38,9 +29,7 @@ const emit = defineEmits<{
     send: [];
     clear: [];
     toggleBranch: [key: string];
-    toggleCompletedBranch: [
-        payload: { collectionId: string; branchId: string }
-    ];
+    toggleMessageBranch: [payload: { messageId: string; branchId: string }];
 }>();
 
 const messagesContainer = ref<HTMLElement | null>(null);
@@ -58,19 +47,6 @@ const getNodeDisplayName = (nodeId: string): string => {
     // Fall back to showing truncated ID if no label
     return nodeId.length > 12 ? `${nodeId.slice(0, 8)}...` : nodeId;
 };
-
-// Debug: watch completedBranchCollections
-watch(
-    () => props.completedBranchCollections,
-    (newVal) => {
-        console.log(
-            '[ChatPanel] completedBranchCollections changed:',
-            newVal?.length,
-            newVal
-        );
-    },
-    { deep: true }
-);
 
 // Auto-scroll to bottom when new messages arrive
 watch(
@@ -248,94 +224,86 @@ const formatNumber = (value?: number) =>
                     v-for="msg in messages"
                     :key="msg.id"
                     class="message"
-                    :class="msg.role"
+                    :class="[msg.role, { 'has-branches': msg.branches?.length }]"
                 >
-                    <div class="message-avatar">
-                        <svg
-                            v-if="msg.role === 'user'"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                        >
-                            <path
-                                d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"
-                            ></path>
-                            <circle cx="12" cy="7" r="4"></circle>
-                        </svg>
-                        <svg
-                            v-else
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                        >
-                            <path
-                                d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"
-                            ></path>
-                        </svg>
-                    </div>
-                    <div class="message-content">
-                        <div class="message-bubble">{{ msg.content }}</div>
-                        <div v-if="msg.nodeId" class="message-meta">
-                            via <span class="node-name">{{ msg.nodeId }}</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Completed Parallel Branch Collections (persisted) -->
-                <div
-                    v-for="collection in completedBranchCollections"
-                    :key="collection.id"
-                    class="parallel-branches completed"
-                >
-                    <div class="branches-header">
-                        <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            class="branches-icon"
-                        >
-                            <path d="M6 3v12"></path>
-                            <circle cx="18" cy="6" r="3"></circle>
-                            <circle cx="6" cy="18" r="3"></circle>
-                            <path d="M18 9a9 9 0 0 1-9 9"></path>
-                        </svg>
-                        <span>{{ getNodeDisplayName(collection.nodeId) }}</span>
-                        <span class="branch-count"
-                            >({{ collection.branches.length }} branches)</span
-                        >
-                    </div>
-                    <div
-                        v-for="branch in collection.branches"
-                        :key="branch.branchId"
-                        class="branch-item completed"
-                        :class="{ expanded: branch.expanded }"
-                    >
-                        <button
-                            class="branch-header"
-                            @click="
-                                emit('toggleCompletedBranch', {
-                                    collectionId: collection.id,
-                                    branchId: branch.branchId,
-                                })
-                            "
-                        >
+                    <!-- Regular message (no branches) -->
+                    <template v-if="!msg.branches?.length">
+                        <div class="message-avatar">
                             <svg
-                                class="branch-chevron"
+                                v-if="msg.role === 'user'"
                                 viewBox="0 0 24 24"
                                 fill="none"
                                 stroke="currentColor"
                                 stroke-width="2"
                             >
-                                <polyline points="9 18 15 12 9 6"></polyline>
+                                <path
+                                    d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"
+                                ></path>
+                                <circle cx="12" cy="7" r="4"></circle>
                             </svg>
-                            <span class="branch-label">{{ branch.label }}</span>
-                            <span class="branch-status-dot"></span>
-                        </button>
-                        <div v-show="branch.expanded" class="branch-content">
-                            <div class="branch-text">{{ branch.content }}</div>
+                            <svg
+                                v-else
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <path
+                                    d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"
+                                ></path>
+                            </svg>
+                        </div>
+                        <div class="message-content">
+                            <div class="message-bubble">{{ msg.content }}</div>
+                            <div v-if="msg.nodeId" class="message-meta">
+                                via <span class="node-name">{{ msg.nodeId }}</span>
+                            </div>
+                        </div>
+                    </template>
+                    
+                    <!-- Message with branches (parallel node output) -->
+                    <div v-else class="parallel-branches completed">
+                        <div class="branches-header">
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                class="branches-icon"
+                            >
+                                <path d="M6 3v12"></path>
+                                <circle cx="18" cy="6" r="3"></circle>
+                                <circle cx="6" cy="18" r="3"></circle>
+                                <path d="M18 9a9 9 0 0 1-9 9"></path>
+                            </svg>
+                            <span>{{ msg.nodeId ? getNodeDisplayName(msg.nodeId) : 'Parallel Branches' }}</span>
+                            <span class="branch-count">({{ msg.branches.length }} branches)</span>
+                        </div>
+                        <div
+                            v-for="branch in msg.branches"
+                            :key="branch.branchId"
+                            class="branch-item completed"
+                            :class="{ expanded: branch.expanded }"
+                        >
+                            <button
+                                class="branch-header"
+                                @click="emit('toggleMessageBranch', { messageId: msg.id, branchId: branch.branchId })"
+                            >
+                                <svg
+                                    class="branch-chevron"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                >
+                                    <polyline points="9 18 15 12 9 6"></polyline>
+                                </svg>
+                                <span class="branch-label">{{ branch.label }}</span>
+                                <span class="branch-status-dot"></span>
+                            </button>
+                            <div v-show="branch.expanded" class="branch-content">
+                                <div class="branch-text">{{ branch.content }}</div>
+                            </div>
                         </div>
                     </div>
                 </div>
