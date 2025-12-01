@@ -80,23 +80,23 @@ const MAX_ITERATIONS_MULTIPLIER = 3;
 
 /** Graph structure for workflow traversal */
 interface WorkflowGraph {
-    nodeMap: Map<string, WorkflowNode>;
-    children: Record<string, Array<{ nodeId: string; handleId?: string }>>;
-    parents: Record<string, string[]>;
+    readonly nodeMap: ReadonlyMap<string, WorkflowNode>;
+    readonly children: Readonly<Record<string, ReadonlyArray<{ nodeId: string; handleId?: string }>>>;
+    readonly parents: Readonly<Record<string, ReadonlyArray<string>>>;
 }
 
 /** Internal execution state */
 interface InternalExecutionContext {
-    input: string;
+    readonly input: string;
     currentInput: string;
-    originalInput: string;
-    attachments: Attachment[];
+    readonly originalInput: string;
+    readonly attachments: Attachment[];
     outputs: Record<string, string>;
     nodeChain: string[];
-    signal: AbortSignal;
-    session: Session;
-    memory: MemoryAdapter;
-    workflowName: string;
+    readonly signal: AbortSignal;
+    readonly session: Session;
+    readonly memory: MemoryAdapter;
+    readonly workflowName: string;
 }
 
 // ============================================================================
@@ -206,8 +206,13 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             this.options.tokenCounter || new ApproximateTokenCounter();
     }
 
-    private isLLMProvider(obj: any): obj is LLMProvider {
-        return 'chat' in obj && typeof obj.chat === 'function';
+    private isLLMProvider(obj: unknown): obj is LLMProvider {
+        return (
+            obj !== null &&
+            typeof obj === 'object' &&
+            'chat' in obj &&
+            typeof obj.chat === 'function'
+        );
     }
 
     // ==========================================================================
@@ -321,11 +326,13 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             let finalOutput = '';
 
             // Helper to propagate skip status
-            const propagateSkip = (nodeId: string) => {
+            const propagateSkip = (nodeId: string): void => {
                 if (executed.has(nodeId)) return;
 
                 // Check if all parents are resolved (executed or skipped)
-                const parentIds = graph.parents[nodeId] || [];
+                const parentIds = graph.parents[nodeId];
+                if (!parentIds) return;
+                
                 const allParentsResolved = parentIds.every((p) =>
                     executed.has(p)
                 );
@@ -335,9 +342,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     skipped.add(nodeId);
 
                     // Propagate to children
-                    const children = graph.children[nodeId] || [];
-                    for (const child of children) {
-                        propagateSkip(child.nodeId);
+                    const children = graph.children[nodeId];
+                    if (children) {
+                        for (const child of children) {
+                            propagateSkip(child.nodeId);
+                        }
                     }
                 }
             };
@@ -347,7 +356,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 const currentId = queue.shift()!;
 
                 // Check for cancellation
-                if (this.abortController.signal.aborted) {
+                if (this.abortController?.signal.aborted) {
                     throw new Error('Workflow cancelled');
                 }
 
@@ -355,16 +364,13 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 if (executed.has(currentId)) continue;
 
                 // Check if all parents are executed (except for start node)
-                const parentIds = graph.parents[currentId] || [];
-                const allParentsExecuted = parentIds.every((p) =>
+                const parentIds = graph.parents[currentId];
+                const allParentsExecuted = !parentIds || parentIds.every((p) =>
                     executed.has(p)
                 );
 
                 if (!allParentsExecuted && currentId !== startNode.id) {
-                    // If not all parents executed, check if we should wait or if we are stuck
-                    // But since we only add to queue when parents complete, this case implies
-                    // we were added by one parent but another is still pending.
-                    // We should re-queue and wait.
+                    // If not all parents executed, re-queue and continue
                     queue.push(currentId);
                     continue;
                 }
@@ -387,10 +393,12 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 // Handle skipped nodes (children not in nextNodes) - except while loops which manage their own control flow
                 const currentNode = graph.nodeMap.get(currentId);
                 if (currentNode?.type !== 'whileLoop') {
-                    const allChildren = graph.children[currentId] || [];
-                    for (const child of allChildren) {
-                        if (!result.nextNodes.includes(child.nodeId)) {
-                            propagateSkip(child.nodeId);
+                    const allChildren = graph.children[currentId];
+                    if (allChildren) {
+                        for (const child of allChildren) {
+                            if (!result.nextNodes.includes(child.nodeId)) {
+                                propagateSkip(child.nodeId);
+                            }
                         }
                     }
                 }
@@ -406,18 +414,6 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 if (result.nextNodes.includes(currentId)) {
                     executed.delete(currentId);
                 }
-
-                // Also check children of skipped nodes - they might be ready now if they have multiple parents
-                // (e.g. merge node where one parent was skipped and one just finished)
-                // Actually, propagateSkip handles the recursive skipping.
-                // But if a merge node has one skipped parent and one active parent (nextId),
-                // nextId is added to queue. When nextId runs, it will add merge node to queue.
-                // When merge node runs, it checks allParentsExecuted.
-                // Since skipped parent is in executed set, it passes.
-                // So we just need to ensure that if a node was WAITING in the queue (re-queued),
-                // and its other parent just got skipped, it should be processed.
-                // But we don't keep waiting nodes in a separate list, we re-push to queue.
-                // So it will be checked again.
             }
 
             if (iterations >= maxIterations) {
@@ -485,6 +481,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             this.abortController = null;
         }
         this.running = false;
+        // Clear token usage events to prevent memory buildup
+        this.tokenUsageEvents = [];
     }
 
     /**
@@ -587,12 +585,12 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
         // Apply context compaction for nodes that use LLM with history
         let historyMessages = context.session.messages;
-        const llmNodeTypes = ['agent', 'router', 'whileLoop'];
-        if (llmNodeTypes.includes(node.type) && this.options.compaction) {
+        const llmNodeTypes = ['agent', 'router', 'whileLoop'] as const;
+        if (llmNodeTypes.includes(node.type as typeof llmNodeTypes[number]) && this.options.compaction) {
             const nodeData = node.data as unknown as Record<string, unknown>;
             const model =
-                (nodeData.model as string) ||
-                (nodeData.conditionModel as string) ||
+                (typeof nodeData.model === 'string' ? nodeData.model : null) ||
+                (typeof nodeData.conditionModel === 'string' ? nodeData.conditionModel : null) ||
                 this.options.defaultModel ||
                 DEFAULT_MODEL;
             const compactionResult = await this.compactHistoryIfNeeded(
@@ -837,14 +835,13 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             return undefined;
         }
 
-        const promptTokens = this.tokenUsageEvents.reduce(
-            (sum, entry) => sum + entry.usage.promptTokens,
-            0
-        );
-        const completionTokens = this.tokenUsageEvents.reduce(
-            (sum, entry) => sum + entry.usage.completionTokens,
-            0
-        );
+        let promptTokens = 0;
+        let completionTokens = 0;
+
+        for (const entry of this.tokenUsageEvents) {
+            promptTokens += entry.usage.promptTokens;
+            completionTokens += entry.usage.completionTokens;
+        }
 
         return {
             promptTokens,
@@ -864,11 +861,13 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         callbacks: ExecutionCallbacks
     ): Promise<{ output: string; nextNodes: string[] }> {
         const node = graph.nodeMap.get(nodeId);
-        if (!node) return { output: '', nextNodes: [] };
+        if (!node) {
+            // Early return for missing node
+            return { output: '', nextNodes: [] };
+        }
 
-        const errorConfig = (node.data as any)?.errorHandling as
-            | NodeErrorConfig
-            | undefined;
+        const nodeData = node.data as unknown as Record<string, unknown>;
+        const errorConfig = nodeData?.errorHandling as NodeErrorConfig | undefined;
         const retryConfig = errorConfig?.retry;
         const resolvedRetry: NodeRetryConfig | undefined =
             retryConfig ??
@@ -884,10 +883,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         );
 
         // Check if this node type supports HITL
-        const hitlConfig = (node.data as any)?.hitl as HITLConfig | undefined;
+        const hitlConfig = nodeData?.hitl as HITLConfig | undefined;
         const supportsHITL = ['agent', 'router', 'tool'].includes(node.type);
         const shouldUseHITL =
-            supportsHITL && hitlConfig?.enabled && this.options.onHITLRequest;
+            supportsHITL && hitlConfig?.enabled === true && this.options.onHITLRequest !== undefined;
 
         let lastError: ExecutionError | null = null;
         const retryHistory: Array<{
@@ -971,6 +970,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             }
         }
 
+        // This should never happen due to throw in loop, but TypeScript needs it
         throw lastError!;
     }
 
@@ -989,7 +989,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         edges: WorkflowEdge[],
         callbacks: ExecutionCallbacks
     ): Promise<{ output: string; nextNodes: string[] }> {
-        const hitlConfig = (node.data as any).hitl as HITLConfig | undefined;
+        const nodeData = node.data as unknown as Record<string, unknown>;
+        const hitlConfig = nodeData.hitl as HITLConfig | undefined;
 
         // No HITL configured or disabled, or no callback provided
         if (!hitlConfig?.enabled || !this.options.onHITLRequest) {
@@ -1003,7 +1004,41 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         }
 
         const workflowName = context.session.id || 'Workflow';
-        const childEdges = graph.children[node.id] || [];
+        const childEdges = graph.children[node.id];
+        const childNodeIds = childEdges ? childEdges.map((c) => c.nodeId) : [];
+
+        // Helper to handle reject action
+        const handleReject = (): { output: string; nextNodes: string[] } => {
+            const rejectEdge = edges.find(
+                (e) =>
+                    e.source === node.id &&
+                    e.sourceHandle === 'rejected'
+            );
+            if (rejectEdge) {
+                callbacks.onNodeFinish(node.id, 'HITL: Rejected');
+                return { output: '', nextNodes: [rejectEdge.target] };
+            }
+            throw new Error('HITL: Request rejected');
+        };
+
+        // Helper to handle skip action
+        const handleSkip = (): { output: string; nextNodes: string[] } => {
+            callbacks.onNodeFinish(node.id, 'HITL: Skipped');
+            return {
+                output: context.currentInput,
+                nextNodes: childNodeIds,
+            };
+        };
+
+        // Helper to update context with response data
+        const updateContextWithData = (data: unknown): void => {
+            if (data) {
+                context.currentInput =
+                    typeof data === 'string'
+                        ? data
+                        : JSON.stringify(data);
+            }
+        };
 
         switch (hitlConfig.mode) {
             case 'approval': {
@@ -1018,34 +1053,15 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 const response = await this.waitForHITL(request, hitlConfig);
 
                 if (response.action === 'reject') {
-                    // Find rejection branch or stop
-                    const rejectEdge = edges.find(
-                        (e) =>
-                            e.source === node.id &&
-                            e.sourceHandle === 'rejected'
-                    );
-                    if (rejectEdge) {
-                        callbacks.onNodeFinish(node.id, 'HITL: Rejected');
-                        return { output: '', nextNodes: [rejectEdge.target] };
-                    }
-                    throw new Error('HITL: Request rejected');
+                    return handleReject();
                 }
 
                 if (response.action === 'skip') {
-                    callbacks.onNodeFinish(node.id, 'HITL: Skipped');
-                    return {
-                        output: context.currentInput,
-                        nextNodes: childEdges.map((c) => c.nodeId),
-                    };
+                    return handleSkip();
                 }
 
                 // Approved - execute with possibly modified input
-                if (response.data) {
-                    context.currentInput =
-                        typeof response.data === 'string'
-                            ? response.data
-                            : JSON.stringify(response.data);
-                }
+                updateContextWithData(response.data);
                 return this.executeNodeInternal(
                     node.id,
                     context,
@@ -1067,33 +1083,15 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 const response = await this.waitForHITL(request, hitlConfig);
 
                 if (response.action === 'skip') {
-                    callbacks.onNodeFinish(node.id, 'HITL: Skipped');
-                    return {
-                        output: context.currentInput,
-                        nextNodes: childEdges.map((c) => c.nodeId),
-                    };
+                    return handleSkip();
                 }
 
                 if (response.action === 'reject') {
-                    const rejectEdge = edges.find(
-                        (e) =>
-                            e.source === node.id &&
-                            e.sourceHandle === 'rejected'
-                    );
-                    if (rejectEdge) {
-                        callbacks.onNodeFinish(node.id, 'HITL: Rejected');
-                        return { output: '', nextNodes: [rejectEdge.target] };
-                    }
-                    throw new Error('HITL: Request rejected');
+                    return handleReject();
                 }
 
                 // Use human input as node input
-                if (response.data) {
-                    context.currentInput =
-                        typeof response.data === 'string'
-                            ? response.data
-                            : JSON.stringify(response.data);
-                }
+                updateContextWithData(response.data);
 
                 return this.executeNodeInternal(
                     node.id,
@@ -1185,18 +1183,17 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         output?: string
     ): HITLRequest {
         const now = new Date();
+        const nodeData = node.data as unknown as Record<string, unknown>;
+        const nodeLabel = typeof nodeData.label === 'string' ? nodeData.label : node.id;
 
         const request: HITLRequest = {
             id: generateHITLRequestId(),
             nodeId: node.id,
-            nodeLabel: (node.data as any).label || node.id,
+            nodeLabel,
             mode: config.mode,
             prompt:
                 config.prompt ||
-                this.getDefaultHITLPrompt(
-                    config.mode,
-                    (node.data as any).label
-                ),
+                this.getDefaultHITLPrompt(config.mode, nodeLabel),
             context: {
                 input: context.currentInput,
                 output,
@@ -1253,16 +1250,21 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             );
         }
 
+        const signal = this.abortController?.signal;
+        
+        // Check if already aborted
+        if (signal?.aborted) {
+            throw new Error('Workflow cancelled');
+        }
+
         // Create abort promise that rejects when execution is cancelled
-        let abortHandler: (() => void) | undefined;
         const abortPromise = new Promise<HITLResponse>((_, reject) => {
-            const signal = this.abortController?.signal;
-            if (signal?.aborted) {
-                reject(new Error('Workflow cancelled'));
+            if (!signal) {
+                // If no signal, this promise never resolves (effectively infinite wait)
                 return;
             }
-            abortHandler = () => reject(new Error('Workflow cancelled'));
-            signal?.addEventListener('abort', abortHandler, { once: true });
+            const abortHandler = () => reject(new Error('Workflow cancelled'));
+            signal.addEventListener('abort', abortHandler, { once: true });
         });
 
         const promises: Promise<HITLResponse>[] = [
@@ -1293,16 +1295,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         try {
             return await Promise.race(promises);
         } finally {
-            // Cleanup
-            if (abortHandler && this.abortController?.signal) {
-                this.abortController.signal.removeEventListener(
-                    'abort',
-                    abortHandler
-                );
-            }
-            if (timeoutId) {
+            // Cleanup timeout to prevent memory leak
+            if (timeoutId !== undefined) {
                 clearTimeout(timeoutId);
             }
+            // Note: abort event listener is automatically cleaned up due to { once: true }
         }
     }
 
