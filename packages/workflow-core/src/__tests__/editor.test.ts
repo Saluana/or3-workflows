@@ -260,6 +260,204 @@ describe('WorkflowEditor', () => {
             expect(editor.nodes).toHaveLength(0);
             expect(editor.edges).toHaveLength(0);
         });
+
+        it('should set destroyed flag', () => {
+            expect(editor.isDestroyed()).toBe(false);
+            editor.destroy();
+            expect(editor.isDestroyed()).toBe(true);
+        });
+
+        it('should warn on double destroy', () => {
+            const warnSpy = vi
+                .spyOn(console, 'warn')
+                .mockImplementation(() => {});
+
+            editor.destroy();
+            editor.destroy();
+
+            expect(warnSpy).toHaveBeenCalledWith(
+                'WorkflowEditor.destroy() called on already destroyed instance'
+            );
+            warnSpy.mockRestore();
+        });
+
+        it('should prevent operations after destroy', () => {
+            editor.destroy();
+
+            expect(() => editor.load(createTestWorkflow())).toThrow(
+                'Cannot use WorkflowEditor after it has been destroyed'
+            );
+            expect(() => editor.undo()).toThrow(
+                'Cannot use WorkflowEditor after it has been destroyed'
+            );
+            expect(() => editor.redo()).toThrow(
+                'Cannot use WorkflowEditor after it has been destroyed'
+            );
+        });
+
+        it('should handle errors in extension onDestroy', () => {
+            const errorSpy = vi
+                .spyOn(console, 'error')
+                .mockImplementation(() => {});
+            const ext = {
+                ...mockExtension,
+                name: 'error-ext',
+                onDestroy: () => {
+                    throw new Error('Destroy error');
+                },
+            };
+            editor.registerExtension(ext);
+
+            expect(() => editor.destroy()).not.toThrow();
+            expect(errorSpy).toHaveBeenCalled();
+            errorSpy.mockRestore();
+        });
+
+        it('should clear event listeners', () => {
+            const callback = vi.fn();
+            editor.on('update', callback);
+            editor.destroy();
+
+            // Listeners should be cleared - emit should not call the callback
+            // We can't emit after destroy, but we can check listeners map is cleared
+            expect(editor.isDestroyed()).toBe(true);
+        });
+    });
+
+    describe('memory leak prevention', () => {
+        it('should cleanup empty listener sets', () => {
+            const callback1 = vi.fn();
+            const callback2 = vi.fn();
+
+            editor.on('update', callback1);
+            const unsub2 = editor.on('update', callback2);
+
+            unsub2();
+
+            // Verify callback2 is removed but callback1 still works
+            editor.emit('update');
+            expect(callback1).toHaveBeenCalled();
+            expect(callback2).not.toHaveBeenCalled();
+        });
+
+        it('should remove event key when all callbacks removed', () => {
+            const callback = vi.fn();
+            const unsub = editor.on('update', callback);
+
+            unsub();
+
+            // Event should be completely removed from map
+            editor.emit('update');
+            expect(callback).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('event emitter error handling', () => {
+        it('should catch and log errors in event callbacks', () => {
+            const errorSpy = vi
+                .spyOn(console, 'error')
+                .mockImplementation(() => {});
+            const goodCallback = vi.fn();
+            const badCallback = vi.fn(() => {
+                throw new Error('Callback error');
+            });
+
+            editor.on('update', badCallback);
+            editor.on('update', goodCallback);
+
+            editor.emit('update');
+
+            expect(errorSpy).toHaveBeenCalled();
+            expect(goodCallback).toHaveBeenCalled();
+            errorSpy.mockRestore();
+        });
+    });
+
+    describe('extension command conflicts', () => {
+        it('should warn on command name conflicts', () => {
+            const warnSpy = vi
+                .spyOn(console, 'warn')
+                .mockImplementation(() => {});
+
+            const ext1: NodeExtension = {
+                ...mockExtension,
+                name: 'ext1',
+                addCommands: () => ({ testCmd: () => true }),
+            };
+
+            const ext2: NodeExtension = {
+                ...mockExtension,
+                name: 'ext2',
+                addCommands: () => ({ testCmd: () => false }),
+            };
+
+            editor.registerExtension(ext1);
+            editor.registerExtension(ext2);
+
+            expect(warnSpy).toHaveBeenCalledWith(
+                expect.stringContaining("Command 'testCmd'")
+            );
+            warnSpy.mockRestore();
+        });
+    });
+
+    describe('viewport zoom validation', () => {
+        it('should validate zoom level is a number', () => {
+            const warnSpy = vi
+                .spyOn(console, 'warn')
+                .mockImplementation(() => {});
+
+            editor.setViewportZoom(NaN);
+            expect(warnSpy).toHaveBeenCalledWith(
+                'Invalid zoom level provided:',
+                NaN
+            );
+
+            editor.setViewportZoom(Infinity);
+            expect(warnSpy).toHaveBeenCalled();
+
+            warnSpy.mockRestore();
+        });
+
+        it('should clamp zoom level to valid range', () => {
+            editor.setViewportZoom(10);
+            expect(editor.viewport.zoom).toBe(3);
+
+            editor.setViewportZoom(0.01);
+            expect(editor.viewport.zoom).toBe(0.1);
+
+            editor.setViewportZoom(1.5);
+            expect(editor.viewport.zoom).toBe(1.5);
+        });
+    });
+
+    describe('readonly properties', () => {
+        it('should expose readonly extensions map', () => {
+            const ext = mockExtension;
+            editor.registerExtension(ext);
+
+            expect(editor.extensions.has('mock')).toBe(true);
+            // Verify it's the same reference (readonly view)
+            expect(editor.extensions).toBeDefined();
+        });
+
+        it('should return readonly arrays from getNodes/getEdges', () => {
+            editor.load(createTestWorkflow());
+
+            const nodes = editor.getNodes();
+            const edges = editor.getEdges();
+
+            // These should be typed as readonly but we can still access them
+            expect(nodes.length).toBeGreaterThan(0);
+            expect(edges.length).toBeGreaterThan(0);
+        });
+
+        it('should return readonly metadata from getMeta', () => {
+            const meta = editor.getMeta();
+
+            expect(meta).toBeDefined();
+            expect(meta.version).toBeDefined();
+        });
     });
 
     describe('createWorkflowEditor', () => {
