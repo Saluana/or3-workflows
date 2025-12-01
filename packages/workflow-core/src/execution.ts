@@ -313,6 +313,9 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             const queue: string[] = [startNode.id];
             const executed = new Set<string>();
             const skipped = new Set<string>();
+            // Per-node execution counter to prevent infinite loops
+            const nodeExecutionCount = new Map<string, number>();
+            const maxNodeExecutions = this.options.maxNodeExecutions ?? 100;
             // Use configured maxIterations or calculate from node count
             const maxIterations =
                 this.options.maxIterations ??
@@ -370,6 +373,18 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 }
 
                 executed.add(currentId);
+
+                // Track node execution count as circuit breaker
+                const execCount = (nodeExecutionCount.get(currentId) || 0) + 1;
+                nodeExecutionCount.set(currentId, execCount);
+
+                // Check if this node has been executed too many times (circuit breaker)
+                if (execCount > maxNodeExecutions) {
+                    throw new Error(
+                        `Node "${currentId}" exceeded maximum executions (${maxNodeExecutions}). ` +
+                            'This likely indicates an infinite loop. Check your workflow for cycles.'
+                    );
+                }
 
                 // Execute the node
                 const result = await this.executeNodeWithErrorHandling(

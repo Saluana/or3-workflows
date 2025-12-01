@@ -543,6 +543,7 @@ export type ValidationWarningCode =
     | 'EMPTY_PROMPT'
     | 'UNREACHABLE_NODE'
     | 'DEAD_END_NODE'
+    | 'DUPLICATE_SOURCE_HANDLE'
     | 'MISSING_EDGE_LABEL'
     | 'NO_SUBFLOW_OUTPUTS'
     | 'NO_REGISTRY'
@@ -1115,6 +1116,12 @@ export interface ExecutionOptions {
     retryDelayMs?: number;
     /** Safety limit for graph traversal iterations */
     maxIterations?: number;
+    /**
+     * Maximum executions per individual node (circuit breaker).
+     * Prevents infinite loops caused by nodes re-queueing themselves.
+     * Default: 100
+     */
+    maxNodeExecutions?: number;
     /** Global tool call handler */
     onToolCall?: (name: string, args: any) => Promise<string>;
     /** Pluggable long-term memory adapter */
