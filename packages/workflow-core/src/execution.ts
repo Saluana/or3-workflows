@@ -1257,6 +1257,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     /**
      * Wait for HITL response with optional timeout.
      * Respects abort signal to cancel waiting when execution is stopped.
+     * Uses timestamp-based timeout to handle system sleep correctly.
      */
     private async waitForHITL(
         request: HITLRequest,
@@ -1280,27 +1281,37 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             signal?.addEventListener('abort', abortHandler, { once: true });
         });
 
+        const callbackPromise = this.options.onHITLRequest(request);
+
         const promises: Promise<HITLResponse>[] = [
-            this.options.onHITLRequest(request),
+            callbackPromise,
             abortPromise,
         ];
 
-        let timeoutId: ReturnType<typeof setTimeout> | undefined;
-        if (config.timeout && config.timeout > 0) {
+        // Timestamp-based timeout handling (robust to system sleep)
+        let timeoutCheckInterval: ReturnType<typeof setInterval> | undefined;
+        if (config.timeout && config.timeout > 0 && request.expiresAt) {
             const timeoutPromise = new Promise<HITLResponse>((resolve) => {
-                timeoutId = setTimeout(() => {
-                    const defaultAction = config.defaultAction || 'reject';
-                    resolve({
-                        requestId: request.id,
-                        action:
-                            defaultAction === 'approve'
-                                ? 'approve'
-                                : defaultAction === 'skip'
-                                ? 'skip'
-                                : 'reject',
-                        respondedAt: new Date().toISOString(),
-                    });
-                }, config.timeout);
+                // Check expiry every second
+                timeoutCheckInterval = setInterval(() => {
+                    const now = new Date();
+                    const expiresAt = new Date(request.expiresAt!);
+
+                    if (now >= expiresAt) {
+                        clearInterval(timeoutCheckInterval);
+                        const defaultAction = config.defaultAction || 'reject';
+                        resolve({
+                            requestId: request.id,
+                            action:
+                                defaultAction === 'approve'
+                                    ? 'approve'
+                                    : defaultAction === 'skip'
+                                    ? 'skip'
+                                    : 'reject',
+                            respondedAt: new Date().toISOString(),
+                        });
+                    }
+                }, 1000); // Check every second
             });
             promises.push(timeoutPromise);
         }
@@ -1315,8 +1326,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     abortHandler
                 );
             }
-            if (timeoutId) {
-                clearTimeout(timeoutId);
+            if (timeoutCheckInterval) {
+                clearInterval(timeoutCheckInterval);
             }
         }
     }

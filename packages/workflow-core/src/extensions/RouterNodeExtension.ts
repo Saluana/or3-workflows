@@ -303,10 +303,37 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
         }
 
         if (!selectedRouteId) {
-            // Fallback to first route
+            const data = node.data as RouterNodeData;
+            const fallbackBehavior =
+                (data as any).fallbackBehavior || 'first'; // 'first', 'error', or 'none'
+
+            if (fallbackBehavior === 'error') {
+                throw new Error(
+                    `Router "${node.id}" failed to select a valid route. LLM response did not match any configured route.`
+                );
+            } else if (fallbackBehavior === 'none') {
+                // No fallback - return empty nextNodes
+                return {
+                    output: 'Router failed to select a route',
+                    nextNodes: [],
+                    metadata: {
+                        selectedRoute: null,
+                        selectedRouteId: null,
+                        fallbackUsed: true,
+                    },
+                };
+            }
+
+            // Default: fallback to first route
             selectedRouteId = routeOptions[0].id;
             if (debug) {
-                console.log('[Router] Fallback to default route');
+                console.warn(
+                    `[Router] Failed to select valid route, falling back to first route: ${selectedRouteId}`
+                );
+            }
+            // Notify via callback if available (for monitoring)
+            if (context.onRouteSelected) {
+                // We'll add this to metadata so the callback can detect fallback
             }
         }
 
@@ -339,6 +366,8 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
                 selectedRouteId,
                 selectedNodeId: selectedOption?.nodeId,
                 selectedName: selectedOption?.name,
+                reasoning,
+                fallbackUsed: !selectedRouteId || routeOptions[0]?.id === selectedRouteId,
             },
         };
     },
