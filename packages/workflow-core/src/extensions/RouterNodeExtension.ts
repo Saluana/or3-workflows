@@ -331,10 +331,37 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
                     `[Router] Failed to select valid route, falling back to first route: ${selectedRouteId}`
                 );
             }
-            // Notify via callback if available (for monitoring)
-            if (context.onRouteSelected) {
-                // We'll add this to metadata so the callback can detect fallback
+            // We'll set fallbackUsed in metadata below
+            const selectedOption = routeOptions.find(
+                (r) => r.id === selectedRouteId
+            );
+
+            if (debug) {
+                console.log('[Router] Selected route ID:', selectedRouteId);
+                console.log('[Router] Selected option:', selectedOption);
             }
+
+            const nextNodes =
+                selectedOption && selectedOption.nodeId
+                    ? [selectedOption.nodeId]
+                    : [];
+
+            if (debug) {
+                console.log('[Router] Next nodes to execute:', nextNodes);
+            }
+
+            return {
+                output: `Routed to ${selectedOption?.name || selectedRouteId}`,
+                nextNodes,
+                metadata: {
+                    selectedRoute: selectedRouteId,
+                    selectedRouteId,
+                    selectedNodeId: selectedOption?.nodeId,
+                    selectedName: selectedOption?.name,
+                    reasoning: '',
+                    fallbackUsed: true, // Mark that fallback was used
+                },
+            };
         }
 
         if (debug) {
@@ -367,7 +394,8 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
                 selectedNodeId: selectedOption?.nodeId,
                 selectedName: selectedOption?.name,
                 reasoning,
-                fallbackUsed: !selectedRouteId || routeOptions[0]?.id === selectedRouteId,
+                // fallbackUsed is false - valid route was selected
+                fallbackUsed: false,
             },
         };
     },

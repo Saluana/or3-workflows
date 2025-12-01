@@ -206,9 +206,16 @@ export const ParallelNodeExtension: NodeExtension = {
         const results = settledResults.map((settled, index) => {
             const branch = branches[index];
             if (settled.status === 'fulfilled') {
-                return settled.value;
+                // settled.value could be either execution result or timeout result
+                const value = settled.value;
+                // Check if it's a timeout/error result
+                if (value.status === 'rejected') {
+                    return value; // Already in correct format
+                }
+                // It's a successful execution result
+                return value;
             } else {
-                // Rejected promise
+                // Promise itself rejected (shouldn't happen with our setup, but be safe)
                 return {
                     status: 'rejected' as const,
                     reason: settled.reason,
