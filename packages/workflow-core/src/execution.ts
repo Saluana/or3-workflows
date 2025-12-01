@@ -273,18 +273,13 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
                 callbacks.onNodeError('', validationError);
 
-                return {
-                    success: false,
-                    output: '',
-                    error: validationError,
-                    nodeOutputs: {},
-                    duration: Date.now() - startTime,
-                    usage: {
-                        promptTokens: 0,
-                        completionTokens: 0,
-                        totalTokens: 0,
-                    },
-                };
+                return this.buildExecutionResult(
+                    false,
+                    '',
+                    {},
+                    startTime,
+                    validationError
+                );
             }
         }
 
@@ -423,17 +418,14 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             }
 
             if (finalOutput) {
-                const lastMessage =
-                    context.session.messages[
-                        context.session.messages.length - 1
-                    ];
-                if (
-                    !(
-                        lastMessage &&
-                        lastMessage.role === 'assistant' &&
-                        lastMessage.content === finalOutput
-                    )
-                ) {
+                const messages = context.session.messages;
+                const lastMessage = messages[messages.length - 1];
+                const shouldAddMessage = 
+                    !lastMessage ||
+                    lastMessage.role !== 'assistant' ||
+                    lastMessage.content !== finalOutput;
+                
+                if (shouldAddMessage) {
                     context.session.addMessage({
                         role: 'assistant',
                         content: finalOutput,
@@ -441,35 +433,49 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 }
             }
 
-            return {
-                success: true,
-                output: finalOutput,
+            return this.buildExecutionResult(
+                true,
+                finalOutput,
                 nodeOutputs,
-                duration: Date.now() - startTime,
-                usage: this.getTokenUsageSummary(),
-                tokenUsageDetails: this.tokenUsageEvents.map((entry) => ({
-                    nodeId: entry.nodeId,
-                    ...entry.usage,
-                })),
-            };
+                startTime
+            );
         } catch (error) {
             const err =
                 error instanceof Error ? error : new Error(String(error));
-            return {
-                success: false,
-                output: '',
+            return this.buildExecutionResult(
+                false,
+                '',
                 nodeOutputs,
-                error: err,
-                duration: Date.now() - startTime,
-                usage: this.getTokenUsageSummary(),
-                tokenUsageDetails: this.tokenUsageEvents.map((entry) => ({
-                    nodeId: entry.nodeId,
-                    ...entry.usage,
-                })),
-            };
+                startTime,
+                err
+            );
         } finally {
             this.running = false;
         }
+    }
+
+    /**
+     * Build an execution result object with common fields.
+     */
+    private buildExecutionResult(
+        success: boolean,
+        output: string,
+        nodeOutputs: Record<string, string>,
+        startTime: number,
+        error?: Error
+    ): ExecutionResult {
+        return {
+            success,
+            output,
+            nodeOutputs,
+            error,
+            duration: Date.now() - startTime,
+            usage: this.getTokenUsageSummary(),
+            tokenUsageDetails: this.tokenUsageEvents.map((entry) => ({
+                nodeId: entry.nodeId,
+                ...entry.usage,
+            })),
+        };
     }
 
     /**
@@ -901,7 +907,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
         // Check if this node type supports HITL
         const hitlConfig = nodeData?.hitl as HITLConfig | undefined;
-        const supportsHITL = ['agent', 'router', 'tool'].includes(node.type);
+        const hitlSupportedTypes = ['agent', 'router', 'tool'] as const;
+        const supportsHITL = hitlSupportedTypes.includes(node.type as typeof hitlSupportedTypes[number]);
         const shouldUseHITL =
             supportsHITL && hitlConfig?.enabled === true && this.options.onHITLRequest !== undefined;
 
