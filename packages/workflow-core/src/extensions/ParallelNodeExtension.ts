@@ -71,6 +71,33 @@ export const ParallelNodeExtension: NodeExtension = {
 
         const outgoingEdges = context.getOutgoingEdges(node.id);
         const mergeEnabled = data.mergeEnabled !== false;
+        // Optional per-branch timeout (default: 5 minutes if not specified)
+        const branchTimeout = data.branchTimeout ?? 5 * 60 * 1000;
+
+        // Helper to create a timeout promise
+        const createTimeoutPromise = (
+            branchId: string,
+            label: string,
+            timeoutMs: number
+        ) => {
+            return new Promise<{
+                status: 'rejected';
+                reason: Error;
+                branchId: string;
+                label: string;
+            }>((resolve) => {
+                setTimeout(() => {
+                    resolve({
+                        status: 'rejected' as const,
+                        reason: new Error(
+                            `Branch "${label}" timed out after ${timeoutMs}ms`
+                        ),
+                        branchId,
+                        label,
+                    });
+                }, timeoutMs);
+            });
+        };
 
         // Execute all branches internally using their model/prompt configs
         // Branches are internal LLM calls, not external node connections
@@ -85,75 +112,83 @@ export const ParallelNodeExtension: NodeExtension = {
                 { role: 'user', content: context.input },
             ];
 
-            return {
-                branchId: branch.id,
-                label: branch.label,
-                promise: (async () => {
-                    if (!provider) {
-                        throw new Error('Parallel node requires LLM provider');
-                    }
+            const executionPromise = (async () => {
+                if (!provider) {
+                    throw new Error('Parallel node requires LLM provider');
+                }
 
-                    // Notify branch start
-                    context.onBranchStart?.(branch.id, branch.label);
+                // Notify branch start
+                context.onBranchStart?.(branch.id, branch.label);
 
-                    const result = await provider.chat(branchModel, messages, {
-                        // Stream tokens for this branch
-                        onToken: (token) => {
-                            context.onBranchToken?.(
-                                branch.id,
-                                branch.label,
-                                token
-                            );
-                        },
-                        // Stream reasoning tokens for this branch
-                        onReasoning: (token) => {
-                            context.onBranchReasoning?.(
-                                branch.id,
-                                branch.label,
-                                token
-                            );
-                        },
+                const result = await provider.chat(branchModel, messages, {
+                    // Stream tokens for this branch
+                    onToken: (token) => {
+                        context.onBranchToken?.(
+                            branch.id,
+                            branch.label,
+                            token
+                        );
+                    },
+                    // Stream reasoning tokens for this branch
+                    onReasoning: (token) => {
+                        context.onBranchReasoning?.(
+                            branch.id,
+                            branch.label,
+                            token
+                        );
+                    },
+                });
+
+                if (context.tokenCounter && context.onTokenUsage) {
+                    let usage = estimateTokenUsage({
+                        model: branchModel,
+                        messages,
+                        output: result.content || '',
+                        tokenCounter: context.tokenCounter,
+                        compaction: context.compaction,
                     });
 
-                    if (context.tokenCounter && context.onTokenUsage) {
-                        let usage = estimateTokenUsage({
-                            model: branchModel,
-                            messages,
-                            output: result.content || '',
-                            tokenCounter: context.tokenCounter,
-                            compaction: context.compaction,
-                        });
-
-                        if (result.usage) {
-                            usage = {
-                                ...usage,
-                                promptTokens: result.usage.promptTokens,
-                                completionTokens: result.usage.completionTokens,
-                                totalTokens: result.usage.totalTokens,
-                            };
-                        }
-
-                        context.onTokenUsage(usage);
+                    if (result.usage) {
+                        usage = {
+                            ...usage,
+                            promptTokens: result.usage.promptTokens,
+                            completionTokens: result.usage.completionTokens,
+                            totalTokens: result.usage.totalTokens,
+                        };
                     }
 
-                    const output = result.content || '';
+                    context.onTokenUsage(usage);
+                }
 
-                    // Notify branch complete
-                    context.onBranchComplete?.(branch.id, branch.label, output);
+                const output = result.content || '';
 
-                    return {
-                        status: 'fulfilled' as const,
-                        value: { output },
-                        branchId: branch.id,
-                        label: branch.label,
-                    };
-                })().catch((error) => ({
-                    status: 'rejected' as const,
-                    reason: error,
+                // Notify branch complete
+                context.onBranchComplete?.(branch.id, branch.label, output);
+
+                return {
+                    status: 'fulfilled' as const,
+                    value: { output },
                     branchId: branch.id,
                     label: branch.label,
-                })),
-            };
+                };
+            })().catch((error) => ({
+                status: 'rejected' as const,
+                reason: error,
+                branchId: branch.id,
+                label: branch.label,
+            }));
+
+            // Race execution against timeout if timeout is configured
+            return branchTimeout > 0
+                ? Promise.race([
+                      executionPromise,
+                      createTimeoutPromise(
+                          branch.id,
+                          branch.label,
+                          branchTimeout
+                      ),
+                  ])
+                : executionPromise;
         });
 
         if (branchExecutions.length === 0) {
@@ -163,10 +198,31 @@ export const ParallelNodeExtension: NodeExtension = {
             };
         }
 
-        // Execute all branches
-        const results = await Promise.all(
-            branchExecutions.map((b) => b!.promise)
-        );
+        // Execute all branches with Promise.allSettled to handle partial failures gracefully
+        const settledResults = await Promise.allSettled(branchExecutions);
+
+        // Convert settled results to our result format
+        const results = settledResults.map((settled, index) => {
+            const branch = branches[index];
+            if (settled.status === 'fulfilled') {
+                // settled.value could be either execution result or timeout result
+                const value = settled.value;
+                // Check if it's a timeout/error result
+                if (value.status === 'rejected') {
+                    return value; // Already in correct format
+                }
+                // It's a successful execution result
+                return value;
+            } else {
+                // Promise itself rejected (shouldn't happen with our setup, but be safe)
+                return {
+                    status: 'rejected' as const,
+                    reason: settled.reason,
+                    branchId: branch.id,
+                    label: branch.label,
+                };
+            }
+        });
 
         // Collect outputs
         const outputs: Record<string, string> = {};

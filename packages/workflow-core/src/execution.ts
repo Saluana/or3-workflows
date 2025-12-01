@@ -320,6 +320,9 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             const queue: string[] = [startNode.id];
             const executed = new Set<string>();
             const skipped = new Set<string>();
+            // Per-node execution counter to prevent infinite loops
+            const nodeExecutionCount = new Map<string, number>();
+            const maxNodeExecutions = this.options.maxNodeExecutions ?? 100;
             // Use configured maxIterations or calculate from node count
             const maxIterations =
                 this.options.maxIterations ??
@@ -381,6 +384,18 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 }
 
                 executed.add(currentId);
+
+                // Track node execution count as circuit breaker
+                const execCount = (nodeExecutionCount.get(currentId) || 0) + 1;
+                nodeExecutionCount.set(currentId, execCount);
+
+                // Check if this node has been executed too many times (circuit breaker)
+                if (execCount > maxNodeExecutions) {
+                    throw new Error(
+                        `Node "${currentId}" exceeded maximum executions (${maxNodeExecutions}). ` +
+                            'This likely indicates an infinite loop. Check your workflow for cycles.'
+                    );
+                }
 
                 // Execute the node
                 const result = await this.executeNodeWithErrorHandling(
@@ -1270,6 +1285,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     /**
      * Wait for HITL response with optional timeout.
      * Respects abort signal to cancel waiting when execution is stopped.
+     * Uses timestamp-based timeout to handle system sleep correctly.
      */
     private async waitForHITL(
         request: HITLRequest,
@@ -1298,27 +1314,35 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             signal.addEventListener('abort', abortHandler, { once: true });
         });
 
+        const callbackPromise = this.options.onHITLRequest(request);
+
         const promises: Promise<HITLResponse>[] = [
-            this.options.onHITLRequest(request),
+            callbackPromise,
             abortPromise,
         ];
 
-        let timeoutId: ReturnType<typeof setTimeout> | undefined;
-        if (config.timeout && config.timeout > 0) {
+        // Timestamp-based timeout handling (robust to system sleep)
+        let timeoutCheckInterval: ReturnType<typeof setInterval> | undefined;
+        if (config.timeout && config.timeout > 0 && request.expiresAt) {
+            const expiresAtMs = new Date(request.expiresAt).getTime();
             const timeoutPromise = new Promise<HITLResponse>((resolve) => {
-                timeoutId = setTimeout(() => {
-                    const defaultAction = config.defaultAction || 'reject';
-                    resolve({
-                        requestId: request.id,
-                        action:
-                            defaultAction === 'approve'
-                                ? 'approve'
-                                : defaultAction === 'skip'
-                                ? 'skip'
-                                : 'reject',
-                        respondedAt: new Date().toISOString(),
-                    });
-                }, config.timeout);
+                // Check expiry every second using performant Date.now()
+                timeoutCheckInterval = setInterval(() => {
+                    if (Date.now() >= expiresAtMs) {
+                        clearInterval(timeoutCheckInterval);
+                        const defaultAction = config.defaultAction || 'reject';
+                        resolve({
+                            requestId: request.id,
+                            action:
+                                defaultAction === 'approve'
+                                    ? 'approve'
+                                    : defaultAction === 'skip'
+                                    ? 'skip'
+                                    : 'reject',
+                            respondedAt: new Date().toISOString(),
+                        });
+                    }
+                }, 1000); // Check every second
             });
             promises.push(timeoutPromise);
         }
@@ -1326,9 +1350,15 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         try {
             return await Promise.race(promises);
         } finally {
-            // Cleanup timeout to prevent memory leak
-            if (timeoutId !== undefined) {
-                clearTimeout(timeoutId);
+            // Cleanup
+            if (abortHandler && this.abortController?.signal) {
+                this.abortController.signal.removeEventListener(
+                    'abort',
+                    abortHandler
+                );
+            }
+            if (timeoutCheckInterval) {
+                clearInterval(timeoutCheckInterval);
             }
             // Note: abort event listener is automatically cleaned up due to { once: true }
         }

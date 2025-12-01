@@ -200,10 +200,10 @@ Respond with only "continue" or "done".`;
             outputs.push(result.output);
             iteration++;
 
-            // Check condition for next iteration
-            if (iteration < maxIterations) {
-                shouldContinue = await evaluateCondition();
-            }
+            // Check condition for next iteration AFTER updating state
+            // This ensures the condition is evaluated with the current iteration count
+            shouldContinue =
+                iteration < maxIterations && (await evaluateCondition());
         }
 
         if (iteration >= maxIterations) {

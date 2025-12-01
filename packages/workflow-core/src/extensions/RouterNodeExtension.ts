@@ -303,11 +303,63 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
         }
 
         if (!selectedRouteId) {
-            // Fallback to first route
+            const fallbackBehavior = data.fallbackBehavior || 'first'; // 'first', 'error', or 'none'
+
+            if (fallbackBehavior === 'error') {
+                throw new Error(
+                    `Router "${node.id}" failed to select a valid route. LLM response did not match any configured route.`
+                );
+            } else if (fallbackBehavior === 'none') {
+                // No fallback - return empty nextNodes
+                return {
+                    output: 'Router failed to select a route',
+                    nextNodes: [],
+                    metadata: {
+                        selectedRoute: null,
+                        selectedRouteId: null,
+                        fallbackUsed: true,
+                    },
+                };
+            }
+
+            // Default: fallback to first route
             selectedRouteId = routeOptions[0].id;
             if (debug) {
-                console.log('[Router] Fallback to default route');
+                console.warn(
+                    `[Router] Failed to select valid route, falling back to first route: ${selectedRouteId}`
+                );
             }
+            // We'll set fallbackUsed in metadata below
+            const selectedOption = routeOptions.find(
+                (r) => r.id === selectedRouteId
+            );
+
+            if (debug) {
+                console.log('[Router] Selected route ID:', selectedRouteId);
+                console.log('[Router] Selected option:', selectedOption);
+            }
+
+            const nextNodes =
+                selectedOption && selectedOption.nodeId
+                    ? [selectedOption.nodeId]
+                    : [];
+
+            if (debug) {
+                console.log('[Router] Next nodes to execute:', nextNodes);
+            }
+
+            return {
+                output: `Routed to ${selectedOption?.name || selectedRouteId}`,
+                nextNodes,
+                metadata: {
+                    selectedRoute: selectedRouteId,
+                    selectedRouteId,
+                    selectedNodeId: selectedOption?.nodeId,
+                    selectedName: selectedOption?.name,
+                    reasoning: '',
+                    fallbackUsed: true, // Mark that fallback was used
+                },
+            };
         }
 
         if (debug) {
@@ -339,6 +391,9 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
                 selectedRouteId,
                 selectedNodeId: selectedOption?.nodeId,
                 selectedName: selectedOption?.name,
+                reasoning,
+                // fallbackUsed is false - valid route was selected
+                fallbackUsed: false,
             },
         };
     },

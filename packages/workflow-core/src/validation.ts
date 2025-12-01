@@ -259,6 +259,9 @@ function validateEdgeHandles(
 ): (ValidationError | ValidationWarning)[] {
     const results: (ValidationError | ValidationWarning)[] = [];
 
+    // Track sourceHandle usage to detect duplicates
+    const sourceHandleUsage = new Map<string, Set<string>>();
+
     for (const edge of edges) {
         const sourceNode = nodeMap.get(edge.source);
         const targetNode = nodeMap.get(edge.target);
@@ -282,6 +285,15 @@ function validateEdgeHandles(
                 edgeId: edge.id,
             });
             continue;
+        }
+
+        // Track sourceHandle usage for duplicate detection
+        if (edge.sourceHandle) {
+            const key = `${edge.source}:${edge.sourceHandle}`;
+            if (!sourceHandleUsage.has(key)) {
+                sourceHandleUsage.set(key, new Set());
+            }
+            sourceHandleUsage.get(key)!.add(edge.id);
         }
 
         // Validate sourceHandle if specified
@@ -320,6 +332,19 @@ function validateEdgeHandles(
                     nodeId: targetNode.id,
                 });
             }
+        }
+    }
+
+    // Check for duplicate sourceHandle usage (routing ambiguity)
+    for (const [key, edgeIds] of sourceHandleUsage.entries()) {
+        if (edgeIds.size > 1) {
+            const [nodeId, handleId] = key.split(':');
+            results.push({
+                type: 'warning',
+                code: 'DUPLICATE_SOURCE_HANDLE',
+                message: `Node "${nodeId}" has multiple edges (${Array.from(edgeIds).join(', ')}) using the same output handle "${handleId}". This may cause ambiguous routing behavior.`,
+                nodeId,
+            });
         }
     }
 
