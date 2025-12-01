@@ -535,18 +535,35 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         > = {};
         const parents: Record<string, string[]> = {};
 
+        // First pass: build node map and initialize edge arrays
         for (const node of nodes) {
             nodeMap.set(node.id, node);
             children[node.id] = [];
             parents[node.id] = [];
         }
 
+        // Second pass: build edges (with validation)
         for (const edge of edges) {
-            children[edge.source]?.push({
-                nodeId: edge.target,
-                handleId: edge.sourceHandle || undefined,
-            });
-            parents[edge.target]?.push(edge.source);
+            // Validate edge refers to existing nodes
+            if (!nodeMap.has(edge.source) || !nodeMap.has(edge.target)) {
+                if (this.options.debug) {
+                    console.warn(
+                        `Skipping edge ${edge.id}: references non-existent node (source: ${edge.source}, target: ${edge.target})`
+                    );
+                }
+                continue;
+            }
+
+            const childList = children[edge.source];
+            const parentList = parents[edge.target];
+            
+            if (childList && parentList) {
+                childList.push({
+                    nodeId: edge.target,
+                    handleId: edge.sourceHandle || undefined,
+                });
+                parentList.push(edge.source);
+            }
         }
 
         return { nodeMap, children, parents };
@@ -1326,10 +1343,16 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         while (queue.length > 0 && iterations < maxIterations) {
             iterations++;
             const currentId = queue.shift()!;
+            
+            // Check for cancellation
+            if (this.abortController?.signal.aborted) {
+                throw new Error('Workflow cancelled');
+            }
+            
             if (executed.has(currentId)) continue;
 
-            const parents = graph.parents[currentId] || [];
-            const allParentsExecuted = parents.every((p) => executed.has(p));
+            const parents = graph.parents[currentId];
+            const allParentsExecuted = !parents || parents.every((p) => executed.has(p));
             if (!allParentsExecuted) {
                 queue.push(currentId);
                 continue;
@@ -1358,6 +1381,12 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             }
         }
 
+        if (iterations >= maxIterations) {
+            throw new Error(
+                `Subgraph execution exceeded maximum iterations (${maxIterations})`
+            );
+        }
+
         return { output, nextNodes };
     }
 
@@ -1372,14 +1401,13 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         if (!config) return false;
 
         // Use error's built-in retryable check with configured skipOn
-        // Default skipOn includes AUTH and VALIDATION
-        const skipOn = config.skipOn ?? ['AUTH', 'VALIDATION'];
+        const skipOn = config.skipOn ?? ['AUTH', 'VALIDATION'] as const;
         if (!error.isRetryable(skipOn as import('./errors').ErrorCode[])) {
             return false;
         }
 
         // If retryOn is specified, only retry on those codes
-        if (config.retryOn?.length && !config.retryOn.includes(error.code)) {
+        if (config.retryOn && config.retryOn.length > 0 && !config.retryOn.includes(error.code)) {
             return false;
         }
 
@@ -1387,22 +1415,25 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     }
 
     private async sleep(ms: number): Promise<void> {
-        if (this.abortController?.signal.aborted) {
+        const signal = this.abortController?.signal;
+        
+        if (signal?.aborted) {
             throw new Error('Workflow cancelled');
         }
+        
         return new Promise((resolve, reject) => {
-            const signal = this.abortController?.signal;
             const timeoutId = setTimeout(() => {
-                signal?.removeEventListener('abort', onAbort);
                 resolve();
             }, ms);
 
-            const onAbort = () => {
-                clearTimeout(timeoutId);
-                reject(new Error('Workflow cancelled'));
-            };
-
-            signal?.addEventListener('abort', onAbort, { once: true });
+            // Only add listener if signal exists
+            if (signal) {
+                const onAbort = () => {
+                    clearTimeout(timeoutId);
+                    reject(new Error('Workflow cancelled'));
+                };
+                signal.addEventListener('abort', onAbort, { once: true });
+            }
         });
     }
 
@@ -1443,6 +1474,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             return { messages };
         }
 
+        // Early return for empty or single message
+        if (messages.length <= 1) {
+            return { messages };
+        }
+
         const threshold = calculateThreshold(config, model, this.tokenCounter);
         const currentTokens = countMessageTokens(messages, this.tokenCounter);
 
@@ -1469,31 +1505,47 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             compactedMessages = toPreserve;
         } else if (config.strategy === 'custom' && config.customCompactor) {
             // Use custom compactor
-            compactedMessages = await config.customCompactor(
-                messages,
-                threshold
-            );
+            try {
+                compactedMessages = await config.customCompactor(
+                    messages,
+                    threshold
+                );
+            } catch (error) {
+                // Fallback to truncate on custom compactor error
+                if (this.options.debug) {
+                    console.error('Custom compactor failed, falling back to truncate:', error);
+                }
+                compactedMessages = toPreserve;
+            }
         } else {
             // Default: summarize strategy
             const summarizeModel = config.summarizeModel || model;
             const prompt = buildSummarizationPrompt(toCompact, config);
 
-            const summarizationResult = await this.provider.chat(
-                summarizeModel,
-                [
-                    {
-                        role: 'system',
-                        content:
-                            'You are a helpful assistant that summarizes conversation history concisely.',
-                    },
-                    { role: 'user', content: prompt },
-                ],
-                { temperature: 0.3, maxTokens: 500 }
-            );
+            try {
+                const summarizationResult = await this.provider.chat(
+                    summarizeModel,
+                    [
+                        {
+                            role: 'system',
+                            content:
+                                'You are a helpful assistant that summarizes conversation history concisely.',
+                        },
+                        { role: 'user', content: prompt },
+                    ],
+                    { temperature: 0.3, maxTokens: 500 }
+                );
 
-            summary = summarizationResult.content || '';
-            const summaryMessage = createSummaryMessage(summary);
-            compactedMessages = [summaryMessage, ...toPreserve];
+                summary = summarizationResult.content || '';
+                const summaryMessage = createSummaryMessage(summary);
+                compactedMessages = [summaryMessage, ...toPreserve];
+            } catch (error) {
+                // Fallback to truncate on summarization error
+                if (this.options.debug) {
+                    console.error('Summarization failed, falling back to truncate:', error);
+                }
+                compactedMessages = toPreserve;
+            }
         }
 
         const tokensAfter = countMessageTokens(
