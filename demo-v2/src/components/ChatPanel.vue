@@ -224,7 +224,10 @@ const formatNumber = (value?: number) =>
                     v-for="msg in messages"
                     :key="msg.id"
                     class="message"
-                    :class="[msg.role, { 'has-branches': msg.branches?.length }]"
+                    :class="[
+                        msg.role,
+                        { 'has-branches': msg.branches?.length },
+                    ]"
                 >
                     <!-- Regular message (no branches) -->
                     <template v-if="!msg.branches?.length">
@@ -256,11 +259,12 @@ const formatNumber = (value?: number) =>
                         <div class="message-content">
                             <div class="message-bubble">{{ msg.content }}</div>
                             <div v-if="msg.nodeId" class="message-meta">
-                                via <span class="node-name">{{ msg.nodeId }}</span>
+                                via
+                                <span class="node-name">{{ msg.nodeId }}</span>
                             </div>
                         </div>
                     </template>
-                    
+
                     <!-- Message with branches (parallel node output) -->
                     <div v-else class="parallel-branches completed">
                         <div class="branches-header">
@@ -276,8 +280,14 @@ const formatNumber = (value?: number) =>
                                 <circle cx="6" cy="18" r="3"></circle>
                                 <path d="M18 9a9 9 0 0 1-9 9"></path>
                             </svg>
-                            <span>{{ msg.nodeId ? getNodeDisplayName(msg.nodeId) : 'Parallel Branches' }}</span>
-                            <span class="branch-count">({{ msg.branches.length }} branches)</span>
+                            <span>{{
+                                msg.nodeId
+                                    ? getNodeDisplayName(msg.nodeId)
+                                    : 'Parallel Branches'
+                            }}</span>
+                            <span class="branch-count"
+                                >({{ msg.branches.length }} branches)</span
+                            >
                         </div>
                         <div
                             v-for="branch in msg.branches"
@@ -287,7 +297,12 @@ const formatNumber = (value?: number) =>
                         >
                             <button
                                 class="branch-header"
-                                @click="emit('toggleMessageBranch', { messageId: msg.id, branchId: branch.branchId })"
+                                @click="
+                                    emit('toggleMessageBranch', {
+                                        messageId: msg.id,
+                                        branchId: branch.branchId,
+                                    })
+                                "
                             >
                                 <svg
                                     class="branch-chevron"
@@ -296,13 +311,22 @@ const formatNumber = (value?: number) =>
                                     stroke="currentColor"
                                     stroke-width="2"
                                 >
-                                    <polyline points="9 18 15 12 9 6"></polyline>
+                                    <polyline
+                                        points="9 18 15 12 9 6"
+                                    ></polyline>
                                 </svg>
-                                <span class="branch-label">{{ branch.label }}</span>
+                                <span class="branch-label">{{
+                                    branch.label
+                                }}</span>
                                 <span class="branch-status-dot"></span>
                             </button>
-                            <div v-show="branch.expanded" class="branch-content">
-                                <div class="branch-text">{{ branch.content }}</div>
+                            <div
+                                v-show="branch.expanded"
+                                class="branch-content"
+                            >
+                                <div class="branch-text">
+                                    {{ branch.content }}
+                                </div>
                             </div>
                         </div>
                     </div>

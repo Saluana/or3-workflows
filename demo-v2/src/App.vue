@@ -465,7 +465,9 @@ function toggleBranchExpanded(key: string) {
 function toggleMessageBranch(payload: { messageId: string; branchId: string }) {
     const message = messages.value.find((m) => m.id === payload.messageId);
     if (message?.branches) {
-        const branch = message.branches.find((b) => b.branchId === payload.branchId);
+        const branch = message.branches.find(
+            (b) => b.branchId === payload.branchId
+        );
         if (branch) {
             branch.expanded = !branch.expanded;
         }
@@ -578,8 +580,11 @@ async function handleSendMessage() {
                             })),
                         };
                         messages.value.push(branchesMessage);
-                        console.log('[Branches] Added branches message to chat:', branchesMessage);
-                        
+                        console.log(
+                            '[Branches] Added branches message to chat:',
+                            branchesMessage
+                        );
+
                         // Clear streaming branches for this node
                         for (const b of nodeBranches) {
                             delete branchStreams.value[
