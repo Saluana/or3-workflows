@@ -625,6 +625,7 @@ export type EditorEvent =
     | 'nodeUpdate'
     | 'edgeCreate'
     | 'edgeDelete'
+    | 'edgeUpdate'
     | 'execute:start'
     | 'execute:nodeStart'
     | 'execute:nodeFinish'
