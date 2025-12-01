@@ -72,6 +72,11 @@ async function runToolLoop(
                     context.onToken(token);
                 }
             },
+            onReasoning: (token) => {
+                if (context.onReasoning) {
+                    context.onReasoning(token);
+                }
+            },
             signal: context.signal,
         });
 

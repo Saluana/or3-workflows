@@ -6,6 +6,7 @@ interface StreamChunk {
     choices: Array<{
         delta?: {
             content?: string;
+            reasoning?: string; // Thinking/reasoning tokens from models that support it
             tool_calls?: Array<{
                 index: number;
                 id?: string;
@@ -49,6 +50,7 @@ export class OpenRouterLLMProvider implements LLMProvider {
             toolChoice?: any;
             responseFormat?: { type: 'json_object' | 'text' };
             onToken?: (token: string) => void;
+            onReasoning?: (token: string) => void;
             signal?: AbortSignal;
         }
     ): Promise<{
@@ -88,6 +90,13 @@ export class OpenRouterLLMProvider implements LLMProvider {
             }
 
             const delta = chunk.choices[0]?.delta;
+
+            // Handle reasoning/thinking tokens (from models like o1, Claude with extended thinking, etc.)
+            if (delta?.reasoning) {
+                if (options?.onReasoning) {
+                    options.onReasoning(delta.reasoning);
+                }
+            }
 
             if (delta?.content) {
                 content += delta.content;

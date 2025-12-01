@@ -1,785 +1,688 @@
-html
 <!DOCTYPE html>
 <html lang="en">
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Wartime Economy Playbook</title>
+        <title>PROJECT: DEEP CURRENT // $1M BLUEPRINT</title>
         <style>
             :root {
-                color-scheme: light dark;
-                --bg: #0b0c10;
-                --bg-alt: #11131a;
-                --text: #e5e5e5;
-                --muted: #9ca3af;
-                --accent: #f97316;
-                --accent-soft: rgba(249, 115, 22, 0.12);
-                --danger: #ef4444;
-                --border: #1f2933;
-                --code-bg: #111827;
+                --bg-deep: #020c1b;
+                --bg-panel: #112240;
+                --accent: #64ffda;
+                --text-main: #ccd6f6;
+                --text-mute: #8892b0;
+                --alert: #ff6b6b;
+                --success: #69f0ae;
+                --font-mono: 'Courier New', Courier, monospace;
+                --font-sans: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             }
 
             * {
+                margin: 0;
+                padding: 0;
                 box-sizing: border-box;
             }
 
             body {
-                margin: 0;
-                padding: 2.5rem 1rem 3rem;
-                font-family: system-ui, -apple-system, BlinkMacSystemFont,
-                    'Segoe UI', sans-serif;
-                background: radial-gradient(
-                    circle at top left,
-                    #111827,
-                    #020617 55%
-                );
-                color: var(--text);
+                background-color: var(--bg-deep);
+                color: var(--text-main);
+                font-family: var(--font-sans);
                 line-height: 1.6;
+                overflow-x: hidden;
             }
 
-            .page {
-                max-width: 860px;
-                margin: 0 auto;
-                background: linear-gradient(
-                    145deg,
-                    #020617 0%,
-                    #020617 40%,
-                    #020617 100%
+            /* --- VISUAL EFFECTS --- */
+            .sonar-bg {
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                width: 100vw;
+                height: 100vh;
+                transform: translate(-50%, -50%);
+                background: radial-gradient(
+                    circle,
+                    rgba(100, 255, 218, 0.03) 0%,
+                    transparent 70%
                 );
-                border-radius: 18px;
-                border: 1px solid rgba(148, 163, 184, 0.15);
-                box-shadow: 0 22px 45px rgba(15, 23, 42, 0.7),
-                    0 0 0 1px rgba(15, 23, 42, 0.8);
-                padding: 2.25rem 2.4rem 2.8rem;
+                z-index: -1;
+                pointer-events: none;
+            }
+
+            .scan-line {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 2px;
+                background: rgba(100, 255, 218, 0.1);
+                animation: scan 8s linear infinite;
+                z-index: 100;
+                pointer-events: none;
+            }
+
+            @keyframes scan {
+                0% {
+                    top: 0;
+                }
+                100% {
+                    top: 100%;
+                }
+            }
+
+            /* --- LAYOUT --- */
+            .container {
+                max-width: 1200px;
+                margin: 0 auto;
+                padding: 2rem;
+            }
+
+            header {
+                text-align: center;
+                padding: 4rem 0;
+                border-bottom: 1px solid rgba(100, 255, 218, 0.1);
+            }
+
+            h1 {
+                font-family: var(--font-mono);
+                color: var(--accent);
+                letter-spacing: 2px;
+                font-size: 2.5rem;
+                margin-bottom: 1rem;
+            }
+
+            .subtitle {
+                color: var(--text-mute);
+                font-size: 1.1rem;
+                max-width: 600px;
+                margin: 0 auto;
+            }
+
+            /* --- DASHBOARD GRID --- */
+            .dashboard {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+                gap: 2rem;
+                margin-top: 3rem;
+            }
+
+            .card {
+                background: var(--bg-panel);
+                border-radius: 8px;
+                padding: 2rem;
+                border: 1px solid transparent;
+                transition: all 0.3s ease;
                 position: relative;
                 overflow: hidden;
             }
 
-            .page::before {
-                content: '';
-                position: absolute;
-                inset: 0;
-                background: radial-gradient(
-                        circle at top right,
-                        rgba(248, 113, 113, 0.13),
-                        transparent 55%
-                    ),
-                    radial-gradient(
-                        circle at bottom left,
-                        rgba(56, 189, 248, 0.12),
-                        transparent 55%
-                    );
-                mix-blend-mode: screen;
-                opacity: 0.9;
-                pointer-events: none;
+            .card:hover {
+                transform: translateY(-5px);
+                border-color: var(--accent);
+                box-shadow: 0 10px 30px -15px rgba(2, 12, 27, 0.7);
             }
 
-            .page-inner {
-                position: relative;
-                z-index: 1;
-            }
-
-            h1,
-            h2,
-            h3,
-            h4 {
-                font-weight: 700;
-                letter-spacing: 0.02em;
-                color: #f9fafb;
-            }
-
-            h1 {
-                font-size: clamp(2.1rem, 3vw, 2.6rem);
-                margin: 0 0 0.75rem;
-                text-transform: uppercase;
-            }
-
-            h2 {
-                font-size: 1.35rem;
-                margin: 1.8rem 0 0.75rem;
-                text-transform: uppercase;
-                border-left: 3px solid var(--accent);
-                padding-left: 0.7rem;
-            }
-
-            h3 {
-                font-size: 1.1rem;
-                margin: 1.4rem 0 0.6rem;
-                text-transform: uppercase;
-                color: #fbbf24;
-            }
-
-            p {
-                margin: 0.5rem 0;
-                color: var(--text);
-                font-size: 0.98rem;
-            }
-
-            em {
-                font-style: italic;
-                color: #e5e7eb;
-            }
-
-            strong {
-                font-weight: 700;
-                color: #f97316;
-            }
-
-            ul {
-                margin: 0.4rem 0 0.9rem 1.3rem;
-                padding-left: 0.4rem;
-            }
-
-            li {
-                margin: 0.25rem 0;
-                font-size: 0.96rem;
-            }
-
-            hr {
-                border: 0;
-                border-top: 1px dashed rgba(148, 163, 184, 0.4);
-                margin: 1.6rem 0;
-            }
-
-            .subtitle {
-                font-size: 0.95rem;
-                color: var(--muted);
-                margin-bottom: 1.4rem;
-                max-width: 40rem;
-            }
-
-            .label {
-                display: inline-flex;
+            .card-header {
+                display: flex;
+                justify-content: space-between;
                 align-items: center;
-                gap: 0.35rem;
-                padding: 0.18rem 0.6rem;
-                border-radius: 999px;
-                border: 1px solid rgba(248, 250, 252, 0.18);
-                background: linear-gradient(
-                    135deg,
-                    rgba(15, 23, 42, 0.9),
-                    rgba(15, 23, 42, 0.3)
-                );
-                color: #e5e7eb;
-                font-size: 0.72rem;
-                text-transform: uppercase;
-                letter-spacing: 0.09em;
-                margin-bottom: 0.9rem;
+                margin-bottom: 1.5rem;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                padding-bottom: 1rem;
             }
 
-            .label-dot {
-                width: 7px;
-                height: 7px;
-                border-radius: 999px;
-                background: #f97316;
-                box-shadow: 0 0 0 4px rgba(248, 150, 30, 0.32);
+            .card-title {
+                color: var(--accent);
+                font-family: var(--font-mono);
+                font-size: 1.2rem;
             }
 
-            .warning {
-                border-radius: 12px;
-                border: 1px solid rgba(248, 113, 113, 0.55);
-                background: radial-gradient(
-                    circle at top left,
-                    rgba(127, 29, 29, 0.65),
-                    rgba(24, 24, 27, 0.9)
-                );
-                padding: 0.9rem 1rem;
-                margin-bottom: 1.4rem;
+            /* --- INTERACTIVE TABS --- */
+            .tab-btn {
+                background: transparent;
+                border: 1px solid var(--accent);
+                color: var(--accent);
+                padding: 0.5rem 1rem;
+                cursor: pointer;
+                font-family: var(--font-mono);
+                transition: 0.2s;
+                margin-right: 0.5rem;
+                margin-bottom: 0.5rem;
+            }
+
+            .tab-btn.active,
+            .tab-btn:hover {
+                background: var(--accent);
+                color: var(--bg-deep);
+            }
+
+            .phase-content {
+                display: none;
+                animation: fadeIn 0.5s;
+            }
+
+            .phase-content.active {
+                display: block;
+            }
+
+            @keyframes fadeIn {
+                from {
+                    opacity: 0;
+                }
+                to {
+                    opacity: 1;
+                }
+            }
+
+            /* --- MATH TERMINAL --- */
+            .terminal {
+                background: #000;
+                padding: 1.5rem;
+                font-family: var(--font-mono);
+                color: var(--success);
+                border-radius: 5px;
+                margin-top: 1rem;
                 font-size: 0.9rem;
-                color: #fee2e2;
             }
 
-            .warning strong {
-                color: #fecaca;
+            .calc-row {
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 0.5rem;
+                border-bottom: 1px dashed #333;
+                padding-bottom: 0.2rem;
             }
 
-            .section {
-                padding: 0.7rem 0 0.9rem;
+            /* --- COMPLIANCE BADGES --- */
+            .badge-container {
+                display: flex;
+                gap: 10px;
+                margin-top: 1rem;
+                flex-wrap: wrap;
             }
 
-            .phase-header {
-                display: inline-flex;
+            .badge {
+                font-size: 0.75rem;
+                padding: 4px 8px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+
+            .badge.fixed {
+                background: rgba(105, 240, 174, 0.2);
+                color: var(--success);
+                border: 1px solid var(--success);
+            }
+            .badge.risk {
+                background: rgba(255, 107, 107, 0.2);
+                color: var(--alert);
+                border: 1px solid var(--alert);
+            }
+
+            /* --- PRODUCT SHOWCASE --- */
+            .product-spec {
+                list-style: none;
+                color: var(--text-mute);
+            }
+
+            .product-spec li {
+                margin-bottom: 0.8rem;
+                display: flex;
                 align-items: center;
-                gap: 0.55rem;
-                padding: 0.22rem 0.7rem 0.24rem;
-                margin-bottom: 0.6rem;
-                border-radius: 999px;
-                border: 1px solid rgba(148, 163, 184, 0.6);
-                background: radial-gradient(
-                    circle at top left,
-                    rgba(148, 163, 184, 0.24),
-                    rgba(15, 23, 42, 0.96)
-                );
-                font-size: 0.7rem;
-                text-transform: uppercase;
-                letter-spacing: 0.15em;
-                color: #e5e7eb;
             }
 
-            .phase-tag {
-                padding: 0.05rem 0.55rem;
-                border-radius: 999px;
-                background: rgba(15, 23, 42, 0.7);
-                border: 1px solid rgba(148, 163, 184, 0.7);
-                font-weight: 600;
+            .product-spec li::before {
+                content: '▹';
+                color: var(--accent);
+                margin-right: 10px;
             }
 
-            .kill-metrics {
-                border-radius: 14px;
-                border: 1px solid rgba(148, 163, 184, 0.6);
-                background: radial-gradient(
-                    circle at top left,
-                    rgba(30, 64, 175, 0.45),
-                    rgba(15, 23, 42, 0.96)
-                );
-                padding: 0.85rem 1rem;
-                margin-top: 0.7rem;
-                font-size: 0.9rem;
+            /* --- FOOTER --- */
+            footer {
+                text-align: center;
+                padding: 3rem;
+                margin-top: 3rem;
+                border-top: 1px solid rgba(100, 255, 218, 0.1);
+                font-family: var(--font-mono);
+                font-size: 0.8rem;
+                color: var(--text-mute);
             }
 
-            .highlight {
-                background: var(--accent-soft);
-                border-radius: 0.4rem;
-                padding: 0.08rem 0.35rem;
-                border: 1px dashed rgba(248, 150, 30, 0.4);
+            /* SLIDERS */
+            input[type='range'] {
+                width: 100%;
+                margin: 10px 0;
+                background: transparent;
+                -webkit-appearance: none;
             }
-
-            .muted {
-                color: var(--muted);
-                font-size: 0.9rem;
+            input[type='range']::-webkit-slider-runnable-track {
+                background: var(--bg-deep);
+                border: 1px solid var(--text-mute);
+                height: 6px;
             }
-
-            .strike {
-                text-decoration: line-through;
-                opacity: 0.6;
-            }
-
-            .safe-note {
-                font-size: 0.82rem;
-                color: #e5e7eb;
-                border-left: 3px solid #22c55e;
-                padding-left: 0.7rem;
-                margin: 0.6rem 0 0.1rem;
-            }
-
-            .removed {
-                font-size: 0.9rem;
-                color: #fecaca;
-                background: rgba(127, 29, 29, 0.5);
-                border-radius: 0.5rem;
-                padding: 0.6rem 0.8rem;
-                border: 1px solid rgba(248, 113, 113, 0.7);
-                margin-top: 0.5rem;
-            }
-
-            @media (max-width: 640px) {
-                body {
-                    padding: 1.4rem 0.7rem 2.1rem;
-                }
-
-                .page {
-                    padding: 1.5rem 1.2rem 1.9rem;
-                }
-
-                h1 {
-                    font-size: 1.8rem;
-                }
-
-                h2 {
-                    font-size: 1.17rem;
-                }
+            input[type='range']::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                height: 20px;
+                width: 20px;
+                background: var(--accent);
+                margin-top: -8px;
+                cursor: pointer;
             }
         </style>
     </head>
     <body>
-        <main class="page">
-            <div class="page-inner">
-                <div class="label">
-                    <span class="label-dot"></span>
-                    <span>Wartime Economy Playbook</span>
-                </div>
+        <div class="sonar-bg"></div>
+        <div class="scan-line"></div>
 
-                <h1>90-Day AI Income Offensive</h1>
+        <div class="container">
+            <header>
+                <h1>PROJECT: DEEP CURRENT</h1>
                 <p class="subtitle">
-                    This is not a traditional business plan. This is a
-                    <strong>wartime economy playbook</strong> to stop the
-                    bleeding and go on the offensive over the next 90 days. You
-                    will leverage AI as a <strong>force multiplier</strong>, not
-                    a toy. You will operate with asymmetric focus, while staying
-                    on the right side of the law and basic ethics.
+                    The Rehabilitated $1M Roadmap. <br />Legitimate Assets.
+                    High-Tech Lures. Zero Fraud.
                 </p>
+            </header>
 
-                <div class="warning">
-                    <strong>Important:</strong> The original text you provided
-                    included tactics that clearly crossed into fraud and
-                    exploitation (for example, fake financial documents and fake
-                    professional identities). Those parts have been removed or
-                    rewritten here. Anything that involves lying, forgery, or
-                    scamming people is not only unethical but can also be
-                    criminal. This page keeps only the parts that can be
-                    executed legally and ethically.
+            <!-- CRITICAL FIXES SECTION -->
+            <section class="dashboard">
+                <div class="card" style="grid-column: 1 / -1">
+                    <div class="card-header">
+                        <span class="card-title">00. COMPLIANCE OVERRIDE</span>
+                        <span style="color: var(--success)"
+                            >STATUS: RESOLVED</span
+                        >
+                    </div>
+                    <div
+                        style="
+                            display: grid;
+                            grid-template-columns: repeat(
+                                auto-fit,
+                                minmax(300px, 1fr)
+                            );
+                            gap: 20px;
+                        "
+                    >
+                        <div>
+                            <h4 style="color: var(--alert)">PREVIOUS ERRORS</h4>
+                            <ul class="product-spec">
+                                <li>Fraud (Empty Boxes/Fake Blueprints)</li>
+                                <li>Biohazard (Human Blood/DNA)</li>
+                                <li>FTC Violations (Fake regulatory bans)</li>
+                                <li>Pyramid Structure (Recruitment fees)</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h4 style="color: var(--success)">
+                                CURRENT PROTOCOLS
+                            </h4>
+                            <ul class="product-spec">
+                                <li>
+                                    <strong style="color: var(--text-main)"
+                                        >Tangible Asset:</strong
+                                    >
+                                    "The Poseidon Core" – Bluetooth telemetry
+                                    lure.
+                                </li>
+                                <li>
+                                    <strong style="color: var(--text-main)"
+                                        >Synthetic Bio:</strong
+                                    >
+                                    FDA-compliant amino-acid gel capsules.
+                                </li>
+                                <li>
+                                    <strong style="color: var(--text-main)"
+                                        >Compliance:</strong
+                                    >
+                                    legitimate "Limited Batch" scarcity, not
+                                    fake bans.
+                                </li>
+                                <li>
+                                    <strong style="color: var(--text-main)"
+                                        >Affiliate Model:</strong
+                                    >
+                                    Standard 15% commission, no buy-in fees.
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="dashboard">
+                <!-- THE PRODUCT -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">01. THE ASSET</span>
+                    </div>
+                    <p style="color: var(--text-mute); margin-bottom: 1rem">
+                        We are launching <strong>"THE POSEIDON NODE"</strong>. A
+                        $299 smart-lure housing depth, temp, and pressure
+                        sensors that syncs to a mobile app to map the user's
+                        secret spots.
+                    </p>
+                    <ul class="product-spec">
+                        <li>
+                            <strong>Hardware:</strong> Polycarbonate shell
+                            (Impact resistant).
+                        </li>
+                        <li>
+                            <strong>Tech:</strong> BLE 5.0 Module + Pressure
+                            Sensor.
+                        </li>
+                        <li>
+                            <strong>Consumable:</strong> "Biolume" Scent Gel
+                            (Recurring Revenue).
+                        </li>
+                        <li><strong>COGS:</strong> $62.00 (Landed).</li>
+                        <li>
+                            <strong>MSRP:</strong> $299.00 (Limit 2 per
+                            customer).
+                        </li>
+                    </ul>
+                    <div class="badge-container">
+                        <span class="badge fixed">Manufacturing Secured</span>
+                        <span class="badge fixed">FCC ID Pending</span>
+                    </div>
                 </div>
 
-                <hr />
-
-                <section class="section" id="mindset">
-                    <h2>THE MINDSET: DIGITAL GHOST</h2>
-                    <p>
-                        You are no longer a person casually “trying things.” You
-                        are a <strong>digital poltergeist</strong> that feeds on
-                        inefficiency, waste, and slow decision-making in the
-                        market.
-                    </p>
-                    <p>
-                        Your identity is a weapon. Your goal is to extract the
-                        value you need from the system before it grinds you
-                        down. Distraction is bankruptcy. Hesitation is lost
-                        runway.
-                    </p>
-                </section>
-
-                <hr />
-
-                <section class="section" id="phase-1">
-                    <div class="phase-header">
-                        <span class="phase-tag">Phase 1</span>
-                        <span>48-Hour Cash Injection</span>
+                <!-- THE INTERACTIVE CALCULATOR -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">02. REVENUE SIMULATOR</span>
                     </div>
-                    <h2>
-                        THE 48-HOUR CASH INJECTION (Generate ~$10k–$50k Fast)
-                    </h2>
-                    <p>
-                        You need operating capital immediately. This is a fast,
-                        relatively low-risk way to get it using AI as leverage.
+                    <p style="font-size: 0.8rem; color: var(--text-mute)">
+                        Adjust sales velocity to see 6-month projections.
                     </p>
 
-                    <h3>The Target</h3>
-                    <p>
-                        Technologically behind local businesses with dated
-                        websites (plumbers, HVAC, roofers, lawyers, local
-                        clinics, etc.). They are losing money on weak online
-                        presence and they know it.
-                    </p>
+                    <div style="margin-top: 1rem">
+                        <label style="color: var(--accent); font-size: 0.9rem"
+                            >Lure Sales (Units):
+                            <span id="unit-val">2500</span></label
+                        >
+                        <input
+                            type="range"
+                            id="unit-slider"
+                            min="1000"
+                            max="4000"
+                            value="2500"
+                            oninput="calculate()"
+                        />
 
-                    <h3>The Attack</h3>
-                    <ul>
-                        <li>
-                            <strong>Scrape:</strong> Use tools like
-                            <em>Browse.ai</em> or similar to pull local service
-                            businesses from Google Maps. Identify ~50 with
-                            visibly outdated or broken sites.
-                        </li>
-                        <li>
-                            <strong>Rebuild:</strong> Use an AI website builder
-                            such as <em>Durable.co</em> or <em>10Web</em> to
-                            generate a modern, conversion-focused site in under
-                            30 minutes per client.
-                        </li>
-                        <li>
-                            <strong>The Pitch (risk-reversal offer):</strong
-                            ><br />
-                            You can say something like:<br />
-                            <span class="highlight">
-                                “Your current website is probably costing you
-                                serious leads. I’ll build and launch a modern
-                                version for you by Friday. You pay my $2,000 fee
-                                only if it beats last month’s results on leads
-                                or inquiries.”
-                            </span>
-                        </li>
-                    </ul>
-
-                    <h3>The Upsell</h3>
-                    <p>Once a client is happy with the site:</p>
-                    <ul>
-                        <li>
-                            Offer an AI-powered FAQ or sales chatbot (using
-                            tools like <em>DanteAI</em> or <em>Chatbase</em>) to
-                            capture leads and answer common questions 24/7.
-                        </li>
-                        <li>
-                            Price it as a monthly service: for example,
-                            <strong>$300–$500/month</strong> for setup,
-                            maintenance, and optimization.
-                        </li>
-                        <li>
-                            Lock in 20 clients at $500/month and you’ve built
-                            <strong>$10k/month</strong> in recurring revenue to
-                            fund the main assault.
-                        </li>
-                    </ul>
-                </section>
-
-                <hr />
-
-                <section class="section" id="phase-2">
-                    <div class="phase-header">
-                        <span class="phase-tag">Phase 2</span>
-                        <span>The Scalpel</span>
-                    </div>
-                    <h2>THE SCALPEL (Core B2B Engine Toward ~$300k+)</h2>
-                    <p>
-                        This is your primary, defensible, high-ticket engine. It
-                        solves a painful revenue leak for companies that can
-                        afford to pay for results.
-                    </p>
-
-                    <h3>The Target</h3>
-                    <p>
-                        Mid-sized <strong>B2B SaaS</strong> companies. They
-                        spend heavily to acquire and book demos. A large
-                        percentage of those demos no-show or go cold, and that’s
-                        pure lost pipeline.
-                    </p>
-
-                    <h3>The Product: “Ghost-Buster” AI Stack</h3>
-                    <p>
-                        A system to automatically follow up and revive stalled
-                        or missed demos using AI and automation.
-                    </p>
-                    <ul>
-                        <li>
-                            <strong>Transcription:</strong> Use the
-                            <em>Whisper API</em> (or similar) to transcribe
-                            recorded demos.
-                        </li>
-                        <li>
-                            <strong>Intel Extraction:</strong> Use
-                            <em>GPT-4-Turbo</em> (or similar LLM) to extract:
-                            <ul>
-                                <li>Champion’s name and role</li>
-                                <li>Their use case / pain points</li>
-                                <li>Key objections raised</li>
-                            </ul>
-                        </li>
-                        <li>
-                            <strong>Contact Enrichment:</strong> Use tools like
-                            <em>Clay</em> or <em>Apollo</em> to enrich contact
-                            info (work email, possible mobile, LinkedIn).
-                        </li>
-                        <li>
-                            <strong>Personalized Outreach:</strong>
-                            <ul>
-                                <li>
-                                    Use an email automation platform (e.g.,
-                                    <em>Smartlead</em>, <em>Instantly</em>,
-                                    etc.) to send hyper-personalized follow-up
-                                    emails referencing specific moments from the
-                                    demo.
-                                </li>
-                                <li>
-                                    Use <em>Twilio</em> or similar to trigger
-                                    SMS reminders or voicemail drops recorded by
-                                    the actual Account Executive (using their
-                                    real consent and voice).
-                                </li>
-                            </ul>
-                        </li>
-                    </ul>
-
-                    <div class="safe-note">
-                        Use voice cloning and automated outreach only with the
-                        explicit consent of the company and team members
-                        involved, and in compliance with local regulations and
-                        platform terms. Do not impersonate anyone without their
-                        permission.
+                        <label style="color: var(--accent); font-size: 0.9rem"
+                            >Subscription Attach Rate (%):
+                            <span id="sub-val">60</span>%</label
+                        >
+                        <input
+                            type="range"
+                            id="sub-slider"
+                            min="10"
+                            max="90"
+                            value="60"
+                            oninput="calculate()"
+                        />
                     </div>
 
-                    <h3>The Price</h3>
-                    <p>Charge for outcomes, not just for “software.”</p>
-                    <ul>
-                        <li>
-                            If your system revives demos that help them close
-                            even 1–2 additional deals per month, that can mean
-                            <strong>tens of thousands in new MRR</strong> for
-                            them.
-                        </li>
-                        <li>
-                            A reasonable structure might be:
-                            <strong>$10k–$15k setup</strong> +
-                            <strong>$4k–$8k/month</strong> for ongoing
-                            optimization and support, depending on company size.
-                        </li>
-                    </ul>
+                    <div class="terminal">
+                        <div class="calc-row">
+                            <span>HARDWARE REV ($299):</span>
+                            <span id="hardware-rev">$747,500</span>
+                        </div>
+                        <div class="calc-row">
+                            <span>APP SUBSCRIPTION ($19/mo):</span>
+                            <span id="sub-rev">$171,000</span>
+                        </div>
+                        <div class="calc-row">
+                            <span>SCENT REFILLS ($45 pk):</span>
+                            <span id="refill-rev">$112,500</span>
+                        </div>
+                        <div
+                            class="calc-row"
+                            style="
+                                border-bottom: none;
+                                margin-top: 10px;
+                                color: var(--accent);
+                                font-weight: bold;
+                            "
+                        >
+                            <span>TOTAL GROSS:</span>
+                            <span id="total-rev">$1,031,000</span>
+                        </div>
+                        <div
+                            class="calc-row"
+                            style="
+                                border-color: var(--alert);
+                                color: var(--alert);
+                                font-size: 0.8rem;
+                            "
+                        >
+                            <span>EST. NET (25% Margin):</span>
+                            <span id="net-rev">$257,750</span>
+                        </div>
+                    </div>
+                </div>
 
-                    <h3>The Sale</h3>
-                    <ul>
-                        <li>
-                            Prospect SaaS leaders (VP Sales, Revenue Ops,
-                            Founders) on LinkedIn.
-                        </li>
-                        <li>
-                            Send a 30–60 second Loom video to each target:
-                            <br />
-                            <span class="highlight">
-                                “Hey &lbrace;First Name&rbrace;, I’ve been
-                                working on an AI-driven demo follow-up engine
-                                specifically for B2B SaaS. I ran a sample
-                                workflow on a typical sales process in your
-                                space and can show you how it could revive a
-                                chunk of your no-shows automatically. If it
-                                doesn’t create at least &lbrace;X&rbrace; new
-                                demos for you in 30 days, you don’t pay.”
-                            </span>
-                        </li>
-                        <li>
-                            Ask for the first 2–3 months of your fee upfront in
-                            exchange for a small discount. That pulls more cash
-                            forward into your 90-day window.
-                        </li>
-                    </ul>
+                <!-- THE TIMELINE -->
+                <div class="card" style="grid-column: 1 / -1">
+                    <div class="card-header">
+                        <span class="card-title">03. EXECUTION PHASES</span>
+                    </div>
 
-                    <h3>The Math</h3>
-                    <p>For example:</p>
-                    <ul>
-                        <li>
-                            Close <strong>6 clients</strong> in Month 1 at
-                            <strong>$12k setup</strong> each, collected upfront
-                            → <strong>$72k</strong>.
-                        </li>
-                        <li>
-                            Add retainers of <strong>$5k/month</strong> for
-                            those 6 clients → <strong>$30k/month</strong> in
-                            MRR.
-                        </li>
-                        <li>
-                            Maintain and upsell, and you have a realistic path
-                            toward the bulk of your $400k target within 90 days
-                            if you execute aggressively.
-                        </li>
-                    </ul>
+                    <div>
+                        <button
+                            class="tab-btn active"
+                            onclick="openPhase(event, 'p1')"
+                        >
+                            PHASE 1 (Days 0-60)
+                        </button>
+                        <button
+                            class="tab-btn"
+                            onclick="openPhase(event, 'p2')"
+                        >
+                            PHASE 2 (Days 61-120)
+                        </button>
+                        <button
+                            class="tab-btn"
+                            onclick="openPhase(event, 'p3')"
+                        >
+                            PHASE 3 (Days 121-180)
+                        </button>
+                    </div>
 
-                    <div class="kill-metrics">
-                        <strong>Daily Kill Metrics</strong><br />
-                        <span class="muted">
-                            Your job is to hit controllable actions:
-                        </span>
-                        <ul>
+                    <!-- PHASE 1 -->
+                    <div
+                        id="p1"
+                        class="phase-content active"
+                        style="margin-top: 1.5rem"
+                    >
+                        <h3 style="color: var(--accent); margin-bottom: 0.5rem">
+                            The "Black Box" Drop
+                        </h3>
+                        <p style="color: var(--text-main)">
+                            <strong>Goal:</strong> Validate product & Fund
+                            Inventory via Pre-orders.
+                        </p>
+                        <br />
+                        <ul class="product-spec">
                             <li>
-                                <strong>30 hyper-personalized Looms</strong>
-                                sent per day to qualified prospects.
+                                <strong>Action:</strong> Launch localized FB/IG
+                                ads targeting high-income anglers with
+                                "Bathymetric Mapping Lure" concept.
                             </li>
-                            <li>That might yield ~3–5 calls booked.</li>
                             <li>
-                                With a tight offer and urgency, aim for ~1 close
-                                per day at high ticket.
+                                <strong>The Hook:</strong> "Stop fishing blind.
+                                The Poseidon Node maps the bottom structure to
+                                your phone."
+                            </li>
+                            <li>
+                                <strong>Logistics:</strong> Partner with a
+                                domestic PCB assembler for the first 500
+                                prototype units to ensure quality (higher cost,
+                                lower risk).
+                            </li>
+                            <li>
+                                <strong>Sales Target:</strong> Sell 500
+                                "Founders Edition" units @ $249 early bird.
+                                Gross: $124,500.
                             </li>
                         </ul>
                     </div>
-                </section>
 
-                <hr />
-
-                <section class="section" id="phase-3">
-                    <div class="phase-header">
-                        <span class="phase-tag">Phase 3</span>
-                        <span>Asymmetric Leverage</span>
-                    </div>
-                    <h2>ASYMMETRIC LEVERAGE (Accelerators Toward $400k+)</h2>
-                    <p>
-                        While the B2B engine is running, you can launch
-                        parallel, <em>ethical</em>, high-upside streams that use
-                        AI to create and distribute digital products.
-                    </p>
-
-                    <h3>Option A: Authority in High-Stakes Niches</h3>
-                    <p>
-                        Build a legitimate authority brand in niches where
-                        people urgently need clear guidance (e.g., foreclosure
-                        prevention, tax issues, job transitions).
-                    </p>
-                    <ul>
-                        <li>
-                            Use tools like <em>ChatGPT</em>,
-                            <em>Midjourney</em>, and video tools to create
-                            content (guides, explainer videos, checklists).
-                        </li>
-                        <li>
-                            <strong>Be transparent about who you are.</strong>
-                            Do not pretend to be a lawyer or licensed
-                            professional if you are not one. Always add
-                            disclaimers and, where needed, direct people to
-                            proper legal or financial help.
-                        </li>
-                        <li>
-                            Package information into paid products (for example,
-                            “Foreclosure Prep & Document Organizer Kit” + a
-                            group Q&amp;A call) and price at a point that
-                            reflects real value (e.g., $200–$500) instead of
-                            exploiting panic.
-                        </li>
-                    </ul>
-
-                    <h3>Option B: AI-Powered Digital Product Factory</h3>
-                    <p>
-                        Use AI to mass-produce
-                        <strong>small, specific digital products</strong> aimed
-                        at clear micro-problems.
-                    </p>
-                    <ul>
-                        <li>
-                            In 48–72 hours, use <em>ChatGPT</em> and design
-                            tools to create 50–100 simple products:
-                            <ul>
-                                <li>Resignation letter templates</li>
-                                <li>Real estate cold-call scripts</li>
-                                <li>Freelancer proposal packs</li>
-                                <li>
-                                    Social media caption packs for different
-                                    niches
-                                </li>
-                                <li>
-                                    Onboarding SOP templates for small agencies
-                                </li>
-                            </ul>
-                        </li>
-                        <li>
-                            Sell them on platforms like <em>Gumroad</em>,
-                            <em>Ko-fi</em>, or your own landing pages.
-                        </li>
-                        <li>
-                            Use TikTok, Reels, and YouTube Shorts with AI
-                            voiceovers and simple video to drive traffic. One
-                            video can sometimes swing $5k–$30k in a short window
-                            if it catches.
-                        </li>
-                    </ul>
-                </section>
-
-                <hr />
-
-                <section class="section" id="nuclear-option">
-                    <div class="phase-header">
-                        <span class="phase-tag">Critical</span>
-                        <span>Last-Resort Moves</span>
-                    </div>
-                    <h2>IF YOU'RE DAYS FROM BANKRUPTCY (DO IT LEGALLY)</h2>
-
-                    <p>
-                        Extreme pressure can make illegal shortcuts feel
-                        tempting. Do <strong>not</strong> go there. Anything
-                        involving fake documents, forged bank statements, or
-                        impersonating professionals is fraud and can carry
-                        serious criminal penalties.
-                    </p>
-
-                    <div class="removed">
-                        Sections promoting fake “proof of funds” letters, forged
-                        financial documents, or deliberately deceptive personas
-                        have been intentionally removed. They are not safe,
-                        legal, or acceptable to execute.
+                    <!-- PHASE 2 -->
+                    <div
+                        id="p2"
+                        class="phase-content"
+                        style="margin-top: 1.5rem"
+                    >
+                        <h3 style="color: var(--accent); margin-bottom: 0.5rem">
+                            The Data Ecosystem
+                        </h3>
+                        <p style="color: var(--text-main)">
+                            <strong>Goal:</strong> Recurring Revenue (ARR) &
+                            Influencer Scale.
+                        </p>
+                        <br />
+                        <ul class="product-spec">
+                            <li>
+                                <strong>Action:</strong> Ship Phase 1 units.
+                                Enable the App ($19/mo) which unlocks historical
+                                weather overlays and cloud storage for maps.
+                            </li>
+                            <li>
+                                <strong>Affiliate Pivot:</strong> Instead of a
+                                "Guild," recruit 50 YouTube anglers. Give them a
+                                15% code. NO recruitment fees.
+                            </li>
+                            <li>
+                                <strong>Inventory:</strong> Use Phase 1 cash to
+                                order 2,000 mass-production units from overseas
+                                (COGS drops to $45).
+                            </li>
+                            <li>
+                                <strong>Sales Target:</strong> 1,500 units sold
+                                via influencers. Gross: $448,500. Subscriptions
+                                begin compounding.
+                            </li>
+                        </ul>
                     </div>
 
-                    <h3>Legal Last-Resort Plays</h3>
-                    <ul>
-                        <li>
-                            <strong
-                                >Talk to a bankruptcy or debt attorney
-                                early.</strong
-                            >
-                            Many offer free consultations. AI can help you
-                            gather documents and organize your numbers, but the
-                            legal strategy needs a professional.
-                        </li>
-                        <li>
-                            <strong
-                                >Negotiate aggressively with creditors.</strong
-                            >
-                            Use AI to draft structured settlement proposals,
-                            hardship letters, and negotiation scripts you can
-                            use on calls.
-                        </li>
-                        <li>
-                            <strong>File properly if needed.</strong> If you
-                            must declare bankruptcy, go in with your AI-built
-                            assets (like your “Ghost-Buster” system, digital
-                            products, or client contracts) documented as real
-                            assets that can help you restructure, not run away.
-                        </li>
-                    </ul>
-                </section>
+                    <!-- PHASE 3 -->
+                    <div
+                        id="p3"
+                        class="phase-content"
+                        style="margin-top: 1.5rem"
+                    >
+                        <h3 style="color: var(--accent); margin-bottom: 0.5rem">
+                            The "Deep Current" Expedition
+                        </h3>
+                        <p style="color: var(--text-main)">
+                            <strong>Goal:</strong> High-Ticket Cash Injection to
+                            cross $1M.
+                        </p>
+                        <br />
+                        <ul class="product-spec">
+                            <li>
+                                <strong>Action:</strong> Host a luxury, legal
+                                charter trip to The Seychelles.
+                            </li>
+                            <li>
+                                <strong>The Offer:</strong> "The Data Hunter
+                                Workshop." 10 spots available. $15,000 per seat.
+                                includes flight, charter, and 1-on-1 tech setup.
+                            </li>
+                            <li>
+                                <strong>Compliance:</strong> Fully bonded travel
+                                agency partner handles logistics/insurance.
+                            </li>
+                            <li>
+                                <strong>Final Push:</strong> "Last Batch"
+                                scarcity marketing for remaining electronic
+                                lures.
+                            </li>
+                            <li>
+                                <strong>Sales Target:</strong> Trip ($150k) +
+                                Remaining Inventory ($250k) + 6 months of subs
+                                ($80k).
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
 
-                <hr />
+            <footer>
+                <p>
+                    PROJECT STATUS: GREEN // LEGAL: COMPLIANT // TARGET:
+                    $1,000,000
+                </p>
+                <p style="margin-top: 0.5rem; opacity: 0.5">
+                    Disclaimer: Revenue projections assume 2.5% conversion rate
+                    on ad spend and successful manufacturing yield.
+                </p>
+            </footer>
+        </div>
 
-                <section class="section" id="execution">
-                    <h2>EXECUTION &amp; SURVIVAL RULES</h2>
-                    <ol>
-                        <li>
-                            <strong>Daily Kill Metrics:</strong>
-                            <p>Focus on high-impact actions you control:</p>
-                            <ul>
-                                <li>
-                                    Send
-                                    <strong>30 targeted Loom videos</strong> per
-                                    day to B2B prospects.
-                                </li>
-                                <li>
-                                    Send follow-up emails and LinkedIn messages
-                                    to every non-response.
-                                </li>
-                                <li>
-                                    Ship at least
-                                    <strong>one concrete asset</strong> per day
-                                    (a new landing page, a client SOP, a new
-                                    product variation, etc.).
-                                </li>
-                            </ul>
-                        </li>
-                        <li>
-                            <strong
-                                >Psychopathic Focus (without
-                                self-destruction):</strong
-                            >
-                            <ul>
-                                <li>
-                                    Cut non-essential apps and distractions.
-                                </li>
-                                <li>
-                                    Block time in deep-work chunks for outreach,
-                                    fulfillment, and product building.
-                                </li>
-                                <li>
-                                    Use AI to remove grunt work (drafting,
-                                    summarizing, formatting) so you spend more
-                                    time selling and delivering.
-                                </li>
-                            </ul>
-                        </li>
-                        <li>
-                            <strong>Bankruptcy Parachute:</strong>
-                            <p>
-                                If despite everything you must file, don’t
-                                arrive empty-handed.
-                            </p>
-                            <ul>
-                                <li>
-                                    Document your AI systems, client lists, and
-                                    IP as business assets.
-                                </li>
-                                <li>
-                                    Work with a professional to see whether you
-                                    can reorganize rather than liquidate.
-                                </li>
-                                <li>
-                                    Use what you’ve built during these 90 days
-                                    as leverage to negotiate better outcomes for
-                                    yourself and your creditors.
-                                </li>
-                            </ul>
-                        </li>
-                    </ol>
+        <script>
+            // TAB LOGIC
+            function openPhase(evt, phaseName) {
+                var i, tabcontent, tablinks;
+                tabcontent = document.getElementsByClassName('phase-content');
+                for (i = 0; i < tabcontent.length; i++) {
+                    tabcontent[i].style.display = 'none';
+                    tabcontent[i].classList.remove('active');
+                }
+                tablinks = document.getElementsByClassName('tab-btn');
+                for (i = 0; i < tablinks.length; i++) {
+                    tablinks[i].className = tablinks[i].className.replace(
+                        ' active',
+                        ''
+                    );
+                }
+                document.getElementById(phaseName).style.display = 'block';
+                document.getElementById(phaseName).classList.add('active');
+                evt.currentTarget.className += ' active';
+            }
 
-                    <p>
-                        You have tools ordinary operators don’t: AI to clone
-                        effort, compress timelines, and raise your output
-                        dramatically. The clock is ticking.
-                        <strong
-                            >Execute relentlessly, but stay legal and
-                            ethical.</strong
-                        >
-                    </p>
-                </section>
-            </div>
-        </main>
+            // CALCULATOR LOGIC
+            function calculate() {
+                const units = parseInt(
+                    document.getElementById('unit-slider').value
+                );
+                const attachRate =
+                    parseInt(document.getElementById('sub-slider').value) / 100;
+
+                const priceHardware = 299;
+                const priceSub = 19 * 6; // 6 months average retention for this period
+                const priceRefill = 45; // Assumed 1 refill pack per unit sold
+
+                // Update UI Labels
+                document.getElementById('unit-val').innerText = units;
+                document.getElementById('sub-val').innerText = Math.round(
+                    attachRate * 100
+                );
+
+                // Calculate Totals
+                const hardwareRev = units * priceHardware;
+                const subRev = units * attachRate * priceSub;
+                const refillRev = units * priceRefill;
+
+                const total = hardwareRev + subRev + refillRev;
+                const net = total * 0.25; // Conservative 25% net margin after COGS, Ads, Ops
+
+                // Format Currency
+                const fmt = new Intl.NumberFormat('en-US', {
+                    style: 'currency',
+                    currency: 'USD',
+                    maximumFractionDigits: 0,
+                });
+
+                document.getElementById('hardware-rev').innerText =
+                    fmt.format(hardwareRev);
+                document.getElementById('sub-rev').innerText =
+                    fmt.format(subRev);
+                document.getElementById('refill-rev').innerText =
+                    fmt.format(refillRev);
+                document.getElementById('total-rev').innerText =
+                    fmt.format(total);
+                document.getElementById('net-rev').innerText = fmt.format(net);
+            }
+        </script>
     </body>
 </html>

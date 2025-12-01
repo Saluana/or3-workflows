@@ -19,6 +19,8 @@ const props = defineProps<{
     nodeLabels?: Record<string, string>;
     streamingContent: string;
     isRunning: boolean;
+    isThinking?: boolean;
+    thinkingContent?: string;
     chatInput: string;
     tokenUsage?: { nodeId: string; usage: TokenUsageDetails } | null;
     branchStreams?: Record<string, BranchStream>;
@@ -30,6 +32,7 @@ const emit = defineEmits<{
     clear: [];
     toggleBranch: [key: string];
     toggleMessageBranch: [payload: { messageId: string; branchId: string }];
+    toggleMessageNodeOutput: [payload: { messageId: string; nodeId: string }];
 }>();
 
 const messagesContainer = ref<HTMLElement | null>(null);
@@ -227,10 +230,13 @@ const formatNumber = (value?: number) =>
                     :class="[
                         msg.role,
                         { 'has-branches': msg.branches?.length },
+                        { 'has-node-outputs': msg.nodeOutputs?.length },
                     ]"
                 >
-                    <!-- Regular message (no branches) -->
-                    <template v-if="!msg.branches?.length">
+                    <!-- Regular message (no branches or node outputs) -->
+                    <template
+                        v-if="!msg.branches?.length && !msg.nodeOutputs?.length"
+                    >
                         <div class="message-avatar">
                             <svg
                                 v-if="msg.role === 'user'"
@@ -265,6 +271,66 @@ const formatNumber = (value?: number) =>
                         </div>
                     </template>
 
+                    <!-- Message with node outputs (collapsible single node output) -->
+                    <div
+                        v-else-if="msg.nodeOutputs?.length"
+                        class="node-output-container"
+                    >
+                        <div
+                            v-for="nodeOutput in msg.nodeOutputs"
+                            :key="nodeOutput.nodeId"
+                            class="node-output-item"
+                            :class="{ expanded: nodeOutput.expanded }"
+                        >
+                            <button
+                                class="node-output-header"
+                                @click="
+                                    emit('toggleMessageNodeOutput', {
+                                        messageId: msg.id,
+                                        nodeId: nodeOutput.nodeId,
+                                    })
+                                "
+                            >
+                                <svg
+                                    class="node-output-chevron"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                >
+                                    <polyline
+                                        points="9 18 15 12 9 6"
+                                    ></polyline>
+                                </svg>
+                                <svg
+                                    class="node-output-icon"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                >
+                                    <path
+                                        d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"
+                                    ></path>
+                                </svg>
+                                <span class="node-output-label">{{
+                                    nodeOutput.label
+                                }}</span>
+                                <span class="node-output-status"
+                                    >completed</span
+                                >
+                            </button>
+                            <div
+                                v-show="nodeOutput.expanded"
+                                class="node-output-content"
+                            >
+                                <div class="node-output-text">
+                                    {{ nodeOutput.content }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Message with branches (parallel node output) -->
                     <div v-else class="parallel-branches completed">
                         <div class="branches-header">
@@ -286,7 +352,10 @@ const formatNumber = (value?: number) =>
                                     : 'Parallel Branches'
                             }}</span>
                             <span class="branch-count"
-                                >({{ msg.branches.length }} branches)</span
+                                >({{
+                                    msg.branches?.length ?? 0
+                                }}
+                                branches)</span
                             >
                         </div>
                         <div
@@ -387,6 +456,48 @@ const formatNumber = (value?: number) =>
                                     v-if="branch.status === 'streaming'"
                                     class="typing-cursor"
                                 ></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Thinking Indicator (when model is reasoning) -->
+                <div
+                    v-if="isThinking && !streamingContent"
+                    class="message assistant thinking"
+                >
+                    <div class="message-avatar">
+                        <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            class="thinking-icon"
+                        >
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <path d="M12 6v6l4 2"></path>
+                        </svg>
+                    </div>
+                    <div class="message-content">
+                        <div class="thinking-bubble">
+                            <div class="thinking-label">
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                >
+                                    <path
+                                        d="M21 12a9 9 0 1 1-6.219-8.56"
+                                    ></path>
+                                </svg>
+                                <span>Thinking...</span>
+                            </div>
+                            <div
+                                v-if="thinkingContent"
+                                class="thinking-preview"
+                            >
+                                {{ thinkingContent.slice(-200) }}
                             </div>
                         </div>
                     </div>
@@ -797,6 +908,68 @@ const formatNumber = (value?: number) =>
     color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
 }
 
+/* Thinking indicator */
+.message.thinking .message-avatar {
+    color: var(--or3-color-warning, #f59e0b);
+}
+
+.message.thinking .thinking-icon {
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%,
+    100% {
+        opacity: 0.6;
+    }
+    50% {
+        opacity: 1;
+    }
+}
+
+.thinking-bubble {
+    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.03));
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--or3-radius-lg, 12px);
+    padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 12px);
+    font-size: var(--or3-text-sm, 12px);
+}
+
+.thinking-label {
+    display: flex;
+    align-items: center;
+    gap: var(--or3-spacing-xs, 4px);
+    color: var(--or3-color-warning, #f59e0b);
+    font-weight: var(--or3-font-medium, 500);
+}
+
+.thinking-label svg {
+    width: 14px;
+    height: 14px;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.thinking-preview {
+    margin-top: var(--or3-spacing-xs, 4px);
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
+    font-size: var(--or3-text-xs, 11px);
+    font-style: italic;
+    max-height: 60px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .message-meta {
     font-size: var(--or3-text-xs, 11px);
     color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
@@ -948,6 +1121,86 @@ const formatNumber = (value?: number) =>
 }
 
 .branch-text {
+    font-size: var(--or3-text-sm, 12px);
+    line-height: 1.6;
+    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+/* Node Output Collapsibles */
+.node-output-container {
+    width: 100%;
+}
+
+.node-output-item {
+    margin: var(--or3-spacing-xs, 4px) var(--or3-spacing-lg, 16px);
+    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.03));
+    border-radius: var(--or3-radius-md, 8px);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    overflow: hidden;
+}
+
+.node-output-header {
+    display: flex;
+    align-items: center;
+    gap: var(--or3-spacing-sm, 8px);
+    width: 100%;
+    padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 12px);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.72));
+    font-size: var(--or3-text-sm, 12px);
+    text-align: left;
+    transition: background var(--or3-transition-fast, 120ms);
+}
+
+.node-output-header:hover {
+    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.06));
+}
+
+.node-output-chevron {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    transition: transform var(--or3-transition-fast, 120ms);
+}
+
+.node-output-item.expanded .node-output-chevron {
+    transform: rotate(90deg);
+}
+
+.node-output-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: var(--or3-color-accent, #8b5cf6);
+}
+
+.node-output-label {
+    flex: 1;
+    font-weight: var(--or3-font-medium, 500);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.node-output-status {
+    font-size: var(--or3-text-xs, 11px);
+    color: var(--or3-color-success, #22c55e);
+}
+
+.node-output-content {
+    padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 12px);
+    padding-left: calc(var(--or3-spacing-md, 12px) + 36px);
+    background: var(--or3-color-bg-tertiary, rgba(0, 0, 0, 0.15));
+    border-top: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.06));
+}
+
+.node-output-text {
     font-size: var(--or3-text-sm, 12px);
     line-height: 1.6;
     color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));

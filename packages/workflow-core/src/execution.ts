@@ -569,6 +569,12 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 callbacks.onToken(nodeId, token);
             },
 
+            onReasoning: callbacks.onReasoning
+                ? (token: string) => {
+                      callbacks.onReasoning!(nodeId, token);
+                  }
+                : undefined,
+
             // Branch streaming callbacks for parallel nodes
             onBranchToken: callbacks.onBranchToken
                 ? (branchId: string, branchLabel: string, token: string) => {

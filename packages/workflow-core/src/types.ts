@@ -450,6 +450,7 @@ export interface LLMProvider {
             toolChoice?: any; // Allow tool choice configuration
             responseFormat?: { type: 'json_object' | 'text' };
             onToken?: (token: string) => void;
+            onReasoning?: (token: string) => void;
             signal?: AbortSignal;
         }
     ): Promise<{
@@ -696,6 +697,14 @@ export interface ExecutionCallbacks {
     onToken: (nodeId: string, token: string) => void;
 
     /**
+     * Called for each reasoning/thinking token from the LLM.
+     * Use this to display the model's reasoning process (for models that support it).
+     * @param nodeId - The ID of the node generating reasoning.
+     * @param token - The reasoning token/chunk of text received.
+     */
+    onReasoning?: (nodeId: string, token: string) => void;
+
+    /**
      * Called when a router node selects a route.
      * Optional - use this to visualize routing decisions.
      * @param nodeId - The ID of the router node.
@@ -932,6 +941,8 @@ export interface ExecutionContext {
     attachments?: Attachment[];
     /** Callback for streaming tokens */
     onToken?: (token: string) => void;
+    /** Callback for streaming reasoning/thinking tokens */
+    onReasoning?: (token: string) => void;
     /** Outputs from previous nodes, keyed by node ID */
     outputs: Record<string, string>;
     /** Chain of executed node IDs leading to this point */

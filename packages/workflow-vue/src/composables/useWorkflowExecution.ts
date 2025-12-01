@@ -98,6 +98,9 @@ export function useWorkflowExecution(): UseWorkflowExecutionReturn {
             onToken: (nodeId, token) => {
                 externalCallbacks?.onToken?.(nodeId, token);
             },
+            onReasoning: (nodeId, token) => {
+                externalCallbacks?.onReasoning?.(nodeId, token);
+            },
             onRouteSelected: (nodeId, routeId) => {
                 externalCallbacks?.onRouteSelected?.(nodeId, routeId);
             },
