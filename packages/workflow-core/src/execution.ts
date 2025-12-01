@@ -1291,13 +1291,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         // Timestamp-based timeout handling (robust to system sleep)
         let timeoutCheckInterval: ReturnType<typeof setInterval> | undefined;
         if (config.timeout && config.timeout > 0 && request.expiresAt) {
+            const expiresAtMs = new Date(request.expiresAt).getTime();
             const timeoutPromise = new Promise<HITLResponse>((resolve) => {
-                // Check expiry every second
+                // Check expiry every second using performant Date.now()
                 timeoutCheckInterval = setInterval(() => {
-                    const now = new Date();
-                    const expiresAt = new Date(request.expiresAt!);
-
-                    if (now >= expiresAt) {
+                    if (Date.now() >= expiresAtMs) {
                         clearInterval(timeoutCheckInterval);
                         const defaultAction = config.defaultAction || 'reject';
                         resolve({

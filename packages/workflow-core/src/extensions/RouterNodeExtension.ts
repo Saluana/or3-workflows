@@ -303,9 +303,7 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
         }
 
         if (!selectedRouteId) {
-            const data = node.data as RouterNodeData;
-            const fallbackBehavior =
-                (data as any).fallbackBehavior || 'first'; // 'first', 'error', or 'none'
+            const fallbackBehavior = data.fallbackBehavior || 'first'; // 'first', 'error', or 'none'
 
             if (fallbackBehavior === 'error') {
                 throw new Error(

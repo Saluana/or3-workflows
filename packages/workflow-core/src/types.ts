@@ -300,6 +300,13 @@ export interface RouterNodeData extends BaseNodeData {
     errorHandling?: NodeErrorConfig;
     /** Human-in-the-loop configuration for this node */
     hitl?: HITLConfig;
+    /**
+     * Fallback behavior when LLM fails to select a valid route:
+     * - 'first': Use first route (default, backward compatible)
+     * - 'error': Throw error
+     * - 'none': Return empty nextNodes (stop execution)
+     */
+    fallbackBehavior?: 'first' | 'error' | 'none';
 }
 
 /**
@@ -330,6 +337,12 @@ export interface ParallelNodeData extends BaseNodeData {
     prompt?: string;
     branches: BranchDefinition[];
     mergeEnabled?: boolean;
+    errorHandling?: NodeErrorConfig;
+    /**
+     * Timeout for each branch in milliseconds (default: 300000 = 5 minutes).
+     * Set to 0 to disable timeout.
+     */
+    branchTimeout?: number;
 }
 
 /**

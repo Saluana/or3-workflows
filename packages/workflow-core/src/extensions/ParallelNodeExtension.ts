@@ -72,8 +72,7 @@ export const ParallelNodeExtension: NodeExtension = {
         const outgoingEdges = context.getOutgoingEdges(node.id);
         const mergeEnabled = data.mergeEnabled !== false;
         // Optional per-branch timeout (default: 5 minutes if not specified)
-        const branchTimeout =
-            (data as any).branchTimeout ?? 5 * 60 * 1000;
+        const branchTimeout = data.branchTimeout ?? 5 * 60 * 1000;
 
         // Helper to create a timeout promise
         const createTimeoutPromise = (
