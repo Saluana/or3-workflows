@@ -18,6 +18,15 @@ importers:
         specifier: ^5.0.0
         version: 5.4.21(@types/node@24.10.1)
 
+  demo-headless:
+    dependencies:
+      '@openrouter/sdk':
+        specifier: ^0.1.0
+        version: 0.1.27
+      '@or3/workflow-core':
+        specifier: workspace:*
+        version: link:../packages/workflow-core
+
   demo-v2:
     dependencies:
       '@openrouter/sdk':

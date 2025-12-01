@@ -276,6 +276,15 @@ export interface AgentNodeData extends BaseNodeData {
     errorHandling?: NodeErrorConfig;
     /** Human-in-the-loop configuration for this node */
     hitl?: HITLConfig;
+    /** Maximum tool call iterations for this node (overrides global setting) */
+    maxToolIterations?: number;
+    /**
+     * Behavior when max tool iterations is reached.
+     * - 'warning': Add a warning to output and continue (default)
+     * - 'error': Throw an error
+     * - 'hitl': Trigger human-in-the-loop for approval to continue
+     */
+    onMaxToolIterations?: 'warning' | 'error' | 'hitl';
 }
 
 /**
@@ -441,6 +450,7 @@ export interface LLMProvider {
             toolChoice?: any; // Allow tool choice configuration
             responseFormat?: { type: 'json_object' | 'text' };
             onToken?: (token: string) => void;
+            onReasoning?: (token: string) => void;
             signal?: AbortSignal;
         }
     ): Promise<{
@@ -687,6 +697,14 @@ export interface ExecutionCallbacks {
     onToken: (nodeId: string, token: string) => void;
 
     /**
+     * Called for each reasoning/thinking token from the LLM.
+     * Use this to display the model's reasoning process (for models that support it).
+     * @param nodeId - The ID of the node generating reasoning.
+     * @param token - The reasoning token/chunk of text received.
+     */
+    onReasoning?: (nodeId: string, token: string) => void;
+
+    /**
      * Called when a router node selects a route.
      * Optional - use this to visualize routing decisions.
      * @param nodeId - The ID of the router node.
@@ -695,16 +713,75 @@ export interface ExecutionCallbacks {
     onRouteSelected?: (nodeId: string, routeId: string) => void;
 
     /**
+     * Called when token usage is estimated for an LLM request.
+     * Use this to display token counts and remaining context.
+     * @param nodeId - The ID of the node producing the usage.
+     * @param usage - Estimated token usage details.
+     */
+    onTokenUsage?: (nodeId: string, usage: TokenUsageDetails) => void;
+
+    /**
      * Called when context compaction occurs.
      * Optional - use this to log or display compaction events.
-     *
-     * Note: This callback is currently defined but not yet wired up in the
-     * OpenRouterExecutionAdapter. It will be called once compaction integration
-     * is implemented.
-     *
      * @param result - Details about the compaction operation.
      */
     onContextCompacted?: (result: CompactionResult) => void;
+
+    /**
+     * Called for each streaming token from a parallel branch.
+     * Use this to display real-time streaming for individual branches.
+     * @param nodeId - The ID of the parallel node.
+     * @param branchId - The ID of the branch.
+     * @param branchLabel - The display label of the branch.
+     * @param token - The token/chunk of text received.
+     */
+    onBranchToken?: (
+        nodeId: string,
+        branchId: string,
+        branchLabel: string,
+        token: string
+    ) => void;
+
+    /**
+     * Called for each reasoning/thinking token from a parallel branch.
+     * Use this to display thinking indicators for individual branches.
+     * @param nodeId - The ID of the parallel node.
+     * @param branchId - The ID of the branch.
+     * @param branchLabel - The display label of the branch.
+     * @param token - The reasoning token/chunk of text received.
+     */
+    onBranchReasoning?: (
+        nodeId: string,
+        branchId: string,
+        branchLabel: string,
+        token: string
+    ) => void;
+
+    /**
+     * Called when a parallel branch starts execution.
+     * @param nodeId - The ID of the parallel node.
+     * @param branchId - The ID of the branch.
+     * @param branchLabel - The display label of the branch.
+     */
+    onBranchStart?: (
+        nodeId: string,
+        branchId: string,
+        branchLabel: string
+    ) => void;
+
+    /**
+     * Called when a parallel branch completes execution.
+     * @param nodeId - The ID of the parallel node.
+     * @param branchId - The ID of the branch.
+     * @param branchLabel - The display label of the branch.
+     * @param output - The final output of the branch.
+     */
+    onBranchComplete?: (
+        nodeId: string,
+        branchId: string,
+        branchLabel: string,
+        output: string
+    ) => void;
 }
 
 /**
@@ -744,6 +821,9 @@ export interface ExecutionResult {
 
     /** Token usage statistics (if available from the LLM provider). */
     usage?: TokenUsage;
+
+    /** Per-request token usage details (estimated). */
+    tokenUsageDetails?: Array<TokenUsageDetails & { nodeId: string }>;
 }
 
 /** Token usage statistics */
@@ -751,6 +831,20 @@ export interface TokenUsage {
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
+}
+
+/** Token usage enriched with model limits */
+export interface TokenUsageDetails extends TokenUsage {
+    /** Model used for the request */
+    model: string;
+    /** Maximum context window for the model */
+    contextLimit: number;
+    /** Compaction threshold in tokens (if enabled) */
+    compactionThreshold?: number;
+    /** Remaining tokens before compaction would trigger */
+    remainingBeforeCompaction?: number;
+    /** Remaining tokens before hitting model context limit */
+    remainingContext: number;
 }
 
 /** Options for execution adapter */
@@ -820,6 +914,23 @@ export interface ExecutionOptions {
      * When false (default), noisy logs are suppressed to reduce console output and PII exposure.
      */
     debug?: boolean;
+    /**
+     * Internal: Current subflow depth, used by subflow execution to track nesting.
+     * @internal
+     */
+    _subflowDepth?: number;
+    /**
+     * Maximum number of tool call iterations for agent nodes (default: 10).
+     * Prevents infinite tool-calling loops.
+     */
+    maxToolIterations?: number;
+    /**
+     * Default behavior when max tool iterations is reached.
+     * - 'warning': Add a warning to output and continue (default)
+     * - 'error': Throw an error
+     * - 'hitl': Trigger human-in-the-loop for approval to continue
+     */
+    onMaxToolIterations?: 'warning' | 'error' | 'hitl';
 }
 
 /** Tool definition in OpenRouter/OpenAI format */
@@ -845,6 +956,8 @@ export interface ExecutionContext {
     attachments?: Attachment[];
     /** Callback for streaming tokens */
     onToken?: (token: string) => void;
+    /** Callback for streaming reasoning/thinking tokens */
+    onReasoning?: (token: string) => void;
     /** Outputs from previous nodes, keyed by node ID */
     outputs: Record<string, string>;
     /** Chain of executed node IDs leading to this point */
@@ -892,6 +1005,50 @@ export interface ExecutionContext {
     >;
     /** Enable debug logging for LLM calls and routing decisions */
     debug?: boolean;
+    /** Default model to use when node doesn't specify one */
+    defaultModel?: string;
+    /** Current subflow nesting depth (for enforcing maxSubflowDepth) */
+    subflowDepth?: number;
+    /** Maximum subflow nesting depth (from ExecutionOptions) */
+    maxSubflowDepth?: number;
+    /** Global tools available to all agents */
+    tools?: ToolDefinition[];
+    /** Maximum tool call iterations (from node or global options) */
+    maxToolIterations?: number;
+    /** Behavior when max tool iterations is reached */
+    onMaxToolIterations?: 'warning' | 'error' | 'hitl';
+    /** HITL callback for human-in-the-loop requests */
+    onHITLRequest?: (
+        request: import('./hitl').HITLRequest
+    ) => Promise<import('./hitl').HITLResponse>;
+    /** Current workflow name for HITL context */
+    workflowName?: string;
+    /** Token counter instance for estimating usage */
+    tokenCounter?: TokenCounter;
+    /** Compaction configuration (if enabled) */
+    compaction?: CompactionConfig;
+    /** Callback to report token usage for the current node */
+    onTokenUsage?: (usage: TokenUsageDetails) => void;
+    /** Callback for parallel branch token streaming */
+    onBranchToken?: (
+        branchId: string,
+        branchLabel: string,
+        token: string
+    ) => void;
+    /** Callback for parallel branch reasoning/thinking token streaming */
+    onBranchReasoning?: (
+        branchId: string,
+        branchLabel: string,
+        token: string
+    ) => void;
+    /** Callback when a parallel branch starts */
+    onBranchStart?: (branchId: string, branchLabel: string) => void;
+    /** Callback when a parallel branch completes */
+    onBranchComplete?: (
+        branchId: string,
+        branchLabel: string,
+        output: string
+    ) => void;
 }
 
 /** Chat message for conversation history */

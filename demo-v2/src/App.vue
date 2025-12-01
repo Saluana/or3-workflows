@@ -3,7 +3,11 @@ import { ref, computed, onMounted, watch } from 'vue';
 import type { Node, Edge } from '@vue-flow/core';
 
 // Import from our v2 packages
-import { type WorkflowData, validateWorkflow } from '@or3/workflow-core';
+import {
+    type WorkflowData,
+    type TokenUsageDetails,
+    validateWorkflow,
+} from '@or3/workflow-core';
 import {
     WorkflowCanvas,
     NodePalette,
@@ -20,6 +24,7 @@ import {
     useWorkflowStorage,
     useMobileNav,
     type ChatMessage,
+    type BranchStream,
 } from './composables';
 import type { WorkflowSummary } from '@or3/workflow-core';
 
@@ -86,6 +91,19 @@ const tempApiKey = ref('');
 const messages = ref<ChatMessage[]>([]);
 const chatInput = ref('');
 const conversationHistory = ref<Array<{ role: string; content: string }>>([]);
+const tokenUsage = ref<{ nodeId: string; usage: TokenUsageDetails } | null>(
+    null
+);
+
+// Track node outputs for collapsible display
+const nodeOutputs = ref<Record<string, { nodeId: string; output: string }>>({});
+
+// Parallel branch streaming state (for live streaming only)
+const branchStreams = ref<Record<string, BranchStream>>({});
+
+// Thinking/reasoning state (for main output)
+const isThinking = ref(false);
+const thinkingContent = ref('');
 
 // Workflow name
 const workflowName = ref('My Workflow');
@@ -435,6 +453,43 @@ function closeHITLModal() {
 // ============================================================================
 // Workflow Execution
 // ============================================================================
+
+// Handle toggling active branch expansion
+function toggleBranchExpanded(key: string) {
+    if (branchStreams.value[key]) {
+        branchStreams.value[key].expanded = !branchStreams.value[key].expanded;
+    }
+}
+
+// Handle toggling branch expansion within a message
+function toggleMessageBranch(payload: { messageId: string; branchId: string }) {
+    const message = messages.value.find((m) => m.id === payload.messageId);
+    if (message?.branches) {
+        const branch = message.branches.find(
+            (b) => b.branchId === payload.branchId
+        );
+        if (branch) {
+            branch.expanded = !branch.expanded;
+        }
+    }
+}
+
+// Handle toggling node output expansion within a message
+function toggleMessageNodeOutput(payload: {
+    messageId: string;
+    nodeId: string;
+}) {
+    const message = messages.value.find((m) => m.id === payload.messageId);
+    if (message?.nodeOutputs) {
+        const nodeOutput = message.nodeOutputs.find(
+            (n) => n.nodeId === payload.nodeId
+        );
+        if (nodeOutput) {
+            nodeOutput.expanded = !nodeOutput.expanded;
+        }
+    }
+}
+
 async function handleSendMessage() {
     const message = chatInput.value.trim();
     if (!message || !editor.value || !apiKey.value) {
@@ -461,7 +516,22 @@ async function handleSendMessage() {
 
     setRunning(true);
     setStreamingContent('');
+    tokenUsage.value = null;
     error.value = null;
+    branchStreams.value = {}; // Reset active branch streams
+    nodeOutputs.value = {}; // Reset node outputs
+    isThinking.value = false; // Reset thinking state
+    thinkingContent.value = '';
+
+    // Find nodes that feed directly into output nodes (their tokens go to main chat)
+    const outputNodeIds = new Set(
+        workflow.nodes.filter((n) => n.type === 'output').map((n) => n.id)
+    );
+    const finalProducerNodeIds = new Set(
+        workflow.edges
+            .filter((e) => outputNodeIds.has(e.target))
+            .map((e) => e.source)
+    );
 
     try {
         const finalOutput = await executeWorkflowFn(
@@ -471,8 +541,63 @@ async function handleSendMessage() {
             conversationHistory.value.slice(0, -1),
             {
                 onNodeStatus: setNodeStatus,
+                onNodeOutput: (nodeId, output) => {
+                    // Store node output for later use
+                    nodeOutputs.value[nodeId] = { nodeId, output };
+
+                    // Get node info from workflow
+                    const node = workflow.nodes.find((n) => n.id === nodeId);
+                    const nodeType = node?.type;
+                    const nodeLabel = node?.data?.label || nodeId;
+
+                    // Skip certain node types:
+                    // - start nodes: don't produce meaningful collapsible content
+                    // - output nodes: just format, no LLM output
+                    // - parallel nodes: have their own branch display
+                    // - final producer nodes: their output streams to main chat area
+                    if (
+                        nodeType === 'start' ||
+                        nodeType === 'output' ||
+                        nodeType === 'parallel' ||
+                        finalProducerNodeIds.has(nodeId)
+                    ) {
+                        return;
+                    }
+
+                    // Add a collapsible message for this node's output
+                    const nodeMessage: ChatMessage = {
+                        id: crypto.randomUUID(),
+                        role: 'assistant',
+                        content: '', // Empty - we use nodeOutputs instead
+                        timestamp: new Date(),
+                        nodeId,
+                        nodeOutputs: [
+                            {
+                                nodeId,
+                                label: nodeLabel,
+                                content: output,
+                                expanded: false, // Collapsed by default
+                            },
+                        ],
+                    };
+                    messages.value.push(nodeMessage);
+                },
                 onStreamingContent: setStreamingContent,
-                onAppendContent: appendStreamingContent,
+                onAppendContent: (token) => {
+                    // When we start getting actual content, stop showing thinking
+                    if (isThinking.value) {
+                        isThinking.value = false;
+                        thinkingContent.value = '';
+                    }
+                    appendStreamingContent(token);
+                },
+                onReasoningToken: (_nodeId, token) => {
+                    // Show thinking indicator and accumulate reasoning content
+                    if (!isThinking.value) {
+                        isThinking.value = true;
+                    }
+                    thinkingContent.value += token;
+                },
                 onHITLRequest: handleHITLRequest,
                 onRouteSelected: (nodeId, routeId) => {
                     console.log(
@@ -483,6 +608,91 @@ async function handleSendMessage() {
                     console.log(
                         `[Compaction] Reduced from ${result.tokensBefore} to ${result.tokensAfter} tokens`
                     );
+                },
+                onTokenUsage: (nodeId, usage) => {
+                    tokenUsage.value = { nodeId, usage };
+                },
+                // Branch streaming callbacks
+                onBranchStart: (nodeId, branchId, branchLabel) => {
+                    const key = `${nodeId}-${branchId}`;
+                    branchStreams.value[key] = {
+                        nodeId,
+                        branchId,
+                        label: branchLabel,
+                        content: '',
+                        status: 'streaming',
+                        expanded: false, // Collapsed by default
+                        isThinking: false,
+                        thinkingContent: '',
+                    };
+                },
+                onBranchToken: (nodeId, branchId, _branchLabel, token) => {
+                    const key = `${nodeId}-${branchId}`;
+                    if (branchStreams.value[key]) {
+                        // When actual content starts, clear thinking state
+                        if (branchStreams.value[key].isThinking) {
+                            branchStreams.value[key].isThinking = false;
+                        }
+                        branchStreams.value[key].content += token;
+                    }
+                },
+                onBranchReasoning: (nodeId, branchId, _branchLabel, token) => {
+                    const key = `${nodeId}-${branchId}`;
+                    const stream = branchStreams.value[key];
+                    if (stream) {
+                        stream.isThinking = true;
+                        stream.thinkingContent =
+                            (stream.thinkingContent ?? '') + token;
+                    }
+                },
+                onBranchComplete: (nodeId, branchId, _branchLabel, output) => {
+                    const key = `${nodeId}-${branchId}`;
+                    if (branchStreams.value[key]) {
+                        branchStreams.value[key].content = output;
+                        branchStreams.value[key].status = 'completed';
+                        branchStreams.value[key].isThinking = false;
+                        branchStreams.value[key].thinkingContent = '';
+                    }
+
+                    // Check if all branches for this node are completed
+                    const nodeBranches = Object.values(
+                        branchStreams.value
+                    ).filter((b) => b.nodeId === nodeId);
+                    const allCompleted =
+                        nodeBranches.length > 0 &&
+                        nodeBranches.every(
+                            (b) =>
+                                b.status === 'completed' || b.status === 'error'
+                        );
+
+                    if (allCompleted) {
+                        // Add a message with embedded branches to the chat
+                        const branchesMessage: ChatMessage = {
+                            id: crypto.randomUUID(),
+                            role: 'assistant',
+                            content: '', // Empty content - branches are displayed instead
+                            timestamp: new Date(),
+                            nodeId,
+                            branches: nodeBranches.map((b) => ({
+                                branchId: b.branchId,
+                                label: b.label,
+                                content: b.content,
+                                expanded: false, // Collapsed by default
+                            })),
+                        };
+                        messages.value.push(branchesMessage);
+                        console.log(
+                            '[Branches] Added branches message to chat:',
+                            branchesMessage
+                        );
+
+                        // Clear streaming branches for this node
+                        for (const b of nodeBranches) {
+                            delete branchStreams.value[
+                                `${b.nodeId}-${b.branchId}`
+                            ];
+                        }
+                    }
                 },
             }
         );
@@ -512,6 +722,8 @@ async function handleSendMessage() {
     } finally {
         setRunning(false);
         setStreamingContent('');
+        isThinking.value = false;
+        thinkingContent.value = '';
     }
 }
 
@@ -586,6 +798,8 @@ function handleRedo() {
 function clearMessages() {
     messages.value = [];
     conversationHistory.value = [];
+    tokenUsage.value = null;
+    branchStreams.value = {};
     resetExecution();
 }
 
@@ -741,8 +955,15 @@ function syncMetaToEditor() {
                 :node-labels="nodeLabels"
                 :streaming-content="streamingContent"
                 :is-running="isRunning"
+                :is-thinking="isThinking"
+                :thinking-content="thinkingContent"
+                :token-usage="tokenUsage"
+                :branch-streams="branchStreams"
                 @send="handleSendMessage"
                 @clear="clearMessages"
+                @toggle-branch="toggleBranchExpanded"
+                @toggle-message-branch="toggleMessageBranch"
+                @toggle-message-node-output="toggleMessageNodeOutput"
             />
 
             <!-- Mobile Bottom Navigation -->

@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>PROJECT: DEEP CURRENT // $1M BLUEPRINT</title>
+        <style>
+            :root {
+                --bg-deep: #020c1b;
+                --bg-panel: #112240;
+                --accent: #64ffda;
+                --text-main: #ccd6f6;
+                --text-mute: #8892b0;
+                --alert: #ff6b6b;
+                --success: #69f0ae;
+                --font-mono: 'Courier New', Courier, monospace;
+                --font-sans: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            }
+
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+                background-color: var(--bg-deep);
+                color: var(--text-main);
+                font-family: var(--font-sans);
+                line-height: 1.6;
+                overflow-x: hidden;
+            }
+
+            /* --- VISUAL EFFECTS --- */
+            .sonar-bg {
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                width: 100vw;
+                height: 100vh;
+                transform: translate(-50%, -50%);
+                background: radial-gradient(
+                    circle,
+                    rgba(100, 255, 218, 0.03) 0%,
+                    transparent 70%
+                );
+                z-index: -1;
+                pointer-events: none;
+            }
+
+            .scan-line {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 2px;
+                background: rgba(100, 255, 218, 0.1);
+                animation: scan 8s linear infinite;
+                z-index: 100;
+                pointer-events: none;
+            }
+
+            @keyframes scan {
+                0% {
+                    top: 0;
+                }
+                100% {
+                    top: 100%;
+                }
+            }
+
+            /* --- LAYOUT --- */
+            .container {
+                max-width: 1200px;
+                margin: 0 auto;
+                padding: 2rem;
+            }
+
+            header {
+                text-align: center;
+                padding: 4rem 0;
+                border-bottom: 1px solid rgba(100, 255, 218, 0.1);
+            }
+
+            h1 {
+                font-family: var(--font-mono);
+                color: var(--accent);
+                letter-spacing: 2px;
+                font-size: 2.5rem;
+                margin-bottom: 1rem;
+            }
+
+            .subtitle {
+                color: var(--text-mute);
+                font-size: 1.1rem;
+                max-width: 600px;
+                margin: 0 auto;
+            }
+
+            /* --- DASHBOARD GRID --- */
+            .dashboard {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+                gap: 2rem;
+                margin-top: 3rem;
+            }
+
+            .card {
+                background: var(--bg-panel);
+                border-radius: 8px;
+                padding: 2rem;
+                border: 1px solid transparent;
+                transition: all 0.3s ease;
+                position: relative;
+                overflow: hidden;
+            }
+
+            .card:hover {
+                transform: translateY(-5px);
+                border-color: var(--accent);
+                box-shadow: 0 10px 30px -15px rgba(2, 12, 27, 0.7);
+            }
+
+            .card-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 1.5rem;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                padding-bottom: 1rem;
+            }
+
+            .card-title {
+                color: var(--accent);
+                font-family: var(--font-mono);
+                font-size: 1.2rem;
+            }
+
+            /* --- INTERACTIVE TABS --- */
+            .tab-btn {
+                background: transparent;
+                border: 1px solid var(--accent);
+                color: var(--accent);
+                padding: 0.5rem 1rem;
+                cursor: pointer;
+                font-family: var(--font-mono);
+                transition: 0.2s;
+                margin-right: 0.5rem;
+                margin-bottom: 0.5rem;
+            }
+
+            .tab-btn.active,
+            .tab-btn:hover {
+                background: var(--accent);
+                color: var(--bg-deep);
+            }
+
+            .phase-content {
+                display: none;
+                animation: fadeIn 0.5s;
+            }
+
+            .phase-content.active {
+                display: block;
+            }
+
+            @keyframes fadeIn {
+                from {
+                    opacity: 0;
+                }
+                to {
+                    opacity: 1;
+                }
+            }
+
+            /* --- MATH TERMINAL --- */
+            .terminal {
+                background: #000;
+                padding: 1.5rem;
+                font-family: var(--font-mono);
+                color: var(--success);
+                border-radius: 5px;
+                margin-top: 1rem;
+                font-size: 0.9rem;
+            }
+
+            .calc-row {
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 0.5rem;
+                border-bottom: 1px dashed #333;
+                padding-bottom: 0.2rem;
+            }
+
+            /* --- COMPLIANCE BADGES --- */
+            .badge-container {
+                display: flex;
+                gap: 10px;
+                margin-top: 1rem;
+                flex-wrap: wrap;
+            }
+
+            .badge {
+                font-size: 0.75rem;
+                padding: 4px 8px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+
+            .badge.fixed {
+                background: rgba(105, 240, 174, 0.2);
+                color: var(--success);
+                border: 1px solid var(--success);
+            }
+            .badge.risk {
+                background: rgba(255, 107, 107, 0.2);
+                color: var(--alert);
+                border: 1px solid var(--alert);
+            }
+
+            /* --- PRODUCT SHOWCASE --- */
+            .product-spec {
+                list-style: none;
+                color: var(--text-mute);
+            }
+
+            .product-spec li {
+                margin-bottom: 0.8rem;
+                display: flex;
+                align-items: center;
+            }
+
+            .product-spec li::before {
+                content: '▹';
+                color: var(--accent);
+                margin-right: 10px;
+            }
+
+            /* --- FOOTER --- */
+            footer {
+                text-align: center;
+                padding: 3rem;
+                margin-top: 3rem;
+                border-top: 1px solid rgba(100, 255, 218, 0.1);
+                font-family: var(--font-mono);
+                font-size: 0.8rem;
+                color: var(--text-mute);
+            }
+
+            /* SLIDERS */
+            input[type='range'] {
+                width: 100%;
+                margin: 10px 0;
+                background: transparent;
+                -webkit-appearance: none;
+            }
+            input[type='range']::-webkit-slider-runnable-track {
+                background: var(--bg-deep);
+                border: 1px solid var(--text-mute);
+                height: 6px;
+            }
+            input[type='range']::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                height: 20px;
+                width: 20px;
+                background: var(--accent);
+                margin-top: -8px;
+                cursor: pointer;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="sonar-bg"></div>
+        <div class="scan-line"></div>
+
+        <div class="container">
+            <header>
+                <h1>PROJECT: DEEP CURRENT</h1>
+                <p class="subtitle">
+                    The Rehabilitated $1M Roadmap. <br />Legitimate Assets.
+                    High-Tech Lures. Zero Fraud.
+                </p>
+            </header>
+
+            <!-- CRITICAL FIXES SECTION -->
+            <section class="dashboard">
+                <div class="card" style="grid-column: 1 / -1">
+                    <div class="card-header">
+                        <span class="card-title">00. COMPLIANCE OVERRIDE</span>
+                        <span style="color: var(--success)"
+                            >STATUS: RESOLVED</span
+                        >
+                    </div>
+                    <div
+                        style="
+                            display: grid;
+                            grid-template-columns: repeat(
+                                auto-fit,
+                                minmax(300px, 1fr)
+                            );
+                            gap: 20px;
+                        "
+                    >
+                        <div>
+                            <h4 style="color: var(--alert)">PREVIOUS ERRORS</h4>
+                            <ul class="product-spec">
+                                <li>Fraud (Empty Boxes/Fake Blueprints)</li>
+                                <li>Biohazard (Human Blood/DNA)</li>
+                                <li>FTC Violations (Fake regulatory bans)</li>
+                                <li>Pyramid Structure (Recruitment fees)</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h4 style="color: var(--success)">
+                                CURRENT PROTOCOLS
+                            </h4>
+                            <ul class="product-spec">
+                                <li>
+                                    <strong style="color: var(--text-main)"
+                                        >Tangible Asset:</strong
+                                    >
+                                    "The Poseidon Core" – Bluetooth telemetry
+                                    lure.
+                                </li>
+                                <li>
+                                    <strong style="color: var(--text-main)"
+                                        >Synthetic Bio:</strong
+                                    >
+                                    FDA-compliant amino-acid gel capsules.
+                                </li>
+                                <li>
+                                    <strong style="color: var(--text-main)"
+                                        >Compliance:</strong
+                                    >
+                                    legitimate "Limited Batch" scarcity, not
+                                    fake bans.
+                                </li>
+                                <li>
+                                    <strong style="color: var(--text-main)"
+                                        >Affiliate Model:</strong
+                                    >
+                                    Standard 15% commission, no buy-in fees.
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="dashboard">
+                <!-- THE PRODUCT -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">01. THE ASSET</span>
+                    </div>
+                    <p style="color: var(--text-mute); margin-bottom: 1rem">
+                        We are launching <strong>"THE POSEIDON NODE"</strong>. A
+                        $299 smart-lure housing depth, temp, and pressure
+                        sensors that syncs to a mobile app to map the user's
+                        secret spots.
+                    </p>
+                    <ul class="product-spec">
+                        <li>
+                            <strong>Hardware:</strong> Polycarbonate shell
+                            (Impact resistant).
+                        </li>
+                        <li>
+                            <strong>Tech:</strong> BLE 5.0 Module + Pressure
+                            Sensor.
+                        </li>
+                        <li>
+                            <strong>Consumable:</strong> "Biolume" Scent Gel
+                            (Recurring Revenue).
+                        </li>
+                        <li><strong>COGS:</strong> $62.00 (Landed).</li>
+                        <li>
+                            <strong>MSRP:</strong> $299.00 (Limit 2 per
+                            customer).
+                        </li>
+                    </ul>
+                    <div class="badge-container">
+                        <span class="badge fixed">Manufacturing Secured</span>
+                        <span class="badge fixed">FCC ID Pending</span>
+                    </div>
+                </div>
+
+                <!-- THE INTERACTIVE CALCULATOR -->
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">02. REVENUE SIMULATOR</span>
+                    </div>
+                    <p style="font-size: 0.8rem; color: var(--text-mute)">
+                        Adjust sales velocity to see 6-month projections.
+                    </p>
+
+                    <div style="margin-top: 1rem">
+                        <label style="color: var(--accent); font-size: 0.9rem"
+                            >Lure Sales (Units):
+                            <span id="unit-val">2500</span></label
+                        >
+                        <input
+                            type="range"
+                            id="unit-slider"
+                            min="1000"
+                            max="4000"
+                            value="2500"
+                            oninput="calculate()"
+                        />
+
+                        <label style="color: var(--accent); font-size: 0.9rem"
+                            >Subscription Attach Rate (%):
+                            <span id="sub-val">60</span>%</label
+                        >
+                        <input
+                            type="range"
+                            id="sub-slider"
+                            min="10"
+                            max="90"
+                            value="60"
+                            oninput="calculate()"
+                        />
+                    </div>
+
+                    <div class="terminal">
+                        <div class="calc-row">
+                            <span>HARDWARE REV ($299):</span>
+                            <span id="hardware-rev">$747,500</span>
+                        </div>
+                        <div class="calc-row">
+                            <span>APP SUBSCRIPTION ($19/mo):</span>
+                            <span id="sub-rev">$171,000</span>
+                        </div>
+                        <div class="calc-row">
+                            <span>SCENT REFILLS ($45 pk):</span>
+                            <span id="refill-rev">$112,500</span>
+                        </div>
+                        <div
+                            class="calc-row"
+                            style="
+                                border-bottom: none;
+                                margin-top: 10px;
+                                color: var(--accent);
+                                font-weight: bold;
+                            "
+                        >
+                            <span>TOTAL GROSS:</span>
+                            <span id="total-rev">$1,031,000</span>
+                        </div>
+                        <div
+                            class="calc-row"
+                            style="
+                                border-color: var(--alert);
+                                color: var(--alert);
+                                font-size: 0.8rem;
+                            "
+                        >
+                            <span>EST. NET (25% Margin):</span>
+                            <span id="net-rev">$257,750</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- THE TIMELINE -->
+                <div class="card" style="grid-column: 1 / -1">
+                    <div class="card-header">
+                        <span class="card-title">03. EXECUTION PHASES</span>
+                    </div>
+
+                    <div>
+                        <button
+                            class="tab-btn active"
+                            onclick="openPhase(event, 'p1')"
+                        >
+                            PHASE 1 (Days 0-60)
+                        </button>
+                        <button
+                            class="tab-btn"
+                            onclick="openPhase(event, 'p2')"
+                        >
+                            PHASE 2 (Days 61-120)
+                        </button>
+                        <button
+                            class="tab-btn"
+                            onclick="openPhase(event, 'p3')"
+                        >
+                            PHASE 3 (Days 121-180)
+                        </button>
+                    </div>
+
+                    <!-- PHASE 1 -->
+                    <div
+                        id="p1"
+                        class="phase-content active"
+                        style="margin-top: 1.5rem"
+                    >
+                        <h3 style="color: var(--accent); margin-bottom: 0.5rem">
+                            The "Black Box" Drop
+                        </h3>
+                        <p style="color: var(--text-main)">
+                            <strong>Goal:</strong> Validate product & Fund
+                            Inventory via Pre-orders.
+                        </p>
+                        <br />
+                        <ul class="product-spec">
+                            <li>
+                                <strong>Action:</strong> Launch localized FB/IG
+                                ads targeting high-income anglers with
+                                "Bathymetric Mapping Lure" concept.
+                            </li>
+                            <li>
+                                <strong>The Hook:</strong> "Stop fishing blind.
+                                The Poseidon Node maps the bottom structure to
+                                your phone."
+                            </li>
+                            <li>
+                                <strong>Logistics:</strong> Partner with a
+                                domestic PCB assembler for the first 500
+                                prototype units to ensure quality (higher cost,
+                                lower risk).
+                            </li>
+                            <li>
+                                <strong>Sales Target:</strong> Sell 500
+                                "Founders Edition" units @ $249 early bird.
+                                Gross: $124,500.
+                            </li>
+                        </ul>
+                    </div>
+
+                    <!-- PHASE 2 -->
+                    <div
+                        id="p2"
+                        class="phase-content"
+                        style="margin-top: 1.5rem"
+                    >
+                        <h3 style="color: var(--accent); margin-bottom: 0.5rem">
+                            The Data Ecosystem
+                        </h3>
+                        <p style="color: var(--text-main)">
+                            <strong>Goal:</strong> Recurring Revenue (ARR) &
+                            Influencer Scale.
+                        </p>
+                        <br />
+                        <ul class="product-spec">
+                            <li>
+                                <strong>Action:</strong> Ship Phase 1 units.
+                                Enable the App ($19/mo) which unlocks historical
+                                weather overlays and cloud storage for maps.
+                            </li>
+                            <li>
+                                <strong>Affiliate Pivot:</strong> Instead of a
+                                "Guild," recruit 50 YouTube anglers. Give them a
+                                15% code. NO recruitment fees.
+                            </li>
+                            <li>
+                                <strong>Inventory:</strong> Use Phase 1 cash to
+                                order 2,000 mass-production units from overseas
+                                (COGS drops to $45).
+                            </li>
+                            <li>
+                                <strong>Sales Target:</strong> 1,500 units sold
+                                via influencers. Gross: $448,500. Subscriptions
+                                begin compounding.
+                            </li>
+                        </ul>
+                    </div>
+
+                    <!-- PHASE 3 -->
+                    <div
+                        id="p3"
+                        class="phase-content"
+                        style="margin-top: 1.5rem"
+                    >
+                        <h3 style="color: var(--accent); margin-bottom: 0.5rem">
+                            The "Deep Current" Expedition
+                        </h3>
+                        <p style="color: var(--text-main)">
+                            <strong>Goal:</strong> High-Ticket Cash Injection to
+                            cross $1M.
+                        </p>
+                        <br />
+                        <ul class="product-spec">
+                            <li>
+                                <strong>Action:</strong> Host a luxury, legal
+                                charter trip to The Seychelles.
+                            </li>
+                            <li>
+                                <strong>The Offer:</strong> "The Data Hunter
+                                Workshop." 10 spots available. $15,000 per seat.
+                                includes flight, charter, and 1-on-1 tech setup.
+                            </li>
+                            <li>
+                                <strong>Compliance:</strong> Fully bonded travel
+                                agency partner handles logistics/insurance.
+                            </li>
+                            <li>
+                                <strong>Final Push:</strong> "Last Batch"
+                                scarcity marketing for remaining electronic
+                                lures.
+                            </li>
+                            <li>
+                                <strong>Sales Target:</strong> Trip ($150k) +
+                                Remaining Inventory ($250k) + 6 months of subs
+                                ($80k).
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <footer>
+                <p>
+                    PROJECT STATUS: GREEN // LEGAL: COMPLIANT // TARGET:
+                    $1,000,000
+                </p>
+                <p style="margin-top: 0.5rem; opacity: 0.5">
+                    Disclaimer: Revenue projections assume 2.5% conversion rate
+                    on ad spend and successful manufacturing yield.
+                </p>
+            </footer>
+        </div>
+
+        <script>
+            // TAB LOGIC
+            function openPhase(evt, phaseName) {
+                var i, tabcontent, tablinks;
+                tabcontent = document.getElementsByClassName('phase-content');
+                for (i = 0; i < tabcontent.length; i++) {
+                    tabcontent[i].style.display = 'none';
+                    tabcontent[i].classList.remove('active');
+                }
+                tablinks = document.getElementsByClassName('tab-btn');
+                for (i = 0; i < tablinks.length; i++) {
+                    tablinks[i].className = tablinks[i].className.replace(
+                        ' active',
+                        ''
+                    );
+                }
+                document.getElementById(phaseName).style.display = 'block';
+                document.getElementById(phaseName).classList.add('active');
+                evt.currentTarget.className += ' active';
+            }
+
+            // CALCULATOR LOGIC
+            function calculate() {
+                const units = parseInt(
+                    document.getElementById('unit-slider').value
+                );
+                const attachRate =
+                    parseInt(document.getElementById('sub-slider').value) / 100;
+
+                const priceHardware = 299;
+                const priceSub = 19 * 6; // 6 months average retention for this period
+                const priceRefill = 45; // Assumed 1 refill pack per unit sold
+
+                // Update UI Labels
+                document.getElementById('unit-val').innerText = units;
+                document.getElementById('sub-val').innerText = Math.round(
+                    attachRate * 100
+                );
+
+                // Calculate Totals
+                const hardwareRev = units * priceHardware;
+                const subRev = units * attachRate * priceSub;
+                const refillRev = units * priceRefill;
+
+                const total = hardwareRev + subRev + refillRev;
+                const net = total * 0.25; // Conservative 25% net margin after COGS, Ads, Ops
+
+                // Format Currency
+                const fmt = new Intl.NumberFormat('en-US', {
+                    style: 'currency',
+                    currency: 'USD',
+                    maximumFractionDigits: 0,
+                });
+
+                document.getElementById('hardware-rev').innerText =
+                    fmt.format(hardwareRev);
+                document.getElementById('sub-rev').innerText =
+                    fmt.format(subRev);
+                document.getElementById('refill-rev').innerText =
+                    fmt.format(refillRev);
+                document.getElementById('total-rev').innerText =
+                    fmt.format(total);
+                document.getElementById('net-rev').innerText = fmt.format(net);
+            }
+        </script>
+    </body>
+</html>

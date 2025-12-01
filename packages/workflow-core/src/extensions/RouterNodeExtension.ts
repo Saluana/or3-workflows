@@ -11,6 +11,7 @@ import type {
     ValidationWarning,
     ChatMessage,
 } from '../types';
+import { estimateTokenUsage } from '../compaction';
 
 /** Default model for router classification */
 const DEFAULT_MODEL = 'openai/gpt-4o-mini';
@@ -116,7 +117,7 @@ export const RouterNodeExtension: NodeExtension = {
         });
 
         // Use provided model or fall back to default
-        const model = data.model || DEFAULT_MODEL;
+        const model = data.model || context.defaultModel || DEFAULT_MODEL;
 
         // LLM-based routing
         if (!provider) {
@@ -219,6 +220,27 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
                 function: { name: 'select_route' },
             },
         });
+
+        if (context.tokenCounter && context.onTokenUsage) {
+            let usage = estimateTokenUsage({
+                model,
+                messages: messagesForLLM,
+                output: result.content || '',
+                tokenCounter: context.tokenCounter,
+                compaction: context.compaction,
+            });
+
+            if (result.usage) {
+                usage = {
+                    ...usage,
+                    promptTokens: result.usage.promptTokens,
+                    completionTokens: result.usage.completionTokens,
+                    totalTokens: result.usage.totalTokens,
+                };
+            }
+
+            context.onTokenUsage(usage);
+        }
 
         if (debug) {
             console.log(

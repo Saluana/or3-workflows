@@ -7,7 +7,7 @@
  * @module compaction
  */
 
-import type { ChatMessage } from './types';
+import type { ChatMessage, TokenUsageDetails } from './types';
 
 // ============================================================================
 // Types
@@ -419,6 +419,56 @@ export function buildSummarizationPrompt(
     const prompt = config.summarizePrompt ?? DEFAULT_SUMMARIZE_PROMPT;
     const formattedMessages = formatMessagesForSummary(messages);
     return prompt.replace('{{messages}}', formattedMessages);
+}
+
+/**
+ * Estimate token usage for an LLM request.
+ *
+ * @param params.model - Model identifier
+ * @param params.messages - Messages sent in the request
+ * @param params.output - LLM output text
+ * @param params.tokenCounter - Token counter to use
+ * @param params.compaction - Optional compaction config to compute thresholds
+ */
+export function estimateTokenUsage(params: {
+    model: string;
+    messages: ChatMessage[];
+    output?: string | null;
+    tokenCounter: TokenCounter;
+    compaction?: CompactionConfig;
+}): TokenUsageDetails {
+    const promptTokens = countMessageTokens(
+        params.messages,
+        params.tokenCounter
+    );
+    const completionTokens = params.output
+        ? params.tokenCounter.count(params.output)
+        : 0;
+    const totalTokens = promptTokens + completionTokens;
+    const contextLimit = params.tokenCounter.getLimit(params.model);
+    const compactionThreshold =
+        params.compaction !== undefined
+            ? calculateThreshold(
+                  params.compaction,
+                  params.model,
+                  params.tokenCounter
+              )
+            : undefined;
+    const remainingBeforeCompaction =
+        compactionThreshold !== undefined
+            ? Math.max(compactionThreshold - promptTokens, 0)
+            : undefined;
+
+    return {
+        model: params.model,
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        contextLimit,
+        compactionThreshold,
+        remainingBeforeCompaction,
+        remainingContext: Math.max(contextLimit - promptTokens, 0),
+    };
 }
 
 // ============================================================================

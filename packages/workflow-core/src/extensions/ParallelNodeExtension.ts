@@ -11,8 +11,9 @@ import type {
     ValidationError,
     ValidationWarning,
 } from '../types';
+import { estimateTokenUsage } from '../compaction';
 
-const DEFAULT_MODEL = 'openai/gpt-4o-mini';
+const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
 
 /**
  * Parallel Node Extension
@@ -91,14 +92,58 @@ export const ParallelNodeExtension: NodeExtension = {
                     if (!provider) {
                         throw new Error('Parallel node requires LLM provider');
                     }
-                    const result = await provider.chat(
-                        branchModel,
-                        messages,
-                        {}
-                    );
+
+                    // Notify branch start
+                    context.onBranchStart?.(branch.id, branch.label);
+
+                    const result = await provider.chat(branchModel, messages, {
+                        // Stream tokens for this branch
+                        onToken: (token) => {
+                            context.onBranchToken?.(
+                                branch.id,
+                                branch.label,
+                                token
+                            );
+                        },
+                        // Stream reasoning tokens for this branch
+                        onReasoning: (token) => {
+                            context.onBranchReasoning?.(
+                                branch.id,
+                                branch.label,
+                                token
+                            );
+                        },
+                    });
+
+                    if (context.tokenCounter && context.onTokenUsage) {
+                        let usage = estimateTokenUsage({
+                            model: branchModel,
+                            messages,
+                            output: result.content || '',
+                            tokenCounter: context.tokenCounter,
+                            compaction: context.compaction,
+                        });
+
+                        if (result.usage) {
+                            usage = {
+                                ...usage,
+                                promptTokens: result.usage.promptTokens,
+                                completionTokens: result.usage.completionTokens,
+                                totalTokens: result.usage.totalTokens,
+                            };
+                        }
+
+                        context.onTokenUsage(usage);
+                    }
+
+                    const output = result.content || '';
+
+                    // Notify branch complete
+                    context.onBranchComplete?.(branch.id, branch.label, output);
+
                     return {
                         status: 'fulfilled' as const,
-                        value: { output: result.content || '' },
+                        value: { output },
                         branchId: branch.id,
                         label: branch.label,
                     };
@@ -174,9 +219,52 @@ export const ParallelNodeExtension: NodeExtension = {
                 },
             ];
 
+            // Notify merge branch start
+            const mergeBranchId = '__merge__';
+            const mergeBranchLabel = 'Merge';
+            context.onBranchStart?.(mergeBranchId, mergeBranchLabel);
+
+            let mergeContent = '';
             const result = await provider.chat(mergeModel, mergeMessages, {
-                onToken: context.onToken,
+                onToken: (token) => {
+                    mergeContent += token;
+                    // Stream to both the main output and the merge branch
+                    context.onToken?.(token);
+                    context.onBranchToken?.(
+                        mergeBranchId,
+                        mergeBranchLabel,
+                        token
+                    );
+                },
             });
+
+            // Notify merge branch complete
+            context.onBranchComplete?.(
+                mergeBranchId,
+                mergeBranchLabel,
+                result.content || mergeContent
+            );
+
+            if (context.tokenCounter && context.onTokenUsage) {
+                let usage = estimateTokenUsage({
+                    model: mergeModel,
+                    messages: mergeMessages,
+                    output: result.content || '',
+                    tokenCounter: context.tokenCounter,
+                    compaction: context.compaction,
+                });
+
+                if (result.usage) {
+                    usage = {
+                        ...usage,
+                        promptTokens: result.usage.promptTokens,
+                        completionTokens: result.usage.completionTokens,
+                        totalTokens: result.usage.totalTokens,
+                    };
+                }
+
+                context.onTokenUsage(usage);
+            }
 
             output = result.content || '';
         }

@@ -6,6 +6,7 @@ interface StreamChunk {
     choices: Array<{
         delta?: {
             content?: string;
+            reasoning?: string; // Thinking/reasoning tokens from models that support it
             tool_calls?: Array<{
                 index: number;
                 id?: string;
@@ -49,6 +50,7 @@ export class OpenRouterLLMProvider implements LLMProvider {
             toolChoice?: any;
             responseFormat?: { type: 'json_object' | 'text' };
             onToken?: (token: string) => void;
+            onReasoning?: (token: string) => void;
             signal?: AbortSignal;
         }
     ): Promise<{
@@ -89,6 +91,13 @@ export class OpenRouterLLMProvider implements LLMProvider {
 
             const delta = chunk.choices[0]?.delta;
 
+            // Handle reasoning/thinking tokens (from models like o1, Claude with extended thinking, etc.)
+            if (delta?.reasoning) {
+                if (options?.onReasoning) {
+                    options.onReasoning(delta.reasoning);
+                }
+            }
+
             if (delta?.content) {
                 content += delta.content;
                 if (options?.onToken) {
@@ -114,8 +123,10 @@ export class OpenRouterLLMProvider implements LLMProvider {
                         const current = toolCallsMap.get(index);
                         if (toolCall.id) current.id = toolCall.id;
                         if (toolCall.type) current.type = toolCall.type;
+                        // Tool names should replace, not concatenate - they're sent once
                         if (toolCall.function?.name)
-                            current.function.name += toolCall.function.name;
+                            current.function.name = toolCall.function.name;
+                        // Arguments are streamed in chunks and should be concatenated
                         if (toolCall.function?.arguments)
                             current.function.arguments +=
                                 toolCall.function.arguments;

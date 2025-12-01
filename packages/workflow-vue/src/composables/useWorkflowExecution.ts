@@ -98,8 +98,49 @@ export function useWorkflowExecution(): UseWorkflowExecutionReturn {
             onToken: (nodeId, token) => {
                 externalCallbacks?.onToken?.(nodeId, token);
             },
+            onReasoning: (nodeId, token) => {
+                externalCallbacks?.onReasoning?.(nodeId, token);
+            },
             onRouteSelected: (nodeId, routeId) => {
                 externalCallbacks?.onRouteSelected?.(nodeId, routeId);
+            },
+            onTokenUsage: (nodeId, usage) => {
+                externalCallbacks?.onTokenUsage?.(nodeId, usage);
+            },
+            onContextCompacted: (result) => {
+                externalCallbacks?.onContextCompacted?.(result);
+            },
+            // Branch streaming callbacks for parallel nodes
+            onBranchStart: (nodeId, branchId, branchLabel) => {
+                externalCallbacks?.onBranchStart?.(
+                    nodeId,
+                    branchId,
+                    branchLabel
+                );
+            },
+            onBranchToken: (nodeId, branchId, branchLabel, token) => {
+                externalCallbacks?.onBranchToken?.(
+                    nodeId,
+                    branchId,
+                    branchLabel,
+                    token
+                );
+            },
+            onBranchReasoning: (nodeId, branchId, branchLabel, token) => {
+                externalCallbacks?.onBranchReasoning?.(
+                    nodeId,
+                    branchId,
+                    branchLabel,
+                    token
+                );
+            },
+            onBranchComplete: (nodeId, branchId, branchLabel, output) => {
+                externalCallbacks?.onBranchComplete?.(
+                    nodeId,
+                    branchId,
+                    branchLabel,
+                    output
+                );
             },
         };
 

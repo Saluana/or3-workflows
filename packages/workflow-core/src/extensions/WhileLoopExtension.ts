@@ -9,6 +9,7 @@ import type {
     ValidationError,
     ValidationWarning,
 } from '../types';
+import { estimateTokenUsage } from '../compaction';
 
 const DEFAULT_MODEL = 'openai/gpt-4o-mini';
 
@@ -93,91 +94,113 @@ export const WhileLoopExtension: NodeExtension = {
         const maxIterations = data.maxIterations || 10;
         const outputs: string[] = [];
 
-        while (iteration < maxIterations) {
-            // 1. Evaluate condition (except first iteration? Original logic: "if iteration === 0 return true")
-            // Actually original logic said: if iteration === 0 return true.
-            // So we always run at least once? Or is it a do-while?
-            // "WhileLoop" implies check first. But often in workflows it's "Process then Check".
-            // execution.ts: evaluateLoopCondition returns true if iteration === 0. So it is a DO-WHILE effectively, or always runs once.
-
-            let shouldContinue = true;
-            if (iteration > 0) {
-                if (
-                    data.customEvaluator &&
-                    context.customEvaluators?.[data.customEvaluator]
-                ) {
-                    const evaluator =
-                        context.customEvaluators[data.customEvaluator];
-                    const loopState = {
-                        iteration,
-                        outputs,
-                        lastOutput:
-                            outputs.length > 0
-                                ? outputs[outputs.length - 1]
-                                : null,
-                    };
-                    const evalContext = {
-                        currentInput,
-                        session: {
-                            id: context.sessionId || '',
-                            messages: context.history,
-                        },
-                        memory: context.memory,
-                        outputs: context.outputs,
-                    };
-                    shouldContinue = await evaluator(
-                        evalContext as any,
-                        loopState
+        // Helper function to evaluate the loop condition
+        const evaluateCondition = async (): Promise<boolean> => {
+            if (
+                data.customEvaluator &&
+                context.customEvaluators?.[data.customEvaluator]
+            ) {
+                const evaluator =
+                    context.customEvaluators[data.customEvaluator];
+                const loopState = {
+                    iteration,
+                    outputs,
+                    lastOutput:
+                        outputs.length > 0
+                            ? outputs[outputs.length - 1]
+                            : null,
+                };
+                const evalContext = {
+                    currentInput,
+                    session: {
+                        id: context.sessionId || '',
+                        messages: context.history,
+                    },
+                    memory: context.memory,
+                    outputs: context.outputs,
+                };
+                return evaluator(evalContext as any, loopState);
+            } else if (!data.customEvaluator) {
+                if (!provider) {
+                    throw new Error(
+                        'WhileLoop requires LLM provider for condition evaluation'
                     );
-                } else if (!data.customEvaluator) {
-                    if (!provider) {
-                        throw new Error(
-                            'WhileLoop requires LLM provider for condition evaluation'
-                        );
-                    }
+                }
 
-                    const model = data.conditionModel || DEFAULT_MODEL;
-                    const prompt = `${data.conditionPrompt}
+                const model = data.conditionModel || context.defaultModel || DEFAULT_MODEL;
+                const inputLabel = iteration > 0 ? 'Last output' : 'Initial input';
+                const previousOutputsInfo = outputs.length > 1 
+                    ? `Previous outputs: ${outputs.length} iterations` 
+                    : '';
+                const prompt = `${data.conditionPrompt}
 
 Current iteration: ${iteration}
-Last output: ${currentInput}
-${outputs.length > 1 ? `Previous outputs: ${outputs.length} iterations` : ''}
+${inputLabel}: ${currentInput}
+${previousOutputsInfo}
 
 Respond with only "continue" or "done".`;
 
-                    const messages: ChatMessage[] = [
-                        {
-                            role: 'system',
-                            content:
-                                'You are a loop controller. Respond with only "continue" or "done".',
-                        },
-                        { role: 'user', content: prompt },
-                    ];
+                const messages: ChatMessage[] = [
+                    {
+                        role: 'system',
+                        content:
+                            'You are a loop controller. Respond with only "continue" or "done".',
+                    },
+                    { role: 'user', content: prompt },
+                ];
 
-                    const result = await provider.chat(model, messages, {
-                        temperature: 0,
-                        maxTokens: 10,
+                const result = await provider.chat(model, messages, {
+                    temperature: 0,
+                    maxTokens: 10,
+                });
+
+                if (context.tokenCounter && context.onTokenUsage) {
+                    let usage = estimateTokenUsage({
+                        model,
+                        messages,
+                        output: result.content || '',
+                        tokenCounter: context.tokenCounter,
+                        compaction: context.compaction,
                     });
 
-                    const decision = result.content?.trim().toLowerCase() || '';
-                    shouldContinue = decision.includes('continue');
+                    if (result.usage) {
+                        usage = {
+                            ...usage,
+                            promptTokens: result.usage.promptTokens,
+                            completionTokens: result.usage.completionTokens,
+                            totalTokens: result.usage.totalTokens,
+                        };
+                    }
+
+                    context.onTokenUsage(usage);
                 }
-            }
 
-            if (!shouldContinue) {
-                break;
+                const decision = result.content?.trim().toLowerCase() || '';
+                return decision.includes('continue');
             }
+            // No evaluator specified and no custom evaluator
+            return true;
+        };
 
-            // 2. Execute Body
+        // Check condition BEFORE first iteration (proper while-loop semantics)
+        let shouldContinue = await evaluateCondition();
+
+        while (shouldContinue && iteration < maxIterations) {
+            // Execute Body
             const result = await context.executeSubgraph(
                 bodyStartNodeId,
                 currentInput
             );
 
-            // 3. Update State
+            // Update State
             currentInput = result.output;
             outputs.push(result.output);
             iteration++;
+
+            // Check condition for next iteration
+            if (iteration < maxIterations) {
+                shouldContinue = await evaluateCondition();
+            }
         }
 
         if (iteration >= maxIterations) {
@@ -185,8 +208,16 @@ Respond with only "continue" or "done".`;
                 throw new Error(
                     `While loop reached max iterations (${maxIterations})`
                 );
+            } else if (data.onMaxIterations === 'warning') {
+                // Could emit a warning event here if callbacks supported it
+                // For now, just log to console in debug mode
+                if (context.debug) {
+                    console.warn(
+                        `[WhileLoop] Reached max iterations (${maxIterations})`
+                    );
+                }
             }
-            // warning is handled by returning what we have
+            // 'continue' mode: silently continue without warning or error
         }
 
         // Done

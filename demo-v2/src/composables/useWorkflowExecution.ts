@@ -10,12 +10,42 @@ import {
     type HITLResponse,
     type CompactionResult,
     type SubflowRegistry,
+    type TokenUsageDetails,
 } from '@or3/workflow-core';
+
+/** Live streaming state for a parallel branch */
+export interface BranchStream {
+    nodeId: string;
+    branchId: string;
+    label: string;
+    content: string;
+    status: 'streaming' | 'completed' | 'error';
+    expanded: boolean;
+    isThinking: boolean;
+    thinkingContent: string;
+}
+
+export interface BranchData {
+    branchId: string;
+    label: string;
+    content: string;
+    expanded: boolean;
+}
+
+export interface NodeOutputData {
+    nodeId: string;
+    label: string;
+    content: string;
+    expanded: boolean;
+}
 
 export interface ChatMessage extends CoreChatMessage {
     id: string;
     timestamp: Date;
     nodeId?: string;
+    branches?: BranchData[]; // Embedded branch data for parallel nodes
+    nodeOutputs?: NodeOutputData[]; // Collapsible outputs from intermediate nodes
+    isFinalOutput?: boolean; // True for the final workflow output (shown normally)
 }
 
 // Legacy callbacks expected by App.vue
@@ -24,8 +54,10 @@ export interface ExecutionCallbacks {
         nodeId: string,
         status: 'idle' | 'active' | 'completed' | 'error'
     ) => void;
+    onNodeOutput?: (nodeId: string, output: string) => void; // Called when a node finishes with its output
     onStreamingContent: (content: string) => void;
     onAppendContent: (content: string) => void;
+    onReasoningToken?: (nodeId: string, token: string) => void; // Called for thinking/reasoning tokens
     onHITLRequest?: (request: HITLRequest) => Promise<HITLResponse>;
     onRouteSelected?: (nodeId: string, routeId: string) => void;
     onContextCompacted?: (result: CompactionResult) => void;
@@ -33,6 +65,31 @@ export interface ExecutionCallbacks {
         nodeId: string,
         iteration: number,
         maxIterations: number
+    ) => void;
+    onTokenUsage?: (nodeId: string, usage: TokenUsageDetails) => void;
+    // Branch streaming callbacks for parallel nodes
+    onBranchStart?: (
+        nodeId: string,
+        branchId: string,
+        branchLabel: string
+    ) => void;
+    onBranchToken?: (
+        nodeId: string,
+        branchId: string,
+        branchLabel: string,
+        token: string
+    ) => void;
+    onBranchReasoning?: (
+        nodeId: string,
+        branchId: string,
+        branchLabel: string,
+        token: string
+    ) => void;
+    onBranchComplete?: (
+        nodeId: string,
+        branchId: string,
+        branchLabel: string,
+        output: string
     ) => void;
 }
 
@@ -215,22 +272,48 @@ export function useWorkflowExecution() {
             attachments: [],
         };
 
+        // Find nodes that feed directly into output nodes
+        // These are the "final producer" nodes whose tokens should stream to main chat
+        const outputNodeIds = new Set(
+            workflow.nodes.filter((n) => n.type === 'output').map((n) => n.id)
+        );
+        const finalProducerNodeIds = new Set(
+            workflow.edges
+                .filter((e) => outputNodeIds.has(e.target))
+                .map((e) => e.source)
+        );
+
         // Map legacy callbacks to core callbacks
         const coreCallbacks = {
             onNodeStart: (nodeId: string) => {
                 callbacks.onNodeStatus(nodeId, 'active');
             },
-            onNodeFinish: (nodeId: string, _output: string) => {
+            onNodeFinish: (nodeId: string, output: string) => {
                 callbacks.onNodeStatus(nodeId, 'completed');
+                callbacks.onNodeOutput?.(nodeId, output);
             },
             onNodeError: (nodeId: string, _error: Error) => {
                 callbacks.onNodeStatus(nodeId, 'error');
             },
-            onToken: (_nodeId: string, token: string) => {
-                callbacks.onAppendContent(token);
+            onToken: (nodeId: string, token: string) => {
+                // Only stream tokens from nodes that feed into output nodes
+                // These are the "final producer" nodes - their output becomes the final result
+                // All other intermediate nodes show their output in collapsible sections
+                if (finalProducerNodeIds.has(nodeId)) {
+                    callbacks.onAppendContent(token);
+                }
+            },
+            onReasoning: (nodeId: string, token: string) => {
+                // Forward reasoning/thinking tokens
+                callbacks.onReasoningToken?.(nodeId, token);
             },
             onRouteSelected: callbacks.onRouteSelected,
             onContextCompacted: callbacks.onContextCompacted,
+            onTokenUsage: callbacks.onTokenUsage,
+            onBranchStart: callbacks.onBranchStart,
+            onBranchToken: callbacks.onBranchToken,
+            onBranchReasoning: callbacks.onBranchReasoning,
+            onBranchComplete: callbacks.onBranchComplete,
         };
 
         const result = await coreExecute(

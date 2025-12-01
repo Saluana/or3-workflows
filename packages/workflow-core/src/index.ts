@@ -17,6 +17,7 @@ export {
     type ExecutionResult,
     type ExecutionCallbacks,
     type ExecutionOptions,
+    type TokenUsageDetails,
     type ChatMessage,
     type NodeStatus,
     type Extension,
@@ -159,6 +160,7 @@ export {
     splitMessagesForCompaction,
     createSummaryMessage,
     buildSummarizationPrompt,
+    estimateTokenUsage,
     isCompactionConfig,
 } from './compaction';
 
