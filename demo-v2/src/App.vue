@@ -90,7 +90,6 @@ const tempApiKey = ref('');
 // Chat
 const messages = ref<ChatMessage[]>([]);
 const chatInput = ref('');
-const conversationHistory = ref<Array<{ role: string; content: string }>>([]);
 const tokenUsage = ref<{ nodeId: string; usage: TokenUsageDetails } | null>(
     null
 );
@@ -509,7 +508,6 @@ async function handleSendMessage() {
         timestamp: new Date(),
     };
     messages.value.push(userMessage);
-    conversationHistory.value.push({ role: 'user', content: message });
 
     // Reset node statuses
     workflow.nodes.forEach((n) => setNodeStatus(n.id, 'idle'));
@@ -704,10 +702,6 @@ async function handleSendMessage() {
             timestamp: new Date(),
         };
         messages.value.push(assistantMessage);
-        conversationHistory.value.push({
-            role: 'assistant',
-            content: finalOutput,
-        });
     } catch (err: unknown) {
         const errMessage = err instanceof Error ? err.message : 'Unknown error';
         error.value = errMessage;
@@ -797,7 +791,6 @@ function handleRedo() {
 
 function clearMessages() {
     messages.value = [];
-    conversationHistory.value = [];
     tokenUsage.value = null;
     branchStreams.value = {};
     resetExecution();

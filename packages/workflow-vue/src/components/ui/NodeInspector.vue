@@ -5,6 +5,7 @@ import {
     WorkflowNode,
     type NodeErrorConfig,
     type NodeRetryConfig,
+    type ErrorCode,
     type HITLConfig,
     type HITLMode,
     type OutputFormat,
@@ -381,7 +382,7 @@ const hitlDefaultActions = [
     { id: 'skip', label: 'Skip' },
 ];
 
-const errorCodes = [
+const errorCodes: { id: ErrorCode; label: string }[] = [
     { id: 'RATE_LIMIT', label: 'Rate Limit' },
     { id: 'TIMEOUT', label: 'Timeout' },
     { id: 'NETWORK', label: 'Network' },
@@ -460,7 +461,7 @@ const updateErrorMode = (mode: NodeErrorConfig['mode']) => {
     updateErrorHandling({ mode });
 };
 
-const toggleRetryOn = (code: string) => {
+const toggleRetryOn = (code: ErrorCode) => {
     const current = retryConfig.value.retryOn || [];
     const updated = current.includes(code)
         ? current.filter((c) => c !== code)
