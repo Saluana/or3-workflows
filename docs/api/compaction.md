@@ -8,8 +8,17 @@ Automatically summarize conversation history when approaching token limits.
 import {
     ApproximateTokenCounter,
     type CompactionConfig,
+    type CompactionResult,
     type TokenCounter,
     MODEL_CONTEXT_LIMITS,
+    DEFAULT_COMPACTION_CONFIG,
+    DEFAULT_SUMMARIZE_PROMPT,
+    countMessageTokens,
+    calculateThreshold,
+    splitMessagesForCompaction,
+    buildSummarizationPrompt,
+    createSummaryMessage,
+    estimateTokenUsage,
 } from '@or3/workflow-core';
 ```
 
@@ -19,29 +28,22 @@ Long conversations can exceed model context limits. Context compaction:
 
 1. Monitors conversation token count
 2. When threshold is reached, summarizes older messages
-3. Preserves recent messages and system prompt
+3. Preserves recent messages
 4. Replaces old messages with a summary
 
 ## Setup
 
 ```typescript
-import {
-    OpenRouterExecutionAdapter,
-    ApproximateTokenCounter,
-} from '@or3/workflow-core';
+import { OpenRouterExecutionAdapter, ApproximateTokenCounter } from '@or3/workflow-core';
 
-const adapter = new OpenRouterExecutionAdapter({
-    client,
-    extensions: StarterKit.configure(),
+const adapter = new OpenRouterExecutionAdapter(client, {
     tokenCounter: new ApproximateTokenCounter(),
 
     compaction: {
-        enabled: true,
-        maxTokens: 100000,
-        targetTokens: 60000,
-        summaryModel: 'openai/gpt-4o-mini',
-        preserveSystemPrompt: true,
-        preserveLastN: 5,
+        threshold: 'auto', // or a specific number like 100000
+        preserveRecent: 5,
+        strategy: 'summarize',
+        summarizeModel: 'openai/gpt-4o-mini',
     },
 });
 ```
@@ -50,32 +52,70 @@ const adapter = new OpenRouterExecutionAdapter({
 
 ```typescript
 interface CompactionConfig {
-    /** Enable automatic compaction */
-    enabled: boolean;
+    /**
+     * Token threshold to trigger compaction.
+     * - 'auto': Automatically calculate as modelLimit - 10000
+     * - number: Specific token count threshold
+     */
+    threshold: 'auto' | number;
 
-    /** Token threshold to trigger compaction */
-    maxTokens: number;
+    /**
+     * Number of recent messages to never compact.
+     * These messages will always be preserved in full.
+     * @default 5
+     */
+    preserveRecent: number;
 
-    /** Target tokens after compaction */
-    targetTokens: number;
+    /**
+     * Strategy to use when compacting messages.
+     * @default 'summarize'
+     */
+    strategy: 'summarize' | 'truncate' | 'custom';
 
-    /** Model to use for summarization */
-    summaryModel?: string;
+    /**
+     * Model to use for summarization.
+     * If not specified, uses the current execution model.
+     */
+    summarizeModel?: string;
 
-    /** Preserve system prompt in summary */
-    preserveSystemPrompt?: boolean;
+    /**
+     * Custom prompt for summarization.
+     * Use {{messages}} placeholder for the messages to summarize.
+     */
+    summarizePrompt?: string;
 
-    /** Number of recent messages to preserve */
-    preserveLastN?: number;
+    /**
+     * Custom compaction function.
+     * Required when strategy is 'custom'.
+     */
+    customCompactor?: (
+        messages: ChatMessage[],
+        targetTokens: number
+    ) => Promise<ChatMessage[]>;
+}
+```
 
-    /** Custom summarization prompt */
-    summaryPrompt?: string;
+## CompactionResult
 
-    /** Compaction strategy */
-    strategy?: 'summarize' | 'truncate' | 'custom';
+```typescript
+interface CompactionResult {
+    /** Whether compaction was performed */
+    compacted: boolean;
 
-    /** Custom compactor function */
-    customCompactor?: (messages: ChatMessage[]) => Promise<ChatMessage[]>;
+    /** The resulting messages */
+    messages: ChatMessage[];
+
+    /** Token count before compaction */
+    tokensBefore: number;
+
+    /** Token count after compaction */
+    tokensAfter: number;
+
+    /** Number of messages that were compacted */
+    messagesCompacted: number;
+
+    /** Summary text if summarization was used */
+    summary?: string;
 }
 ```
 
@@ -87,11 +127,10 @@ Uses an LLM to create a summary of older messages:
 
 ```typescript
 compaction: {
-  enabled: true,
+  threshold: 'auto',
   strategy: 'summarize',
-  summaryModel: 'openai/gpt-4o-mini',
-  maxTokens: 100000,
-  targetTokens: 60000,
+  summarizeModel: 'openai/gpt-4o-mini',
+  preserveRecent: 5,
 }
 ```
 
@@ -101,10 +140,9 @@ Simply removes oldest messages:
 
 ```typescript
 compaction: {
-  enabled: true,
+  threshold: 100000,
   strategy: 'truncate',
-  maxTokens: 100000,
-  preserveLastN: 10,
+  preserveRecent: 10,
 }
 ```
 
@@ -114,9 +152,10 @@ Provide your own compaction logic:
 
 ```typescript
 compaction: {
-  enabled: true,
+  threshold: 'auto',
   strategy: 'custom',
-  customCompactor: async (messages) => {
+  preserveRecent: 5,
+  customCompactor: async (messages, targetTokens) => {
     // Your custom logic
     return compactedMessages;
   },
@@ -127,13 +166,16 @@ compaction: {
 
 ### ApproximateTokenCounter
 
-Fast estimation based on character count:
+Fast estimation based on character count (~4 characters per token):
 
 ```typescript
 const counter = new ApproximateTokenCounter();
 
 const tokens = counter.count('Hello, world!');
 // ~3 tokens (based on ~4 chars per token)
+
+const limit = counter.getLimit('openai/gpt-4o');
+// 128000
 ```
 
 #### Options
@@ -141,11 +183,13 @@ const tokens = counter.count('Hello, world!');
 ```typescript
 const counter = new ApproximateTokenCounter({
     charsPerToken: 4, // Average characters per token
-    modelLimits: {
-        'openai/gpt-4o': 128000,
-        'anthropic/claude-3': 200000,
+    customLimits: {
+        'my-custom-model': 64000,
     },
 });
+
+// Add custom limit
+counter.setLimit('another-model', 32000);
 ```
 
 ### Custom Token Counter
@@ -163,23 +207,8 @@ class TiktokenCounter implements TokenCounter {
         return this.encoder.encode(text).length;
     }
 
-    countMessages(messages: ChatMessage[]): number {
-        return messages.reduce((sum, m) => {
-            const content =
-                typeof m.content === 'string'
-                    ? m.content
-                    : JSON.stringify(m.content);
-            return sum + this.count(content) + 4; // +4 for message overhead
-        }, 0);
-    }
-
     getLimit(model: string): number {
-        const limits: Record<string, number> = {
-            'gpt-4o': 128000,
-            'gpt-4o-mini': 128000,
-            'claude-3-5-sonnet': 200000,
-        };
-        return limits[model] ?? 128000;
+        return MODEL_CONTEXT_LIMITS[model] ?? 128000;
     }
 }
 ```
@@ -188,27 +217,47 @@ class TiktokenCounter implements TokenCounter {
 
 ```typescript
 interface TokenCounter {
-    /** Count tokens in text */
-    count(text: string): number;
+    /**
+     * Count the approximate number of tokens in text.
+     * @param text - Text to count tokens in
+     * @param model - Optional model name for model-specific counting
+     * @returns Approximate token count
+     */
+    count(text: string, model?: string): number;
 
-    /** Count tokens in message array */
-    countMessages?(messages: ChatMessage[]): number;
-
-    /** Get context limit for model */
-    getLimit?(model: string): number;
+    /**
+     * Get the context limit for a specific model.
+     * @param model - Model identifier (e.g., 'openai/gpt-4o')
+     * @returns Maximum context tokens for the model
+     */
+    getLimit(model: string): number;
 }
 ```
 
 ## Model Context Limits
 
-Pre-configured limits for common models:
+Pre-configured limits for popular models:
 
 ```typescript
 import { MODEL_CONTEXT_LIMITS } from '@or3/workflow-core';
 
-console.log(MODEL_CONTEXT_LIMITS['gpt-4o']); // 128000
-console.log(MODEL_CONTEXT_LIMITS['claude-3']); // 200000
+console.log(MODEL_CONTEXT_LIMITS['openai/gpt-4o']); // 128000
+console.log(MODEL_CONTEXT_LIMITS['anthropic/claude-3.5-sonnet']); // 200000
+console.log(MODEL_CONTEXT_LIMITS['google/gemini-1.5-pro']); // 1000000
 ```
+
+Available models include:
+
+| Model                              | Context Limit |
+| ---------------------------------- | ------------- |
+| `openai/gpt-4o`                    | 128,000       |
+| `openai/gpt-4o-mini`               | 128,000       |
+| `openai/o1`                        | 200,000       |
+| `anthropic/claude-3.5-sonnet`      | 200,000       |
+| `anthropic/claude-3-opus`          | 200,000       |
+| `google/gemini-1.5-pro`            | 1,000,000     |
+| `meta-llama/llama-3.1-405b-instruct` | 128,000     |
+| `mistralai/mistral-large`          | 128,000       |
 
 ## How Compaction Works
 
@@ -249,13 +298,21 @@ Total: 60,000 tokens ✓
 Count tokens in a message array:
 
 ```typescript
-import {
-    countMessageTokens,
-    ApproximateTokenCounter,
-} from '@or3/workflow-core';
+import { countMessageTokens, ApproximateTokenCounter } from '@or3/workflow-core';
 
 const counter = new ApproximateTokenCounter();
 const tokens = countMessageTokens(messages, counter);
+```
+
+### calculateThreshold()
+
+Calculate the compaction threshold for a model:
+
+```typescript
+import { calculateThreshold } from '@or3/workflow-core';
+
+const threshold = calculateThreshold(compactionConfig, 'openai/gpt-4o', counter);
+// Returns modelLimit - 10000 for 'auto', or the specified threshold
 ```
 
 ### splitMessagesForCompaction()
@@ -265,9 +322,9 @@ Split messages into preserved and to-compact:
 ```typescript
 import { splitMessagesForCompaction } from '@or3/workflow-core';
 
-const { preserved, toCompact } = splitMessagesForCompaction(
+const { toPreserve, toCompact } = splitMessagesForCompaction(
     messages,
-    5 // preserveLastN
+    5 // preserveRecent
 );
 ```
 
@@ -279,7 +336,7 @@ Format messages for summarization prompt:
 import { formatMessagesForSummary } from '@or3/workflow-core';
 
 const formatted = formatMessagesForSummary(messages);
-// "User: Hello\nAssistant: Hi there!\n..."
+// "User: Hello\n\nAssistant: Hi there!\n\n..."
 ```
 
 ### buildSummarizationPrompt()
@@ -287,12 +344,9 @@ const formatted = formatMessagesForSummary(messages);
 Build the summarization prompt:
 
 ```typescript
-import {
-    buildSummarizationPrompt,
-    DEFAULT_SUMMARIZE_PROMPT,
-} from '@or3/workflow-core';
+import { buildSummarizationPrompt } from '@or3/workflow-core';
 
-const prompt = buildSummarizationPrompt(messages, DEFAULT_SUMMARIZE_PROMPT);
+const prompt = buildSummarizationPrompt(messages, compactionConfig);
 ```
 
 ### createSummaryMessage()
@@ -303,44 +357,83 @@ Create a summary system message:
 import { createSummaryMessage } from '@or3/workflow-core';
 
 const summaryMessage = createSummaryMessage(summaryText);
-// { role: 'system', content: '[Previous conversation summary]...' }
+// { role: 'system', content: '[Previous conversation summary]: ...' }
+```
+
+### estimateTokenUsage()
+
+Estimate token usage for an LLM request:
+
+```typescript
+import { estimateTokenUsage } from '@or3/workflow-core';
+
+const usage = estimateTokenUsage({
+    model: 'openai/gpt-4o',
+    messages: conversationHistory,
+    output: 'LLM response text',
+    tokenCounter: counter,
+    compaction: compactionConfig,
+});
+
+console.log(usage.promptTokens);
+console.log(usage.completionTokens);
+console.log(usage.remainingContext);
+console.log(usage.remainingBeforeCompaction);
 ```
 
 ## Default Summarize Prompt
 
 ```typescript
-const DEFAULT_SUMMARIZE_PROMPT = `
-Summarize the following conversation, preserving:
-1. Key facts and decisions
-2. User preferences and context
-3. Important outcomes
+import { DEFAULT_SUMMARIZE_PROMPT } from '@or3/workflow-core';
 
-Keep the summary concise but informative.
+// The default prompt:
+const prompt = `Summarize the following conversation history concisely, preserving key information, decisions, and context that would be important for continuing the conversation:
 
-Conversation:
 {{messages}}
-`;
+
+Provide a concise summary that captures the essential context. Focus on:
+- Key decisions made
+- Important information shared
+- Current state of the task
+- Any pending questions or actions`;
 ```
 
-Customize with `summaryPrompt`:
+Customize with `summarizePrompt`:
 
 ```typescript
 compaction: {
-  summaryPrompt: `
+  summarizePrompt: `
     Create a brief summary of this conversation.
     Focus on: {{messages}}
   `,
 }
 ```
 
+## Listening for Compaction Events
+
+Use the `onContextCompacted` callback to track when compaction occurs:
+
+```typescript
+const callbacks: ExecutionCallbacks = {
+    onContextCompacted: (result) => {
+        console.log(`Compacted: ${result.tokensBefore} → ${result.tokensAfter} tokens`);
+        console.log(`Messages compacted: ${result.messagesCompacted}`);
+        if (result.summary) {
+            console.log('Summary:', result.summary);
+        }
+    },
+    // ... other callbacks
+};
+```
+
 ## Best Practices
 
-### 1. Set Appropriate Thresholds
+### 1. Use Auto Threshold
 
 ```typescript
 compaction: {
-  maxTokens: modelLimit * 0.8, // 80% of limit
-  targetTokens: modelLimit * 0.5, // Compact to 50%
+  threshold: 'auto', // Automatically calculates modelLimit - 10000
+  preserveRecent: 5,
 }
 ```
 
@@ -348,8 +441,7 @@ compaction: {
 
 ```typescript
 compaction: {
-  preserveLastN: 5, // Keep recent turns for context
-  preserveSystemPrompt: true, // Keep system instructions
+  preserveRecent: 5, // Keep recent turns for context
 }
 ```
 
@@ -357,18 +449,20 @@ compaction: {
 
 ```typescript
 compaction: {
-  summaryModel: 'openai/gpt-4o-mini', // Fast and cheap
+  summarizeModel: 'openai/gpt-4o-mini', // Fast and cheap
 }
 ```
 
 ### 4. Monitor Compaction Events
 
 ```typescript
-adapter.on('compaction', (result) => {
-    console.log(
-        `Compacted ${result.originalTokens} → ${result.compactedTokens}`
-    );
-});
+const callbacks: ExecutionCallbacks = {
+    onContextCompacted: (result) => {
+        console.log(
+            `Compacted ${result.tokensBefore} → ${result.tokensAfter} tokens`
+        );
+    },
+};
 ```
 
 ## Next Steps

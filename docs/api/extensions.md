@@ -16,44 +16,66 @@ import {
 ## Extension Interface
 
 ```typescript
-interface Extension {
-    /** Unique name */
+interface NodeExtension {
+    /** Unique type identifier for the node (e.g., 'agent', 'router') */
     name: string;
 
-    /** Node type for registration */
-    type: string;
+    /** The type of extension */
+    type: 'node';
 
-    /** Default data for new nodes */
-    getDefaultData?: () => NodeData;
+    /** Label to display in the palette */
+    label?: string;
 
-    /** Input port definitions */
-    inputs?: PortDefinition[];
+    /** Description to display in the palette */
+    description?: string;
 
-    /** Output port definitions */
-    outputs?: PortDefinition[];
+    /** Category for grouping in the palette */
+    category?: string;
 
-    /** Dynamic outputs based on node data */
-    getDynamicOutputs?: (node: WorkflowNode) => PortDefinition[];
+    /** Icon to display (lucide icon name) */
+    icon?: string;
 
-    /** Validation rules */
-    validate?: (
-        node: WorkflowNode,
-        workflow: WorkflowData
-    ) => ValidationIssue[];
+    /** Input handles definition */
+    inputs: PortDefinition[];
 
-    /** Execution logic */
-    execute?: (
-        node: WorkflowNode,
-        input: string,
-        context: ExecutionContext
-    ) => Promise<ExecutionResult>;
+    /** Output handles definition */
+    outputs: PortDefinition[];
 
-    /** Lifecycle hooks */
+    /** Default data when creating a new node */
+    defaultData: Record<string, any>;
+
+    /** Add custom commands to the editor */
+    addCommands?: () => Record<string, Command>;
+
+    /** Lifecycle hook called when extension is registered */
     onCreate?: () => void;
+
+    /** Lifecycle hook called when extension is destroyed */
     onDestroy?: () => void;
 
-    /** Custom commands */
-    addCommands?: () => Record<string, Command>;
+    /**
+     * Execute the node logic.
+     * @param context - The execution context
+     * @param node - The node being executed
+     * @param provider - The LLM provider (optional)
+     */
+    execute(
+        context: ExecutionContext,
+        node: WorkflowNode,
+        provider?: LLMProvider
+    ): Promise<NodeExecutionResult>;
+
+    /**
+     * Validate the node configuration.
+     * @param node - The node to validate
+     * @param edges - All edges in the workflow
+     * @param context - Optional validation context with registries
+     */
+    validate(
+        node: WorkflowNode,
+        edges: WorkflowEdge[],
+        context?: ValidationContext
+    ): (ValidationError | ValidationWarning)[];
 }
 ```
 
@@ -232,30 +254,46 @@ getDefaultData(options?: ExtensionOptions) {
 Returns validation issues for a node:
 
 ```typescript
-validate(node: WorkflowNode, workflow: { nodes: WorkflowNode[], edges: WorkflowEdge[] }) {
-  const issues: ValidationIssue[] = [];
+validate(
+    node: WorkflowNode,
+    edges: WorkflowEdge[],
+    context?: ValidationContext
+): (ValidationError | ValidationWarning)[] {
+    const issues: (ValidationError | ValidationWarning)[] = [];
 
-  // Check for errors
-  if (!node.data.requiredField) {
-    issues.push({
-      type: 'error',
-      code: 'MISSING_FIELD',
-      nodeId: node.id,
-      message: 'Required field is missing',
-    });
-  }
+    // Check for errors
+    if (!node.data.requiredField) {
+        issues.push({
+            type: 'error',
+            code: 'INVALID_CONNECTION',
+            nodeId: node.id,
+            message: 'Required field is missing',
+        });
+    }
 
-  // Check for warnings
-  if (!node.data.optionalField) {
-    issues.push({
-      type: 'warning',
-      code: 'EMPTY_FIELD',
-      nodeId: node.id,
-      message: 'Optional field is empty',
-    });
-  }
+    // Check for warnings
+    if (!node.data.optionalField) {
+        issues.push({
+            type: 'warning',
+            code: 'EMPTY_PROMPT',
+            nodeId: node.id,
+            message: 'Optional field is empty',
+        });
+    }
 
-  return issues;
+    // Use context for deep validation
+    if (context?.subflowRegistry && node.data.subflowId) {
+        if (!context.subflowRegistry.has(node.data.subflowId)) {
+            issues.push({
+                type: 'error',
+                code: 'SUBFLOW_NOT_FOUND',
+                nodeId: node.id,
+                message: `Subflow not found: ${node.data.subflowId}`,
+            });
+        }
+    }
+
+    return issues;
 }
 ```
 
@@ -265,26 +303,44 @@ Executes the node logic:
 
 ```typescript
 async execute(
+  context: ExecutionContext,
   node: WorkflowNode,
-  input: string,
-  context: ExecutionContext
-): Promise<ExecutionResult> {
+  provider?: LLMProvider
+): Promise<NodeExecutionResult> {
   // Access context
-  const { session, memory, client, signal, callbacks } = context;
+  const { input, history, memory, signal, outputs, nodeChain } = context;
 
   // Check for cancellation
   if (signal?.aborted) {
-    return { output: '', cancelled: true };
+    return { output: '', nextNodes: [] };
   }
 
-  // Process input
-  const result = await processInput(input, node.data);
+  // Use streaming callback
+  if (context.onToken) {
+    context.onToken('Streaming...');
+  }
+
+  // Process with LLM
+  if (provider) {
+    const result = await provider.chat(
+      node.data.model,
+      [...history, { role: 'user', content: input }],
+      {
+        onToken: context.onToken,
+        signal,
+      }
+    );
+    return {
+      output: result.content || '',
+      nextNodes: context.getOutgoingEdges(node.id).map(e => e.target),
+    };
+  }
 
   // Return result
   return {
-    output: result,
-    nextHandleId: 'success', // For multi-output nodes
-    metadata: { tokens: 100 },
+    output: input,
+    nextNodes: context.getOutgoingEdges(node.id).map(e => e.target),
+    metadata: { processed: true },
   };
 }
 ```
@@ -310,29 +366,94 @@ The context passed to `execute()`:
 
 ```typescript
 interface ExecutionContext {
-    /** OpenRouter client */
-    client: OpenRouter;
+    /** Input text for the current execution step */
+    input: string;
+
+    /** Conversation history */
+    history: ChatMessage[];
+
+    /** Long-term memory adapter */
+    memory: MemoryAdapter;
+
+    /** Multimodal attachments for this execution */
+    attachments?: Attachment[];
+
+    /** Callback for streaming tokens */
+    onToken?: (token: string) => void;
+
+    /** Callback for streaming reasoning/thinking tokens */
+    onReasoning?: (token: string) => void;
+
+    /** Outputs from previous nodes, keyed by node ID */
+    outputs: Record<string, string>;
+
+    /** Chain of executed node IDs */
+    nodeChain: string[];
 
     /** Abort signal for cancellation */
     signal?: AbortSignal;
 
-    /** Execution callbacks */
-    callbacks?: ExecutionCallbacks;
+    /** Get a node by ID */
+    getNode: (id: string) => WorkflowNode | undefined;
 
-    /** Session state */
-    session: Session;
+    /** Get outgoing edges from a node */
+    getOutgoingEdges: (nodeId: string, sourceHandle?: string) => WorkflowEdge[];
 
-    /** Memory adapter */
-    memory?: MemoryAdapter;
+    /** Global tool call handler */
+    onToolCall?: (name: string, args: any) => Promise<string>;
 
-    /** Request HITL pause */
-    requestHITL: (request: HITLRequest) => Promise<HITLResponse>;
+    /** Session ID for the current execution */
+    sessionId?: string;
 
-    /** Other nodes in workflow */
-    nodes: WorkflowNode[];
+    /** Execute a subgraph (for loops) */
+    executeSubgraph?: (startNodeId: string, input: string) => Promise<{ output: string }>;
 
-    /** Edges in workflow */
-    edges: WorkflowEdge[];
+    /** Execute a complete workflow (for subflows) */
+    executeWorkflow?: (workflow: WorkflowData, input: ExecutionInput) => Promise<ExecutionResult>;
+
+    /** Registry for subflows */
+    subflowRegistry?: SubflowRegistry;
+
+    /** Custom evaluators for while loops */
+    customEvaluators?: Record<string, (context, loopState) => Promise<boolean>>;
+
+    /** Enable debug logging */
+    debug?: boolean;
+
+    /** Default model to use */
+    defaultModel?: string;
+
+    /** Current subflow nesting depth */
+    subflowDepth?: number;
+
+    /** Maximum subflow nesting depth */
+    maxSubflowDepth?: number;
+
+    /** Global tools available to all agents */
+    tools?: ToolDefinition[];
+
+    /** Maximum tool call iterations */
+    maxToolIterations?: number;
+
+    /** Behavior when max tool iterations is reached */
+    onMaxToolIterations?: 'warning' | 'error' | 'hitl';
+
+    /** HITL callback for human-in-the-loop requests */
+    onHITLRequest?: (request: HITLRequest) => Promise<HITLResponse>;
+
+    /** Token counter instance */
+    tokenCounter?: TokenCounter;
+
+    /** Compaction configuration */
+    compaction?: CompactionConfig;
+
+    /** Callback to report token usage */
+    onTokenUsage?: (usage: TokenUsageDetails) => void;
+
+    /** Callbacks for parallel branch streaming */
+    onBranchToken?: (branchId: string, branchLabel: string, token: string) => void;
+    onBranchStart?: (branchId: string, branchLabel: string) => void;
+    onBranchComplete?: (branchId: string, branchLabel: string, output: string) => void;
 }
 ```
 
@@ -344,10 +465,19 @@ interface PortDefinition {
     id: string;
 
     /** Display label */
-    label: string;
+    label?: string;
 
-    /** Port type (for styling) */
-    type?: 'default' | 'error' | 'success';
+    /** Port type (input or output) */
+    type: 'input' | 'output';
+
+    /** Data type for the port */
+    dataType?: 'any' | 'string' | 'object' | 'array';
+
+    /** Whether this port is required (for inputs) */
+    required?: boolean;
+
+    /** Whether multiple connections are allowed */
+    multiple?: boolean;
 }
 ```
 

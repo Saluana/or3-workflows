@@ -5,7 +5,7 @@ Validate workflows before execution to catch configuration errors and potential 
 ## Import
 
 ```typescript
-import { validateWorkflow } from '@or3/workflow-core';
+import { validateWorkflow, type ValidationContext } from '@or3/workflow-core';
 ```
 
 ## Basic Usage
@@ -20,6 +20,22 @@ if (!result.isValid) {
 if (result.warnings.length > 0) {
     console.warn('Warnings:', result.warnings);
 }
+```
+
+## Validation with Context
+
+For deeper validation (e.g., subflow resolution, port validation), pass a `ValidationContext`:
+
+```typescript
+import { validateWorkflow, extensionRegistry } from '@or3/workflow-core';
+
+const context: ValidationContext = {
+    subflowRegistry: mySubflowRegistry,
+    defaultModel: 'openai/gpt-4o',
+    extensionRegistry: extensionRegistry,
+};
+
+const result = validateWorkflow(editor.nodes, editor.edges, context);
 ```
 
 ## ValidationResult
@@ -38,16 +54,35 @@ interface ValidationResult {
 
 interface ValidationError {
     type: 'error';
-    code: string;
+    code: ValidationErrorCode;
     nodeId?: string;
+    edgeId?: string;
     message: string;
 }
 
 interface ValidationWarning {
     type: 'warning';
-    code: string;
+    code: ValidationWarningCode;
     nodeId?: string;
+    edgeId?: string;
     message: string;
+}
+```
+
+## ValidationContext
+
+Optional context for deep validation:
+
+```typescript
+interface ValidationContext {
+    /** Registry for resolving subflow references */
+    subflowRegistry?: SubflowRegistry;
+
+    /** Default model to use when node doesn't specify one */
+    defaultModel?: string;
+
+    /** Extension registry for port/handle validation */
+    extensionRegistry?: Map<string, NodeExtension>;
 }
 ```
 
@@ -55,22 +90,32 @@ interface ValidationWarning {
 
 ### Structure Errors
 
-| Code                   | Description                      |
-| ---------------------- | -------------------------------- |
-| `NO_START_NODE`        | Workflow has no start node       |
-| `MULTIPLE_START_NODES` | More than one start node         |
-| `DISCONNECTED_NODE`    | Node is not reachable from start |
-| `CYCLE_DETECTED`       | Workflow contains a cycle        |
+| Code                   | Description                                                |
+| ---------------------- | ---------------------------------------------------------- |
+| `NO_START_NODE`        | Workflow has no start node                                 |
+| `MULTIPLE_START_NODES` | More than one start node                                   |
+| `DISCONNECTED_NODE`    | Node is not reachable from start                           |
+| `CYCLE_DETECTED`       | Workflow contains a cycle                                  |
+| `DANGLING_EDGE`        | Edge references non-existent source or target node         |
+| `UNKNOWN_HANDLE`       | Edge references unknown input/output handle on a node      |
+| `MISSING_REQUIRED_PORT`| Node has a required input port with no incoming connection |
 
 ### Node Configuration Errors
 
-| Code               | Description                          |
-| ------------------ | ------------------------------------ |
-| `MISSING_MODEL`    | Agent node has no model selected     |
-| `NO_INCOMING_EDGE` | Non-start node has no incoming edges |
-| `NO_OUTGOING_EDGE` | Start node has no outgoing edges     |
-| `INVALID_SUBFLOW`  | Subflow reference is invalid         |
-| `MISSING_ROUTE`    | Router has no routes defined         |
+| Code                   | Description                            |
+| ---------------------- | -------------------------------------- |
+| `MISSING_MODEL`        | Agent node has no model selected       |
+| `MISSING_PROMPT`       | Agent node has no prompt               |
+| `MISSING_SUBFLOW_ID`   | Subflow node has no subflowId          |
+| `SUBFLOW_NOT_FOUND`    | Subflow reference not found in registry|
+| `MISSING_INPUT_MAPPING`| Required subflow input not mapped      |
+| `MISSING_OPERATION`    | Memory node has no operation           |
+| `INVALID_LIMIT`        | Memory node has invalid limit value    |
+| `MISSING_CONDITION_PROMPT` | While loop has no condition prompt |
+| `INVALID_MAX_ITERATIONS`| While loop has invalid max iterations |
+| `MISSING_BODY`         | While loop missing body connection     |
+| `MISSING_EXIT`         | While loop missing exit connection     |
+| `INVALID_CONNECTION`   | General invalid connection error       |
 
 ## Warning Codes
 
@@ -79,8 +124,38 @@ interface ValidationWarning {
 | `EMPTY_PROMPT`            | Agent node has no prompt                   |
 | `DEAD_END_NODE`           | Node has no outgoing edges (except output) |
 | `MISSING_EDGE_LABEL`      | Router edge has no label                   |
-| `MISSING_MERGE_PROMPT`    | Parallel node has no merge prompt          |
 | `DISCONNECTED_COMPONENTS` | Workflow has disconnected node groups      |
+| `NO_SUBFLOW_OUTPUTS`      | Subflow has no output nodes                |
+| `NO_REGISTRY`             | Subflow registry not provided              |
+| `NO_INPUT`                | Node expects input but has none            |
+| `NO_OUTPUT`               | Node expects output but has none           |
+| `MISSING_BODY`            | While loop body port not connected         |
+| `MISSING_EXIT`            | While loop exit port not connected         |
+| `UNREACHABLE_NODE`        | Node cannot be reached from start          |
+
+## Dynamic Port Validation
+
+The validator checks edge handles against node port definitions:
+
+-   **Output handles** are validated against the node's static outputs and dynamic outputs (e.g., router routes, parallel branches)
+-   **Input handles** are validated against the node's static inputs and dynamic inputs (e.g., while loop body/exit)
+-   The special `error` handle is always allowed for error branching
+
+```typescript
+// Example: Router with dynamic output ports
+const node = {
+    type: 'router',
+    data: {
+        routes: [
+            { id: 'support', label: 'Support' },
+            { id: 'sales', label: 'Sales' },
+        ],
+    },
+};
+
+// Valid edge handles: 'support', 'sales', 'error'
+const edge = { source: routerId, target: nextId, sourceHandle: 'support' };
+```
 
 ## Validation Rules
 
@@ -202,26 +277,46 @@ const node = {
 
 ## Extension Validation
 
-Extensions can provide custom validation:
+Extensions can provide custom validation with access to the validation context:
 
 ```typescript
-const MyExtension: Extension = {
+const MyExtension: NodeExtension = {
     name: 'custom',
-    type: 'custom',
+    type: 'node',
+    inputs: [{ id: 'input', label: 'Input', type: 'input', required: true }],
+    outputs: [{ id: 'output', label: 'Output', type: 'output' }],
+    defaultData: { label: 'Custom' },
 
-    validate(node, workflow) {
-        const issues = [];
+    validate(node, edges, context?: ValidationContext) {
+        const issues: (ValidationError | ValidationWarning)[] = [];
 
         if (!node.data.customField) {
             issues.push({
                 type: 'error',
-                code: 'MISSING_CUSTOM_FIELD',
+                code: 'INVALID_CONNECTION',
                 nodeId: node.id,
                 message: 'Custom field is required',
             });
         }
 
+        // Use context for deep validation
+        if (context?.subflowRegistry && node.data.subflowRef) {
+            if (!context.subflowRegistry.has(node.data.subflowRef)) {
+                issues.push({
+                    type: 'error',
+                    code: 'SUBFLOW_NOT_FOUND',
+                    nodeId: node.id,
+                    message: `Subflow "${node.data.subflowRef}" not found`,
+                });
+            }
+        }
+
         return issues;
+    },
+
+    async execute(context, node, provider) {
+        // Execution logic
+        return { output: context.input, nextNodes: [] };
     },
 };
 ```
