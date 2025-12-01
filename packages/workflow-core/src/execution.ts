@@ -74,6 +74,9 @@ const DEFAULT_RETRY_DELAY_MS = 1000;
 /** Maximum iterations multiplier to prevent infinite loops */
 const MAX_ITERATIONS_MULTIPLIER = 3;
 
+/** Default error codes to skip retrying */
+const DEFAULT_SKIP_ON_RETRY: ReadonlyArray<import('./errors').ErrorCode> = ['AUTH', 'VALIDATION'] as const;
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -367,7 +370,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
                 // Check if all parents are executed (except for start node)
                 const parentIds = graph.parents[currentId];
-                const allParentsExecuted = !parentIds || parentIds.every((p) =>
+                const allParentsExecuted = !parentIds || parentIds.length === 0 || parentIds.every((p) =>
                     executed.has(p)
                 );
 
@@ -567,16 +570,12 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 continue;
             }
 
-            const childList = children[edge.source];
-            const parentList = parents[edge.target];
-            
-            if (childList && parentList) {
-                childList.push({
-                    nodeId: edge.target,
-                    handleId: edge.sourceHandle || undefined,
-                });
-                parentList.push(edge.source);
-            }
+            // These are guaranteed to exist after initialization loop
+            children[edge.source].push({
+                nodeId: edge.target,
+                handleId: edge.sourceHandle || undefined,
+            });
+            parents[edge.target].push(edge.source);
         }
 
         return { nodeMap, children, parents };
@@ -915,7 +914,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         const hitlConfig = nodeData?.hitl as HITLConfig | undefined;
         const supportsHITL = OpenRouterExecutionAdapter.HITL_SUPPORTED_TYPES.has(node.type);
         const shouldUseHITL =
-            supportsHITL && hitlConfig?.enabled === true && this.options.onHITLRequest !== undefined;
+            supportsHITL && hitlConfig?.enabled && this.options.onHITLRequest;
 
         let lastError: ExecutionError | null = null;
         const retryHistory: Array<{
@@ -999,8 +998,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             }
         }
 
-        // This should never happen due to throw in loop, but TypeScript needs it
-        throw lastError!;
+        // This should never be reached due to throw in loop above
+        if (!lastError) {
+            throw new Error('Unexpected: No error captured in retry loop');
+        }
+        throw lastError;
     }
 
     // ==========================================================================
@@ -1413,8 +1415,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         if (!config) return false;
 
         // Use error's built-in retryable check with configured skipOn
-        const DEFAULT_SKIP_ON = ['AUTH', 'VALIDATION'] as const;
-        const skipOn = config.skipOn ?? DEFAULT_SKIP_ON;
+        const skipOn = config.skipOn ?? DEFAULT_SKIP_ON_RETRY;
         if (!error.isRetryable(skipOn as import('./errors').ErrorCode[])) {
             return false;
         }
