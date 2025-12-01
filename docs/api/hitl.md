@@ -81,13 +81,16 @@ interface HITLConfig {
 Provide a callback to the execution adapter:
 
 ```typescript
-const adapter = new OpenRouterExecutionAdapter({
-    client,
-    extensions: StarterKit.configure(),
-
+const adapter = new OpenRouterExecutionAdapter(client, {
     onHITLRequest: async (request) => {
         // Show modal to user and wait for response
-        return await showApprovalModal(request);
+        const response = await showApprovalModal(request);
+        return {
+            requestId: request.id,
+            action: response.action,
+            data: response.modifiedContent,
+            respondedAt: new Date().toISOString(),
+        };
     },
 });
 ```
@@ -110,30 +113,36 @@ interface HITLRequest {
     /** HITL mode */
     mode: 'approval' | 'input' | 'review';
 
-    /** Content to review */
-    content: string;
-
     /** Prompt to show the user */
-    prompt?: string;
+    prompt: string;
 
-    /** Schema for input forms */
-    inputSchema?: Record<string, unknown>;
+    /** Current execution context */
+    context: {
+        /** Current input to the node */
+        input: string;
+        /** Node output (only for review mode) */
+        output?: string;
+        /** Workflow name */
+        workflowName: string;
+        /** Session ID if available */
+        sessionId?: string;
+    };
 
-    /** Available options */
+    /** Available options (for approval mode) */
     options?: Array<{
         id: string;
         label: string;
         action: HITLAction;
     }>;
 
-    /** Timeout in ms */
-    timeout?: number;
+    /** Schema for input forms */
+    inputSchema?: Record<string, unknown>;
 
-    /** Default action on timeout */
-    defaultAction?: HITLAction;
-
-    /** Request timestamp */
+    /** Request timestamp (ISO string) */
     createdAt: string;
+
+    /** Expiry timestamp if timeout is set (ISO string) */
+    expiresAt?: string;
 }
 ```
 
@@ -143,17 +152,20 @@ Return this from your callback:
 
 ```typescript
 interface HITLResponse {
+    /** Request ID being responded to */
+    requestId: string;
+
     /** Action taken */
     action: HITLAction;
 
-    /** Modified content (for 'modify' action) */
-    modifiedContent?: string;
+    /** Data provided by the human (modified input/output or collected input) */
+    data?: string | Record<string, unknown>;
 
-    /** User input data (for 'input' mode) */
-    inputData?: Record<string, unknown>;
+    /** Identifier of the responder (optional) */
+    respondedBy?: string;
 
-    /** Additional metadata */
-    metadata?: Record<string, unknown>;
+    /** Response timestamp (ISO string) */
+    respondedAt: string;
 }
 
 type HITLAction =
@@ -216,11 +228,13 @@ hitl: {
 
 ```typescript
 {
+  requestId: request.id,
   action: 'submit',
-  inputData: {
+  data: {
     priority: 'high',
     notes: 'Urgent request',
   },
+  respondedAt: new Date().toISOString(),
 }
 ```
 
@@ -263,19 +277,29 @@ async function handleHITLRequest(request: HITLRequest): Promise<HITLResponse> {
 }
 
 function onApprove() {
-    resolveHITL.value?.({ action: 'approve' });
+    resolveHITL.value?.({
+        requestId: currentRequest.value!.id,
+        action: 'approve',
+        respondedAt: new Date().toISOString(),
+    });
     closeModal();
 }
 
 function onReject() {
-    resolveHITL.value?.({ action: 'reject' });
+    resolveHITL.value?.({
+        requestId: currentRequest.value!.id,
+        action: 'reject',
+        respondedAt: new Date().toISOString(),
+    });
     closeModal();
 }
 
 function onModify(content: string) {
     resolveHITL.value?.({
+        requestId: currentRequest.value!.id,
         action: 'modify',
-        modifiedContent: content,
+        data: content,
+        respondedAt: new Date().toISOString(),
     });
     closeModal();
 }
@@ -294,7 +318,12 @@ function closeModal() {
             <p>{{ currentRequest?.prompt }}</p>
 
             <div class="content">
-                {{ currentRequest?.content }}
+                <p v-if="currentRequest?.context.input">
+                    Input: {{ currentRequest.context.input }}
+                </p>
+                <p v-if="currentRequest?.context.output">
+                    Output: {{ currentRequest.context.output }}
+                </p>
             </div>
 
             <div class="actions">
@@ -375,10 +404,14 @@ if (isHITLConfig(nodeData.hitl)) {
 ```typescript
 onHITLRequest: async (request) => {
     try {
-        const response = await showModalWithTimeout(request, request.timeout);
+        const response = await showModalWithTimeout(request, request.expiresAt);
         return response;
     } catch {
-        return { action: request.defaultAction ?? 'reject' };
+        return {
+            requestId: request.id,
+            action: 'reject',
+            respondedAt: new Date().toISOString(),
+        };
     }
 };
 ```
