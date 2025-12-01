@@ -17,6 +17,7 @@ import type {
     ChatMessage,
     TokenUsage,
     TokenUsageDetails,
+    ValidationContext,
 } from './types';
 import {
     AgentNodeExtension,
@@ -33,9 +34,8 @@ import { OpenRouterLLMProvider } from './providers/OpenRouterLLMProvider';
 import { InMemoryAdapter, type MemoryAdapter } from './memory';
 import { ExecutionSession, type Session } from './session';
 import {
-    classifyError,
-    wrapError as wrapExecutionError,
-    type ExecutionError,
+    createExecutionError,
+    ExecutionError,
     type NodeErrorConfig,
     type NodeRetryConfig,
 } from './errors';
@@ -56,6 +56,7 @@ import {
     type CompactionResult,
     type TokenCounter,
 } from './compaction';
+import { validateWorkflow } from './validation';
 
 // ============================================================================
 // Constants
@@ -102,7 +103,11 @@ interface InternalExecutionContext {
 // Extension Registry
 // ============================================================================
 
-const extensionRegistry = new Map<string, NodeExtension>([
+/**
+ * Registry of all node type extensions.
+ * Used by execution and validation to look up node handlers.
+ */
+export const extensionRegistry = new Map<string, NodeExtension>([
     ['agent', AgentNodeExtension],
     ['router', RouterNodeExtension],
     ['parallel', ParallelNodeExtension],
@@ -114,6 +119,23 @@ const extensionRegistry = new Map<string, NodeExtension>([
     ['start', StartNodeExtension],
     ['condition', RouterNodeExtension], // Legacy alias
 ]);
+
+/**
+ * Get an extension by node type.
+ * @param nodeType - The type of node (e.g., 'agent', 'router')
+ * @returns The extension or undefined if not found
+ */
+export function getExtension(nodeType: string): NodeExtension | undefined {
+    return extensionRegistry.get(nodeType);
+}
+
+/**
+ * Register a custom node extension.
+ * @param extension - The extension to register
+ */
+export function registerExtension(extension: NodeExtension): void {
+    extensionRegistry.set(extension.name, extension);
+}
 
 // ============================================================================
 // OpenRouterExecutionAdapter
@@ -210,6 +232,56 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
         const startTime = Date.now();
         const nodeOutputs: Record<string, string> = {};
+
+        // Preflight validation (enabled by default)
+        if (this.options.preflight !== false) {
+            const validationContext: ValidationContext = {
+                subflowRegistry: this.options.subflowRegistry,
+                defaultModel: this.options.defaultModel,
+                extensionRegistry,
+            };
+
+            const validation = validateWorkflow(
+                workflow.nodes,
+                workflow.edges,
+                validationContext
+            );
+
+            if (!validation.isValid) {
+                const errorMessages = validation.errors
+                    .map(
+                        (e) =>
+                            `${e.code}: ${e.message}${
+                                e.nodeId ? ` (node: ${e.nodeId})` : ''
+                            }`
+                    )
+                    .join('; ');
+
+                const validationError = createExecutionError(
+                    new Error(`Workflow validation failed: ${errorMessages}`),
+                    '',
+                    '',
+                    1,
+                    1,
+                    []
+                );
+
+                callbacks.onNodeError('', validationError);
+
+                return {
+                    success: false,
+                    output: '',
+                    error: validationError,
+                    nodeOutputs: {},
+                    duration: Date.now() - startTime,
+                    usage: {
+                        promptTokens: 0,
+                        completionTokens: 0,
+                        totalTokens: 0,
+                    },
+                };
+            }
+        }
 
         try {
             const graph = this.buildGraph(workflow.nodes, workflow.edges);
@@ -845,35 +917,24 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     callbacks
                 );
             } catch (error) {
-                const execError = wrapExecutionError(
+                const execError = createExecutionError(
                     error,
                     nodeId,
+                    node.type,
                     attempt,
                     maxAttempts,
                     retryHistory
                 );
-                execError.code = classifyError(error);
-                execError.retry = {
-                    attempts: attempt,
-                    maxAttempts,
-                    history: [
-                        ...retryHistory,
-                        {
-                            attempt,
-                            error: execError.message,
-                            timestamp: new Date().toISOString(),
-                        },
-                    ],
-                };
                 lastError = execError;
 
                 const shouldRetry =
                     attempt < maxAttempts &&
                     this.shouldRetry(execError, resolvedRetry);
                 if (shouldRetry) {
-                    const delay = Math.min(
-                        (resolvedRetry?.baseDelay || DEFAULT_RETRY_DELAY_MS) *
-                            Math.pow(2, attempt - 1),
+                    // Use suggested delay (respects retry-after header)
+                    const delay = execError.getSuggestedDelay(
+                        resolvedRetry?.baseDelay || DEFAULT_RETRY_DELAY_MS,
+                        attempt,
                         resolvedRetry?.maxDelay || 30000
                     );
                     await this.sleep(delay);
@@ -1313,12 +1374,17 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     ): boolean {
         if (!config) return false;
 
-        if (config.skipOn?.includes(error.code)) return false;
-
-        if (config.retryOn?.length && !config.retryOn.includes(error.code))
+        // Use error's built-in retryable check with configured skipOn
+        // Default skipOn includes AUTH and VALIDATION
+        const skipOn = config.skipOn ?? ['AUTH', 'VALIDATION'];
+        if (!error.isRetryable(skipOn as import('./errors').ErrorCode[])) {
             return false;
+        }
 
-        if (error.code === 'VALIDATION') return false;
+        // If retryOn is specified, only retry on those codes
+        if (config.retryOn?.length && !config.retryOn.includes(error.code)) {
+            return false;
+        }
 
         return true;
     }

@@ -57,22 +57,12 @@ export const StartNodeExtension: NodeExtension = {
     validate(
         node: WorkflowNode,
         edges: WorkflowEdge[],
-        allNodes?: WorkflowNode[]
+        _context?: import('../types').ValidationContext
     ): ValidationError[] {
         const errors: ValidationError[] = [];
 
-        // Check if there are multiple start nodes (if allNodes provided)
-        if (allNodes) {
-            const startNodes = allNodes.filter((n) => n.type === 'start');
-            if (startNodes.length > 1) {
-                errors.push({
-                    type: 'error',
-                    code: 'MULTIPLE_START_NODES',
-                    message: 'Workflow can only have one start node',
-                    nodeId: node.id,
-                });
-            }
-        }
+        // Note: Multiple start node check is done at workflow level in validateWorkflow
+        // This extension just validates the individual start node configuration
 
         // Check if start node has at least one outgoing edge
         const outgoingEdges = edges.filter((e) => e.source === node.id);

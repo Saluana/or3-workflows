@@ -25,6 +25,7 @@ export {
     type PortDefinition,
     type StorageAdapter,
     type WorkflowSummary,
+    type ValidationContext,
     // Type guards
     isAgentNodeData,
     isRouterNodeData,
@@ -38,6 +39,15 @@ export {
     generateWorkflowId,
     isVersionCompatible,
     parseVersion,
+    // Zod schemas
+    WorkflowNodeSchema,
+    WorkflowEdgeSchema,
+    WorkflowDataSchema,
+    StrictNodeDataSchema,
+    StrictWorkflowNodeSchema,
+    StrictWorkflowDataSchema,
+    getNodeDataSchema,
+    validateNodeData,
 } from './types';
 export {
     type MemoryAdapter,
@@ -48,9 +58,19 @@ export {
 export { type Session, ExecutionSession } from './session';
 export {
     type NodeRetryConfig,
-    type ExecutionError,
+    type ErrorCode,
+    type RetryHistoryEntry,
+    type RateLimitInfo,
+    type RetryInfo,
     type ErrorHandlingMode,
     type NodeErrorConfig,
+    ExecutionError,
+    DEFAULT_SKIP_ON,
+    classifyError,
+    classifyFromStatus,
+    extractRateLimitInfo,
+    extractStatusCode,
+    createExecutionError,
 } from './errors';
 
 // Human-in-the-Loop (HITL)
@@ -85,7 +105,12 @@ export type {
 
 // Execution adapters
 export { type ExecutionAdapter } from './types';
-export { OpenRouterExecutionAdapter } from './execution';
+export {
+    OpenRouterExecutionAdapter,
+    extensionRegistry,
+    getExtension,
+    registerExtension,
+} from './execution';
 
 // Subflows
 export {

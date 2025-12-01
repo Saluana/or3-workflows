@@ -1,10 +1,13 @@
-import { WorkflowNode, WorkflowEdge, isAgentNodeData } from './types';
-
-import type {
-    ValidationResult,
-    ValidationError,
-    ValidationWarning,
+import {
+    WorkflowNode,
+    WorkflowEdge,
+    type ValidationResult,
+    type ValidationError,
+    type ValidationWarning,
+    type ValidationContext,
+    type NodeExtension,
 } from './types';
+import { extensionRegistry } from './execution';
 
 export type { ValidationResult, ValidationError, ValidationWarning };
 
@@ -180,12 +183,233 @@ function findConnectedComponents(
     return components;
 }
 
+/**
+ * Get dynamic output ports for a node (e.g., router routes become output ports).
+ */
+function getDynamicOutputPorts(
+    node: WorkflowNode,
+    extension: NodeExtension | undefined
+): string[] {
+    const ports: string[] = [];
+
+    // Add static output ports from extension
+    if (extension) {
+        for (const output of extension.outputs) {
+            ports.push(output.id);
+        }
+    }
+
+    // Add dynamic ports based on node type
+    if (node.type === 'router') {
+        const routes = (node.data as { routes?: Array<{ id: string }> }).routes;
+        if (routes) {
+            for (const route of routes) {
+                ports.push(route.id);
+            }
+        }
+    }
+
+    if (node.type === 'parallel') {
+        const branches = (node.data as { branches?: Array<{ id: string }> })
+            .branches;
+        if (branches) {
+            for (const branch of branches) {
+                ports.push(branch.id);
+            }
+        }
+    }
+
+    // Always allow 'error' handle for error branching
+    ports.push('error');
+
+    return ports;
+}
+
+/**
+ * Get dynamic input ports for a node.
+ */
+function getDynamicInputPorts(
+    node: WorkflowNode,
+    extension: NodeExtension | undefined
+): string[] {
+    const ports: string[] = [];
+
+    // Add static input ports from extension
+    if (extension) {
+        for (const input of extension.inputs) {
+            ports.push(input.id);
+        }
+    }
+
+    // WhileLoop has dynamic body/exit handles
+    if (node.type === 'whileLoop') {
+        ports.push('body', 'exit');
+    }
+
+    return ports;
+}
+
+/**
+ * Validate edge handles against node port definitions.
+ */
+function validateEdgeHandles(
+    edges: WorkflowEdge[],
+    nodeMap: Map<string, WorkflowNode>,
+    registry: Map<string, NodeExtension>
+): (ValidationError | ValidationWarning)[] {
+    const results: (ValidationError | ValidationWarning)[] = [];
+
+    for (const edge of edges) {
+        const sourceNode = nodeMap.get(edge.source);
+        const targetNode = nodeMap.get(edge.target);
+
+        // Check for dangling edges
+        if (!sourceNode) {
+            results.push({
+                type: 'error',
+                code: 'DANGLING_EDGE',
+                message: `Edge "${edge.id}" references non-existent source node "${edge.source}"`,
+                edgeId: edge.id,
+            });
+            continue;
+        }
+
+        if (!targetNode) {
+            results.push({
+                type: 'error',
+                code: 'DANGLING_EDGE',
+                message: `Edge "${edge.id}" references non-existent target node "${edge.target}"`,
+                edgeId: edge.id,
+            });
+            continue;
+        }
+
+        // Validate sourceHandle if specified
+        if (edge.sourceHandle) {
+            const sourceExtension = registry.get(sourceNode.type);
+            const validOutputs = getDynamicOutputPorts(
+                sourceNode,
+                sourceExtension
+            );
+
+            if (!validOutputs.includes(edge.sourceHandle)) {
+                results.push({
+                    type: 'error',
+                    code: 'UNKNOWN_HANDLE',
+                    message: `Edge "${edge.id}" references unknown output handle "${edge.sourceHandle}" on ${sourceNode.type} node "${sourceNode.id}"`,
+                    edgeId: edge.id,
+                    nodeId: sourceNode.id,
+                });
+            }
+        }
+
+        // Validate targetHandle if specified
+        if (edge.targetHandle) {
+            const targetExtension = registry.get(targetNode.type);
+            const validInputs = getDynamicInputPorts(
+                targetNode,
+                targetExtension
+            );
+
+            if (!validInputs.includes(edge.targetHandle)) {
+                results.push({
+                    type: 'error',
+                    code: 'UNKNOWN_HANDLE',
+                    message: `Edge "${edge.id}" references unknown input handle "${edge.targetHandle}" on ${targetNode.type} node "${targetNode.id}"`,
+                    edgeId: edge.id,
+                    nodeId: targetNode.id,
+                });
+            }
+        }
+    }
+
+    return results;
+}
+
+/**
+ * Check for required input ports without connections.
+ */
+function validateRequiredPorts(
+    nodes: WorkflowNode[],
+    edges: WorkflowEdge[],
+    registry: Map<string, NodeExtension>
+): (ValidationError | ValidationWarning)[] {
+    const results: (ValidationError | ValidationWarning)[] = [];
+
+    // Build map of target node -> incoming edges by handle
+    const incomingByHandle = new Map<
+        string,
+        Map<string | undefined, WorkflowEdge[]>
+    >();
+    for (const edge of edges) {
+        if (!incomingByHandle.has(edge.target)) {
+            incomingByHandle.set(edge.target, new Map());
+        }
+        const handleMap = incomingByHandle.get(edge.target)!;
+        const handle = edge.targetHandle ?? undefined;
+        if (!handleMap.has(handle)) {
+            handleMap.set(handle, []);
+        }
+        handleMap.get(handle)!.push(edge);
+    }
+
+    for (const node of nodes) {
+        if (node.type === 'start') continue; // Start node has no inputs
+
+        const extension = registry.get(node.type);
+        if (!extension) continue;
+
+        const handleMap = incomingByHandle.get(node.id) ?? new Map();
+
+        for (const input of extension.inputs) {
+            if (input.required) {
+                // Check if there's at least one edge to this input
+                const edgesToInput = handleMap.get(input.id) ?? [];
+                const edgesToDefault = handleMap.get(undefined) ?? [];
+
+                if (edgesToInput.length === 0 && edgesToDefault.length === 0) {
+                    results.push({
+                        type: 'error',
+                        code: 'MISSING_REQUIRED_PORT',
+                        message: `Node "${node.id}" (${
+                            node.type
+                        }) requires input "${
+                            input.label || input.id
+                        }" but has no connection`,
+                        nodeId: node.id,
+                    });
+                }
+            }
+        }
+    }
+
+    return results;
+}
+
+/**
+ * Validate a workflow graph for structural and node-level issues.
+ *
+ * @param nodes - All nodes in the workflow
+ * @param edges - All edges connecting nodes
+ * @param context - Optional validation context with registries for deep validation
+ * @returns ValidationResult with errors and warnings
+ */
 export function validateWorkflow(
     nodes: WorkflowNode[],
-    edges: WorkflowEdge[]
+    edges: WorkflowEdge[],
+    context?: ValidationContext
 ): ValidationResult {
     const errors: ValidationError[] = [];
     const warnings: ValidationWarning[] = [];
+
+    // Use provided registry or default
+    const registry = context?.extensionRegistry ?? extensionRegistry;
+
+    // Build node map for lookups
+    const nodeMap = new Map<string, WorkflowNode>();
+    for (const node of nodes) {
+        nodeMap.set(node.id, node);
+    }
 
     // 1. Check Start Node
     const startNodes = nodes.filter((n) => n.type === 'start');
@@ -261,23 +485,48 @@ export function validateWorkflow(
         }
     }
 
-    // 5. Node Specific Checks
-    nodes.forEach((node) => {
-        // Agent Node Checks
-        if (node.type === 'agent' && isAgentNodeData(node.data)) {
-            if (!node.data.model) {
+    // 5. Edge/Handle Validation
+    const handleResults = validateEdgeHandles(edges, nodeMap, registry);
+    for (const result of handleResults) {
+        if (result.type === 'error') {
+            errors.push(result);
+        } else {
+            warnings.push(result);
+        }
+    }
+
+    // 6. Required Port Validation
+    const portResults = validateRequiredPorts(nodes, edges, registry);
+    for (const result of portResults) {
+        if (result.type === 'error') {
+            errors.push(result);
+        } else {
+            warnings.push(result);
+        }
+    }
+
+    // 7. Extension-level Node Validation
+    for (const node of nodes) {
+        const extension = registry.get(node.type);
+        if (extension?.validate) {
+            try {
+                const nodeResults = extension.validate(node, edges, context);
+
+                for (const result of nodeResults) {
+                    if (result.type === 'error') {
+                        errors.push(result);
+                    } else {
+                        warnings.push(result);
+                    }
+                }
+            } catch (err) {
+                // Extension validator threw - treat as error
                 errors.push({
                     type: 'error',
-                    code: 'MISSING_MODEL',
-                    message: 'Agent node missing model',
-                    nodeId: node.id,
-                });
-            }
-            if (!node.data.prompt) {
-                warnings.push({
-                    type: 'warning',
-                    code: 'EMPTY_PROMPT',
-                    message: 'Agent node has empty prompt',
+                    code: 'INVALID_CONNECTION',
+                    message: `Validation failed for ${node.type} node "${
+                        node.id
+                    }": ${err instanceof Error ? err.message : String(err)}`,
                     nodeId: node.id,
                 });
             }
@@ -298,7 +547,7 @@ export function validateWorkflow(
                 nodeId: node.id,
             });
         }
-    });
+    }
 
     return {
         isValid: errors.length === 0,

@@ -208,7 +208,8 @@ describe('OpenRouterExecutionAdapter', () => {
             );
 
             expect(result.success).toBe(false);
-            expect(result.error?.message).toContain('No start node');
+            // Preflight validation catches this now with code NO_START_NODE
+            expect(result.error?.message).toContain('NO_START_NODE');
         });
 
         it('should handle API errors gracefully', async () => {

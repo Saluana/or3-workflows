@@ -250,15 +250,16 @@ export const SubflowExtension: NodeExtension = {
      *
      * @param node The subflow node to validate
      * @param edges All edges in the workflow
-     * @param registry Optional subflow registry for deep validation
+     * @param context Optional validation context with subflow registry
      */
     validate(
         node: WorkflowNode,
         edges: WorkflowEdge[],
-        registry?: SubflowRegistry
+        context?: import('../types').ValidationContext
     ): (ValidationError | ValidationWarning)[] {
         const errors: (ValidationError | ValidationWarning)[] = [];
         const data = node.data as SubflowNodeData;
+        const registry = context?.subflowRegistry;
 
         // Check for subflow ID
         if (!data.subflowId) {
