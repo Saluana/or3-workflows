@@ -38,22 +38,35 @@ interface AgentNodeData {
     hitl?: HITLConfig;
 
     /** Error handling */
-    errorConfig?: NodeErrorConfig;
+    errorHandling?: NodeErrorConfig;
+
+    /** Maximum tool call iterations for this node */
+    maxToolIterations?: number;
+
+    /**
+     * Behavior when max tool iterations is reached.
+     * - 'warning': Add a warning to output and continue (default)
+     * - 'error': Throw an error
+     * - 'hitl': Trigger human-in-the-loop for approval to continue
+     */
+    onMaxToolIterations?: 'warning' | 'error' | 'hitl';
 
     /** Multimodal capabilities */
     acceptsImages?: boolean;
     acceptsAudio?: boolean;
+    acceptsVideo?: boolean;
     acceptsFiles?: boolean;
 }
 ```
 
 ## Ports
 
-| Port     | Type   | Description                       |
-| -------- | ------ | --------------------------------- |
-| `input`  | Input  | Receives input from previous node |
-| `output` | Output | LLM response                      |
-| `error`  | Output | Error branch (if configured)      |
+| Port       | Type   | Description                       |
+| ---------- | ------ | --------------------------------- |
+| `input`    | Input  | Receives input from previous node |
+| `output`   | Output | LLM response                      |
+| `error`    | Output | Error branch (if configured)      |
+| `rejected` | Output | HITL rejection branch             |
 
 ## Usage
 
@@ -172,16 +185,34 @@ Configure retry and branching:
 
 ```typescript
 {
-  errorConfig: {
+  errorHandling: {
+    mode: 'branch',
     retry: {
-      maxAttempts: 3,
-      delayMs: 1000,
+      maxRetries: 3,
+      baseDelay: 1000,
+      skipOn: ['AUTH', 'VALIDATION'],
     },
-    onError: 'branch',
-    errorHandleId: 'error',
   },
 }
 ```
+
+See [Error Handling](../api/errors.md) for details.
+
+## Tool Iteration Limits
+
+Control how many tool call iterations are allowed:
+
+```typescript
+{
+  // Maximum iterations (default: 10)
+  maxToolIterations: 5,
+
+  // What to do when limit is reached
+  onMaxToolIterations: 'warning', // 'warning' | 'error' | 'hitl'
+}
+```
+
+When `hitl` is selected, the agent pauses for human approval to continue.
 
 ## Tools
 
@@ -270,14 +301,17 @@ const result = await adapter.execute({
 Responses stream by default:
 
 ```typescript
-const adapter = new OpenRouterExecutionAdapter({
-    client,
-    extensions: StarterKit.configure(),
-
-    onStreamChunk: (chunk) => {
-        streamingContent.value += chunk;
+const callbacks: ExecutionCallbacks = {
+    onToken: (nodeId, token) => {
+        streamingContent.value += token;
     },
-});
+    onReasoning: (nodeId, token) => {
+        // For models that support thinking/reasoning
+        reasoningContent.value += token;
+    },
+};
+
+const result = await adapter.execute(workflow, input, callbacks);
 ```
 
 ## StarterKit Configuration
@@ -326,9 +360,12 @@ Always configure error handling for production:
 
 ```typescript
 {
-  errorConfig: {
-    retry: { maxAttempts: 2 },
-    onError: 'branch',
+  errorHandling: {
+    mode: 'branch',
+    retry: {
+      maxRetries: 2,
+      baseDelay: 1000,
+    },
   },
 }
 ```

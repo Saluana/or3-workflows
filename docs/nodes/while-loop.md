@@ -19,17 +19,20 @@ interface WhileLoopNodeData {
     /** Display label */
     label: string;
 
-    /** Model for condition evaluation */
-    model?: string;
-
-    /** Condition prompt */
+    /** Condition prompt for LLM evaluation */
     conditionPrompt: string;
+
+    /** Model for condition evaluation */
+    conditionModel?: string;
 
     /** Maximum iterations */
     maxIterations: number;
 
-    /** Current iteration (runtime) */
-    currentIteration?: number;
+    /** Behavior when max iterations is reached */
+    onMaxIterations: 'error' | 'warning' | 'continue';
+
+    /** Name of a custom evaluator function (registered in ExecutionOptions) */
+    customEvaluator?: string;
 }
 ```
 
@@ -38,8 +41,8 @@ interface WhileLoopNodeData {
 | Port    | Type   | Description                         |
 | ------- | ------ | ----------------------------------- |
 | `input` | Input  | Initial input and loop feedback     |
-| `body`  | Output | Loop body (executes while true)     |
-| `exit`  | Output | Exit path (when condition is false) |
+| `body`  | Output | Loop body (executes while continue) |
+| `done`  | Output | Exit path (when condition is done)  |
 
 ## Usage
 
@@ -90,32 +93,38 @@ Respond with only "true" or "false".`,
 
 ## Condition Evaluation
 
-The loop evaluates a condition each iteration:
+The loop evaluates a condition each iteration using an LLM:
 
 ```typescript
 {
-  conditionPrompt: `Should we continue refining?
+  conditionPrompt: `Based on the current output, should we continue iterating to improve the result?
 
-Current output: {{input}}
+Current iteration: {{iteration}}
+Last output: {{input}}
 
-Criteria:
-- Score >= 8/10: Stop (respond "false")
-- Score < 8/10: Continue (respond "true")
-
-Respond with only "true" or "false".`,
+Respond with only "continue" or "done".`,
 }
 ```
 
+The LLM responds with either `continue` or `done` to control the loop.
+
 ### Custom Evaluator
 
-Provide a custom condition function:
+Provide a custom condition function via `ExecutionOptions`:
 
 ```typescript
+const adapter = new OpenRouterExecutionAdapter(client, {
+    customEvaluators: {
+        qualityCheck: async (context, loopState) => {
+            // Return true to continue, false to exit
+            return context.currentInput.length < 1000 && loopState.iteration < 5;
+        },
+    },
+});
+
+// Reference in node config
 {
-  conditionEvaluator: async (input, context) => {
-    // Return true to continue, false to exit
-    return input.length < 1000;
-  },
+  customEvaluator: 'qualityCheck',
 }
 ```
 
@@ -161,9 +170,9 @@ editor.commands.createNode(
 );
 
 // Connect
-editor.commands.createEdge(loopId, bodyId, 'body');
-editor.commands.createEdge(loopId, 'output', 'exit');
-editor.commands.createEdge(bodyId, loopId); // Feedback loop
+editor.commands.createEdge(loopId, bodyId, 'body');  // Loop body output
+editor.commands.createEdge(loopId, 'output', 'done'); // Exit output
+editor.commands.createEdge(bodyId, loopId); // Feedback loop to input
 ```
 
 ## Max Iterations
@@ -173,19 +182,23 @@ Prevent infinite loops:
 ```typescript
 {
   maxIterations: 10, // Stop after 10 iterations
+  onMaxIterations: 'warning', // 'error' | 'warning' | 'continue'
 }
 ```
 
-When max is reached, execution follows the `exit` path.
+When max is reached:
+- `error`: Throws an error
+- `warning`: Logs a warning and exits normally
+- `continue`: Silently exits without warning
 
 ## Validation
 
-| Code                     | Type    | Description             |
-| ------------------------ | ------- | ----------------------- |
-| `MISSING_CONDITION`      | Error   | No condition prompt     |
-| `INVALID_MAX_ITERATIONS` | Error   | Max iterations <= 0     |
-| `NO_BODY_CONNECTION`     | Warning | Body port not connected |
-| `NO_EXIT_CONNECTION`     | Warning | Exit port not connected |
+| Code                      | Type    | Description             |
+| ------------------------- | ------- | ----------------------- |
+| `MISSING_CONDITION_PROMPT`| Error   | No condition prompt     |
+| `INVALID_MAX_ITERATIONS`  | Error   | Max iterations <= 0     |
+| `MISSING_BODY`            | Warning | Body port not connected |
+| `MISSING_EXIT`            | Warning | Done port not connected |
 
 ## StarterKit Configuration
 
@@ -206,16 +219,16 @@ StarterKit.configure({
 {
   conditionPrompt: `Continue refining?
 
-STOP (false) if:
+DONE if:
 - Quality score >= 9/10
 - All requirements met
 - No further improvements possible
 
-CONTINUE (true) if:
+CONTINUE if:
 - Quality can be improved
 - Requirements not fully met
 
-Respond ONLY with "true" or "false".`,
+Respond ONLY with "continue" or "done".`,
 }
 ```
 
@@ -254,10 +267,10 @@ Make incremental improvements.`,
 
 ### 4. Handle Edge Cases
 
-Always connect the exit path:
+Always connect the done/exit path:
 
 ```typescript
-editor.commands.createEdge(loopId, exitHandler, 'exit');
+editor.commands.createEdge(loopId, exitHandler, 'done');
 ```
 
 ## Examples
@@ -268,8 +281,9 @@ editor.commands.createEdge(loopId, exitHandler, 'exit');
 {
   label: 'Quality Refinement',
   conditionPrompt: `Is this text high quality (clear, accurate, well-structured)?
-Respond "false" if quality is good, "true" if it needs improvement.`,
+Respond "done" if quality is good, "continue" if it needs improvement.`,
   maxIterations: 5,
+  onMaxIterations: 'warning',
 }
 ```
 
@@ -279,8 +293,9 @@ Respond "false" if quality is good, "true" if it needs improvement.`,
 {
   label: 'Search Loop',
   conditionPrompt: `Did we find the answer?
-Respond "false" if found, "true" to continue searching.`,
+Respond "done" if found, "continue" to continue searching.`,
   maxIterations: 10,
+  onMaxIterations: 'warning',
 }
 ```
 
@@ -296,8 +311,9 @@ Rules:
 - Contains required fields
 - Values are within acceptable ranges
 
-Respond "false" if valid, "true" if needs fixing.`,
+Respond "done" if valid, "continue" if needs fixing.`,
   maxIterations: 3,
+  onMaxIterations: 'error',
 }
 ```
 

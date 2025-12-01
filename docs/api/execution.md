@@ -5,7 +5,12 @@ The `OpenRouterExecutionAdapter` runs workflows using the OpenRouter API.
 ## Import
 
 ```typescript
-import { OpenRouterExecutionAdapter } from '@or3/workflow-core';
+import {
+    OpenRouterExecutionAdapter,
+    type ExecutionOptions,
+    type ExecutionCallbacks,
+    type ExecutionResult,
+} from '@or3/workflow-core';
 import OpenRouter from '@openrouter/sdk';
 ```
 
@@ -16,9 +21,8 @@ const client = new OpenRouter({
     apiKey: process.env.OPENROUTER_API_KEY,
 });
 
-const adapter = new OpenRouterExecutionAdapter({
-    client,
-    extensions: StarterKit.configure(),
+const adapter = new OpenRouterExecutionAdapter(client, {
+    defaultModel: 'openai/gpt-4o-mini',
 });
 ```
 
@@ -26,43 +30,111 @@ const adapter = new OpenRouterExecutionAdapter({
 
 ```typescript
 interface ExecutionOptions {
-    /** OpenRouter client instance */
-    client: OpenRouter;
+    /** Global tools available to all agents */
+    tools?: ToolDefinition[];
 
-    /** Extensions for node execution */
-    extensions: Extension[];
+    /** Fallback model when node doesn't specify one */
+    defaultModel?: string;
 
-    /** Memory adapter for memory nodes */
-    memoryAdapter?: MemoryAdapter;
+    /** Maximum retry attempts for failed API calls */
+    maxRetries?: number;
 
-    /** Token counter for compaction */
-    tokenCounter?: TokenCounter;
+    /** Base delay in ms between retries */
+    retryDelayMs?: number;
 
-    /** Context compaction config */
-    compaction?: CompactionConfig;
+    /** Safety limit for graph traversal iterations */
+    maxIterations?: number;
 
-    /** Subflow registry */
+    /** Global tool call handler */
+    onToolCall?: (name: string, args: any) => Promise<string>;
+
+    /** Pluggable long-term memory adapter */
+    memory?: MemoryAdapter;
+
+    /** Provide an existing session ID to reuse */
+    sessionId?: string;
+
+    /** Registry of available subflows */
     subflowRegistry?: SubflowRegistry;
 
-    /** Callbacks for execution events */
-    onNodeStart?: (nodeId: string) => void;
-    onNodeComplete?: (nodeId: string, result: any) => void;
-    onNodeError?: (nodeId: string, error: Error) => void;
-    onStreamChunk?: (chunk: string) => void;
-    onHITLRequest?: (request: HITLRequest) => Promise<HITLResponse>;
+    /** Maximum nesting depth for subflows (default: 10) */
+    maxSubflowDepth?: number;
+
+    /** Configuration for automatic context compaction */
+    compaction?: CompactionConfig;
+
+    /** Token counter for measuring context size */
+    tokenCounter?: TokenCounter;
+
+    /** Enable debug logging for LLM calls */
+    debug?: boolean;
+
+    /** Run workflow validation before execution (default: true) */
+    preflight?: boolean;
+
+    /** Maximum tool call iterations for agent nodes (default: 10) */
+    maxToolIterations?: number;
+
+    /** Behavior when max tool iterations is reached */
+    onMaxToolIterations?: 'warning' | 'error' | 'hitl';
+
+    /** Custom evaluators for while loop nodes */
+    customEvaluators?: Record<string, (context, loopState) => Promise<boolean>>;
+
+    /** Callback for human-in-the-loop requests */
+    onHITLRequest?: HITLCallback;
 }
 ```
 
 ## Basic Execution
 
 ```typescript
-const result = await adapter.execute({
+const workflow = {
+    meta: { version: '2.0.0', name: 'My Workflow' },
     nodes: editor.nodes,
     edges: editor.edges,
-    input: 'Hello, how can you help me?',
-});
+};
+
+const callbacks: ExecutionCallbacks = {
+    onNodeStart: (nodeId) => console.log(`Starting: ${nodeId}`),
+    onNodeFinish: (nodeId, output) => console.log(`Finished: ${nodeId}`),
+    onNodeError: (nodeId, error) => console.error(`Error: ${nodeId}`, error),
+    onToken: (nodeId, token) => process.stdout.write(token),
+};
+
+const result = await adapter.execute(
+    workflow,
+    { text: 'Hello, how can you help me?' },
+    callbacks
+);
 
 console.log(result.output);
+```
+
+## Preflight Validation
+
+By default, workflows are validated before execution:
+
+```typescript
+// Validation is enabled by default
+const adapter = new OpenRouterExecutionAdapter(client, {
+    preflight: true, // default
+});
+
+// Disable preflight validation for performance
+const adapter = new OpenRouterExecutionAdapter(client, {
+    preflight: false,
+});
+```
+
+When preflight validation fails, the result includes validation errors:
+
+```typescript
+const result = await adapter.execute(workflow, input, callbacks);
+
+if (!result.success && result.error?.message.includes('validation failed')) {
+    console.error('Workflow has validation errors');
+}
 ```
 
 ## With Conversation History
@@ -84,41 +156,79 @@ const result = await adapter.execute({
 
 ## Callbacks
 
+### ExecutionCallbacks Interface
+
+```typescript
+interface ExecutionCallbacks {
+    /** Called when a node begins execution */
+    onNodeStart: (nodeId: string) => void;
+
+    /** Called when a node completes successfully */
+    onNodeFinish: (nodeId: string, output: string) => void;
+
+    /** Called when a node encounters an error */
+    onNodeError: (nodeId: string, error: Error) => void;
+
+    /** Called for each streaming token from the LLM */
+    onToken: (nodeId: string, token: string) => void;
+
+    /** Called for reasoning/thinking tokens (optional) */
+    onReasoning?: (nodeId: string, token: string) => void;
+
+    /** Called when a router selects a route (optional) */
+    onRouteSelected?: (nodeId: string, routeId: string) => void;
+
+    /** Called when token usage is estimated (optional) */
+    onTokenUsage?: (nodeId: string, usage: TokenUsageDetails) => void;
+
+    /** Called when context compaction occurs (optional) */
+    onContextCompacted?: (result: CompactionResult) => void;
+
+    /** Called for parallel branch streaming (optional) */
+    onBranchToken?: (nodeId: string, branchId: string, branchLabel: string, token: string) => void;
+
+    /** Called when a parallel branch starts (optional) */
+    onBranchStart?: (nodeId: string, branchId: string, branchLabel: string) => void;
+
+    /** Called when a parallel branch completes (optional) */
+    onBranchComplete?: (nodeId: string, branchId: string, branchLabel: string, output: string) => void;
+}
+```
+
 ### Node Status Updates
 
 ```typescript
-const adapter = new OpenRouterExecutionAdapter({
-    client,
-    extensions: StarterKit.configure(),
-
+const callbacks: ExecutionCallbacks = {
     onNodeStart: (nodeId) => {
         setNodeStatus(nodeId, 'active');
     },
 
-    onNodeComplete: (nodeId, result) => {
+    onNodeFinish: (nodeId, output) => {
         setNodeStatus(nodeId, 'completed');
-        console.log(`Node ${nodeId} output:`, result);
+        console.log(`Node ${nodeId} output:`, output);
     },
 
     onNodeError: (nodeId, error) => {
         setNodeStatus(nodeId, 'error');
         console.error(`Node ${nodeId} failed:`, error);
     },
-});
+
+    onToken: (nodeId, token) => {
+        appendStreamingContent(token);
+    },
+};
 ```
 
-### Streaming
+### Token Usage Tracking
 
 ```typescript
-const adapter = new OpenRouterExecutionAdapter({
-    client,
-    extensions: StarterKit.configure(),
-
-    onStreamChunk: (chunk) => {
-        // Append streaming content
-        streamingContent.value += chunk;
+const callbacks: ExecutionCallbacks = {
+    // ... other callbacks
+    onTokenUsage: (nodeId, usage) => {
+        console.log(`Node ${nodeId} used ${usage.totalTokens} tokens`);
+        console.log(`Remaining context: ${usage.remainingContext}`);
     },
-});
+};
 ```
 
 ## Stopping Execution
@@ -149,36 +259,64 @@ if (adapter.isRunning()) {
 
 ```typescript
 interface ExecutionResult {
+    /** Whether execution completed successfully */
+    success: boolean;
+
     /** Final output text */
     output: string;
 
-    /** Whether execution was cancelled */
-    cancelled?: boolean;
+    /** Output from each executed node, keyed by node ID */
+    nodeOutputs: Record<string, string>;
 
-    /** Total tokens used */
-    totalTokens?: number;
+    /** Error that caused execution to fail (if success is false) */
+    error?: Error;
 
-    /** Model used */
-    model?: string;
+    /** Total execution duration in milliseconds */
+    duration: number;
 
-    /** Execution metadata */
-    metadata?: Record<string, unknown>;
+    /** Token usage statistics */
+    usage?: TokenUsage;
 
-    /** Output node result (if output node was used) */
-    formattedOutput?: string;
+    /** Per-request token usage details */
+    tokenUsageDetails?: Array<TokenUsageDetails & { nodeId: string }>;
+}
+
+interface TokenUsage {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+}
+
+interface TokenUsageDetails extends TokenUsage {
+    /** Model used for the request */
+    model: string;
+    /** Maximum context window for the model */
+    contextLimit: number;
+    /** Compaction threshold in tokens (if enabled) */
+    compactionThreshold?: number;
+    /** Remaining tokens before compaction would trigger */
+    remainingBeforeCompaction?: number;
+    /** Remaining tokens before hitting model context limit */
+    remainingContext: number;
 }
 ```
 
 ## Error Handling
 
 ```typescript
-try {
-    const result = await adapter.execute({ nodes, edges, input });
-} catch (error) {
-    if (error instanceof ExecutionError) {
-        console.error('Node:', error.nodeId);
-        console.error('Message:', error.message);
-        console.error('Original:', error.cause);
+import { ExecutionError } from '@or3/workflow-core';
+
+const result = await adapter.execute(workflow, input, callbacks);
+
+if (!result.success) {
+    if (result.error instanceof ExecutionError) {
+        console.error('Node:', result.error.nodeId);
+        console.error('Code:', result.error.code);
+        console.error('Message:', result.error.message);
+
+        if (result.error.retry) {
+            console.error('Retry attempts:', result.error.retry.attempts);
+        }
     }
 }
 ```
@@ -186,17 +324,16 @@ try {
 ## With HITL
 
 ```typescript
-const adapter = new OpenRouterExecutionAdapter({
-    client,
-    extensions: StarterKit.configure(),
-
+const adapter = new OpenRouterExecutionAdapter(client, {
     onHITLRequest: async (request) => {
         // Show modal to user
         const userResponse = await showApprovalModal(request);
 
         return {
-            action: userResponse.action,
-            modifiedContent: userResponse.content,
+            requestId: request.id,
+            action: userResponse.action, // 'approve' | 'reject' | 'skip' | 'modify'
+            data: userResponse.content,
+            respondedAt: new Date().toISOString(),
         };
     },
 });
@@ -209,18 +346,14 @@ See [Human-in-the-Loop](./hitl.md) for details.
 ```typescript
 import { ApproximateTokenCounter } from '@or3/workflow-core';
 
-const adapter = new OpenRouterExecutionAdapter({
-    client,
-    extensions: StarterKit.configure(),
+const adapter = new OpenRouterExecutionAdapter(client, {
     tokenCounter: new ApproximateTokenCounter(),
 
     compaction: {
-        enabled: true,
-        maxTokens: 100000,
-        targetTokens: 60000,
-        summaryModel: 'openai/gpt-4o-mini',
-        preserveSystemPrompt: true,
-        preserveLastN: 5,
+        strategy: 'summarize', // 'summarize' | 'truncate' | 'custom'
+        threshold: 0.8, // Trigger at 80% of context limit
+        preserveRecent: 5, // Keep last 5 messages
+        summarizeModel: 'openai/gpt-4o-mini',
     },
 });
 ```
@@ -232,10 +365,8 @@ See [Context Compaction](./compaction.md) for details.
 ```typescript
 import { InMemoryAdapter } from '@or3/workflow-core';
 
-const adapter = new OpenRouterExecutionAdapter({
-    client,
-    extensions: StarterKit.configure(),
-    memoryAdapter: new InMemoryAdapter(),
+const adapter = new OpenRouterExecutionAdapter(client, {
+    memory: new InMemoryAdapter(),
 });
 ```
 

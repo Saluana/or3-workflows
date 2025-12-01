@@ -27,10 +27,10 @@ interface SubflowNodeData {
     subflowId: string;
 
     /** Input mappings from parent to subflow */
-    inputMappings: Record<string, string>;
+    inputMappings?: Record<string, string>;
 
-    /** Output mappings from subflow to parent */
-    outputMappings?: Record<string, string>;
+    /** Whether to share session with parent workflow */
+    shareSession?: boolean;
 }
 ```
 
@@ -40,6 +40,7 @@ interface SubflowNodeData {
 | -------- | ------ | ---------------------------- |
 | `input`  | Input  | Input passed to subflow      |
 | `output` | Output | Subflow result               |
+| `error`  | Output | Error branch                 |
 | Dynamic  | Input  | Per subflow input definition |
 
 ## Subflow Definition
@@ -147,13 +148,10 @@ registry.clear();
 ## Usage
 
 ```typescript
-// Configure StarterKit with registry
-const editor = new WorkflowEditor({
-    extensions: StarterKit.configure({
-        subflow: {
-            storage: registry,
-        },
-    }),
+// Configure adapter with registry
+const adapter = new OpenRouterExecutionAdapter(client, {
+    subflowRegistry: registry,
+    maxSubflowDepth: 10, // Maximum nesting depth
 });
 
 // Create subflow node
@@ -163,9 +161,10 @@ editor.commands.createNode(
         label: 'Process Email',
         subflowId: 'email-processor',
         inputMappings: {
-            email: 'input', // Map parent input to subflow's 'email' input
+            email: '{{input}}', // Map parent input to subflow's 'email' input
             tone: 'friendly', // Static value
         },
+        shareSession: true, // Share session with parent workflow
     },
     { x: 100, y: 200 }
 );
@@ -173,21 +172,35 @@ editor.commands.createNode(
 
 ## Input Mappings
 
-Map parent workflow data to subflow inputs:
+Map parent workflow data to subflow inputs using expressions:
 
 ```typescript
 {
   inputMappings: {
-    // Map from parent input
-    'subflowInput': 'parentInput',
+    // Map from parent input using expression syntax
+    'subflowInput': '{{input}}',
+
+    // Reference another node's output
+    'data': '{{outputs.previousNode}}',
 
     // Static value
-    'config': JSON.stringify({ mode: 'strict' }),
+    'config': 'strict',
 
-    // Template
+    // Template with expression
     'prompt': 'Process this: {{input}}',
   },
 }
+```
+
+### Expression Syntax
+
+| Expression          | Description                          |
+| ------------------- | ------------------------------------ |
+| `{{input}}`         | Current input to the subflow node    |
+| `{{output}}`        | Alias for `{{input}}`                |
+| `{{outputs.nodeId}}`| Output from a specific node          |
+| `{{context.sessionId}}` | Session ID from context          |
+| `static value`      | Used as-is                           |
 ```
 
 ## Execution Flow
@@ -222,35 +235,59 @@ Parent Workflow
 
 ## Nesting Limits
 
-Prevent infinite recursion:
+Prevent infinite recursion with depth limits:
 
 ```typescript
-StarterKit.configure({
-    subflow: {
-        maxNestingDepth: 5, // Maximum subflow depth
-    },
+const adapter = new OpenRouterExecutionAdapter(client, {
+    subflowRegistry: registry,
+    maxSubflowDepth: 10, // Maximum subflow nesting depth (default: 10)
 });
 ```
 
 ## Validation
 
-| Code                     | Type  | Description                   |
-| ------------------------ | ----- | ----------------------------- |
-| `MISSING_SUBFLOW_ID`     | Error | No subflow ID specified       |
-| `UNKNOWN_SUBFLOW`        | Error | Subflow not found in registry |
-| `MISSING_REQUIRED_INPUT` | Error | Required input not mapped     |
-| `EXCEEDED_NESTING_DEPTH` | Error | Too many nested subflows      |
+| Code                   | Type    | Description                   |
+| ---------------------- | ------- | ----------------------------- |
+| `MISSING_SUBFLOW_ID`   | Error   | No subflow ID specified       |
+| `SUBFLOW_NOT_FOUND`    | Error   | Subflow not found in registry |
+| `MISSING_INPUT_MAPPING`| Error   | Required input not mapped     |
+| `NO_SUBFLOW_OUTPUTS`   | Warning | Subflow has no output nodes   |
+| `NO_REGISTRY`          | Warning | Registry not provided for validation |
+| `NO_INPUT`             | Warning | Subflow node has no incoming edges |
+| `NO_OUTPUT`            | Warning | Subflow node has no outgoing edges |
 
 ### Validate Input Mappings
 
 ```typescript
 import { validateInputMappings } from '@or3/workflow-core';
 
-const result = validateInputMappings(node.data.inputMappings, subflow.inputs);
+const result = validateInputMappings(subflow, node.data.inputMappings || {});
 
-if (result.missing.length > 0) {
-    console.error('Missing inputs:', result.missing);
+if (!result.valid) {
+    console.error('Missing required inputs:', result.missing);
 }
+```
+
+## Helper Functions
+
+### getSubflowPorts
+
+Get dynamic ports for a subflow node based on its definition:
+
+```typescript
+import { getSubflowPorts } from '@or3/workflow-core';
+
+const { inputs, outputs } = getSubflowPorts(subflowId, registry);
+```
+
+### createDefaultInputMappings
+
+Create default input mappings from a subflow definition:
+
+```typescript
+import { createDefaultInputMappings } from '@or3/workflow-core';
+
+const mappings = createDefaultInputMappings(subflowId, registry);
 ```
 
 ## Best Practices
