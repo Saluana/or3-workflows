@@ -171,6 +171,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         usage: TokenUsageDetails;
     }> = [];
 
+    // Cache node type sets for O(1) lookups
+    private static readonly LLM_NODE_TYPES = new Set(['agent', 'router', 'whileLoop']);
+    private static readonly HITL_SUPPORTED_TYPES = new Set(['agent', 'router', 'tool']);
+
     /**
      * Create a new OpenRouterExecutionAdapter.
      *
@@ -326,7 +330,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
                 // Check if all parents are resolved (executed or skipped)
                 const parentIds = graph.parents[nodeId];
-                if (!parentIds) return;
+                if (!parentIds || parentIds.length === 0) {
+                    // No parents means this is unreachable from executed nodes
+                    return;
+                }
                 
                 const allParentsResolved = parentIds.every((p) =>
                     executed.has(p)
@@ -608,8 +615,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
         // Apply context compaction for nodes that use LLM with history
         let historyMessages = context.session.messages;
-        const llmNodeTypes = ['agent', 'router', 'whileLoop'] as const;
-        if (llmNodeTypes.includes(node.type as typeof llmNodeTypes[number]) && this.options.compaction) {
+        if (OpenRouterExecutionAdapter.LLM_NODE_TYPES.has(node.type) && this.options.compaction) {
             const nodeData = node.data as unknown as Record<string, unknown>;
             const model =
                 (typeof nodeData.model === 'string' ? nodeData.model : null) ||
@@ -907,8 +913,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
         // Check if this node type supports HITL
         const hitlConfig = nodeData?.hitl as HITLConfig | undefined;
-        const hitlSupportedTypes = ['agent', 'router', 'tool'] as const;
-        const supportsHITL = hitlSupportedTypes.includes(node.type as typeof hitlSupportedTypes[number]);
+        const supportsHITL = OpenRouterExecutionAdapter.HITL_SUPPORTED_TYPES.has(node.type);
         const shouldUseHITL =
             supportsHITL && hitlConfig?.enabled === true && this.options.onHITLRequest !== undefined;
 
@@ -1408,7 +1413,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         if (!config) return false;
 
         // Use error's built-in retryable check with configured skipOn
-        const skipOn = config.skipOn ?? ['AUTH', 'VALIDATION'] as const;
+        const DEFAULT_SKIP_ON = ['AUTH', 'VALIDATION'] as const;
+        const skipOn = config.skipOn ?? DEFAULT_SKIP_ON;
         if (!error.isRetryable(skipOn as import('./errors').ErrorCode[])) {
             return false;
         }
