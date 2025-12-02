@@ -379,6 +379,19 @@ export interface ExecutionCallbacks {
         branchLabel: string,
         output: string
     ) => void;
+
+    /**
+     * Called when a loop node starts a new iteration.
+     * Use this to update the UI with the current iteration count.
+     * @param nodeId - The ID of the loop node.
+     * @param iteration - The current iteration number (1-based).
+     * @param maxIterations - The maximum allowed iterations.
+     */
+    onLoopIteration?: (
+        nodeId: string,
+        iteration: number,
+        maxIterations: number
+    ) => void;
 }
 
 /**
@@ -656,6 +669,8 @@ export interface ExecutionContext {
         branchLabel: string,
         output: string
     ) => void;
+    /** Callback when a loop iteration starts */
+    onLoopIteration?: (iteration: number, maxIterations: number) => void;
 }
 
 /** Execution adapter interface */

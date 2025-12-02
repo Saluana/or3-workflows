@@ -218,6 +218,9 @@ Respond with only "continue" or "done".`;
         let shouldContinue = await evaluateCondition();
 
         while (shouldContinue && iteration < maxIterations) {
+            // Report iteration start (1-based for display)
+            context.onLoopIteration?.(iteration + 1, maxIterations);
+
             // Build enriched input for the body
             const enrichedInput = buildBodyInput(currentInput);
 

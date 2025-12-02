@@ -785,6 +785,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                       );
                   }
                 : undefined,
+            onLoopIteration: callbacks.onLoopIteration
+                ? (iteration: number, maxIterations: number) => {
+                      callbacks.onLoopIteration!(nodeId, iteration, maxIterations);
+                  }
+                : undefined,
 
             getNode: (id: string) => graph.nodeMap.get(id),
 
