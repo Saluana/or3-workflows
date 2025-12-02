@@ -81,6 +81,8 @@ export {
     type HITLRequest,
     type HITLResponse,
     type HITLCallback,
+    type HITLAdapter,
+    InMemoryHITLAdapter,
     isHITLMode,
     isHITLConfig,
     isHITLRequest,

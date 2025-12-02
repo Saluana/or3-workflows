@@ -185,13 +185,27 @@ interface ExecutionCallbacks {
     onContextCompacted?: (result: CompactionResult) => void;
 
     /** Called for parallel branch streaming (optional) */
-    onBranchToken?: (nodeId: string, branchId: string, branchLabel: string, token: string) => void;
+    onBranchToken?: (
+        nodeId: string,
+        branchId: string,
+        branchLabel: string,
+        token: string
+    ) => void;
 
     /** Called when a parallel branch starts (optional) */
-    onBranchStart?: (nodeId: string, branchId: string, branchLabel: string) => void;
+    onBranchStart?: (
+        nodeId: string,
+        branchId: string,
+        branchLabel: string
+    ) => void;
 
     /** Called when a parallel branch completes (optional) */
-    onBranchComplete?: (nodeId: string, branchId: string, branchLabel: string, output: string) => void;
+    onBranchComplete?: (
+        nodeId: string,
+        branchId: string,
+        branchLabel: string,
+        output: string
+    ) => void;
 }
 ```
 
@@ -399,6 +413,45 @@ const adapter = new OpenRouterExecutionAdapter(client, {
 6. Output Nodes
    └─ Format and return final output
 ```
+
+## DAG-Level Parallelism
+
+The executor automatically runs independent branches concurrently. When multiple nodes are "ready" (all their parent nodes have completed), they execute in parallel via `Promise.all`.
+
+```
+     ┌─► Node B ─┐
+     │           │
+Start├─► Node C ─┼─► Output
+     │           │
+     └─► Node D ─┘
+```
+
+In this example, nodes B, C, and D all execute concurrently since they share the same parent (Start) and have no dependencies on each other.
+
+### Explicit Parallel Node
+
+For more control over parallel execution (branch labeling, merging strategies), use the explicit `parallel` node:
+
+```typescript
+const parallelNode = {
+    id: 'parallel-1',
+    type: 'parallel',
+    data: {
+        label: 'Research Branches',
+        branches: [
+            { id: 'branch-a', label: 'Market Research' },
+            { id: 'branch-b', label: 'Competitor Analysis' },
+        ],
+        mergeStrategy: 'concatenate',
+    },
+};
+```
+
+### Performance Considerations
+
+-   **Automatic parallelism**: Independent nodes in the DAG run concurrently without configuration
+-   **Resource limits**: Each concurrent node makes its own API call; consider rate limits
+-   **Error handling**: If one parallel branch fails, execution continues for other branches; the error is reported via `onNodeError`
 
 ## Model Capabilities
 

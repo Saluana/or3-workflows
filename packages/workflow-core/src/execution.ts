@@ -75,7 +75,10 @@ const DEFAULT_RETRY_DELAY_MS = 1000;
 const MAX_ITERATIONS_MULTIPLIER = 3;
 
 /** Default error codes to skip retrying */
-const DEFAULT_SKIP_ON_RETRY: ReadonlyArray<import('./errors').ErrorCode> = ['AUTH', 'VALIDATION'] as const;
+const DEFAULT_SKIP_ON_RETRY: ReadonlyArray<import('./errors').ErrorCode> = [
+    'AUTH',
+    'VALIDATION',
+] as const;
 
 // ============================================================================
 // Types
@@ -84,7 +87,9 @@ const DEFAULT_SKIP_ON_RETRY: ReadonlyArray<import('./errors').ErrorCode> = ['AUT
 /** Graph structure for workflow traversal */
 interface WorkflowGraph {
     readonly nodeMap: ReadonlyMap<string, WorkflowNode>;
-    readonly children: Readonly<Record<string, ReadonlyArray<{ nodeId: string; handleId?: string }>>>;
+    readonly children: Readonly<
+        Record<string, ReadonlyArray<{ nodeId: string; handleId?: string }>>
+    >;
     readonly parents: Readonly<Record<string, ReadonlyArray<string>>>;
 }
 
@@ -175,8 +180,16 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     }> = [];
 
     // Cache node type sets for O(1) lookups
-    private static readonly LLM_NODE_TYPES = new Set(['agent', 'router', 'whileLoop']);
-    private static readonly HITL_SUPPORTED_TYPES = new Set(['agent', 'router', 'tool']);
+    private static readonly LLM_NODE_TYPES = new Set([
+        'agent',
+        'router',
+        'whileLoop',
+    ]);
+    private static readonly HITL_SUPPORTED_TYPES = new Set([
+        'agent',
+        'router',
+        'tool',
+    ]);
 
     /**
      * Create a new OpenRouterExecutionAdapter.
@@ -340,7 +353,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     // No parents means this is unreachable from executed nodes
                     return;
                 }
-                
+
                 const allParentsResolved = parentIds.every((p) =>
                     executed.has(p)
                 );
@@ -359,80 +372,119 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 }
             };
 
+            // DAG-level parallel execution: execute all ready nodes concurrently
+            // A node is "ready" when all its parents have been executed
             while (queue.length > 0 && iterations < maxIterations) {
                 iterations++;
-                const currentId = queue.shift()!;
 
                 // Check for cancellation
                 if (this.abortController?.signal.aborted) {
                     throw new Error('Workflow cancelled');
                 }
 
-                // Skip if already executed
-                if (executed.has(currentId)) continue;
+                // Find all ready nodes (nodes whose parents are all executed)
+                const readyNodes: string[] = [];
+                const deferredNodes: string[] = [];
 
-                // Check if all parents are executed (except for start node)
-                const parentIds = graph.parents[currentId];
-                const allParentsExecuted = !parentIds || parentIds.length === 0 || parentIds.every((p) =>
-                    executed.has(p)
-                );
+                for (const nodeId of queue) {
+                    // Skip if already executed
+                    if (executed.has(nodeId)) continue;
 
-                if (!allParentsExecuted && currentId !== startNode.id) {
-                    // If not all parents executed, re-queue and continue
-                    queue.push(currentId);
-                    continue;
+                    // Check if all parents are executed (except for start node)
+                    const parentIds = graph.parents[nodeId];
+                    const allParentsExecuted =
+                        !parentIds ||
+                        parentIds.length === 0 ||
+                        parentIds.every((p) => executed.has(p));
+
+                    if (allParentsExecuted || nodeId === startNode.id) {
+                        readyNodes.push(nodeId);
+                    } else {
+                        deferredNodes.push(nodeId);
+                    }
                 }
 
-                executed.add(currentId);
+                // If no nodes are ready, we have a cycle or unreachable nodes
+                if (readyNodes.length === 0) {
+                    if (deferredNodes.length > 0) {
+                        // Re-queue deferred nodes and continue (might become ready later)
+                        queue.length = 0;
+                        queue.push(...deferredNodes);
+                        continue;
+                    }
+                    break; // No more nodes to execute
+                }
 
-                // Track node execution count as circuit breaker
-                const execCount = (nodeExecutionCount.get(currentId) || 0) + 1;
-                nodeExecutionCount.set(currentId, execCount);
+                // Clear queue and add back deferred nodes
+                queue.length = 0;
+                queue.push(...deferredNodes);
 
-                // Check if this node has been executed too many times (circuit breaker)
-                if (execCount > maxNodeExecutions) {
-                    throw new Error(
-                        `Node "${currentId}" exceeded maximum executions (${maxNodeExecutions}). ` +
-                            'This likely indicates an infinite loop. Check your workflow for cycles.'
+                // Mark all ready nodes as executing (prevents re-queueing during concurrent execution)
+                for (const nodeId of readyNodes) {
+                    executed.add(nodeId);
+
+                    // Track node execution count as circuit breaker
+                    const execCount = (nodeExecutionCount.get(nodeId) || 0) + 1;
+                    nodeExecutionCount.set(nodeId, execCount);
+
+                    // Check if this node has been executed too many times (circuit breaker)
+                    if (execCount > maxNodeExecutions) {
+                        throw new Error(
+                            `Node "${nodeId}" exceeded maximum executions (${maxNodeExecutions}). ` +
+                                'This likely indicates an infinite loop. Check your workflow for cycles.'
+                        );
+                    }
+                }
+
+                // Execute all ready nodes concurrently
+                const executeNode = async (
+                    nodeId: string
+                ): Promise<{
+                    nodeId: string;
+                    result: { output: string; nextNodes: string[] };
+                }> => {
+                    const result = await this.executeNodeWithErrorHandling(
+                        nodeId,
+                        context,
+                        graph,
+                        workflow.edges,
+                        callbacks
                     );
-                }
+                    return { nodeId, result };
+                };
 
-                // Execute the node
-                const result = await this.executeNodeWithErrorHandling(
-                    currentId,
-                    context,
-                    graph,
-                    workflow.edges,
-                    callbacks
-                );
+                const results = await Promise.all(readyNodes.map(executeNode));
 
-                // Store output
-                nodeOutputs[currentId] = result.output;
-                finalOutput = result.output;
+                // Process results
+                for (const { nodeId, result } of results) {
+                    // Store output
+                    nodeOutputs[nodeId] = result.output;
+                    finalOutput = result.output;
 
-                // Handle skipped nodes (children not in nextNodes) - except while loops which manage their own control flow
-                const currentNode = graph.nodeMap.get(currentId);
-                if (currentNode?.type !== 'whileLoop') {
-                    const allChildren = graph.children[currentId];
-                    if (allChildren) {
-                        for (const child of allChildren) {
-                            if (!result.nextNodes.includes(child.nodeId)) {
-                                propagateSkip(child.nodeId);
+                    // Handle skipped nodes (children not in nextNodes) - except while loops which manage their own control flow
+                    const currentNode = graph.nodeMap.get(nodeId);
+                    if (currentNode?.type !== 'whileLoop') {
+                        const allChildren = graph.children[nodeId];
+                        if (allChildren) {
+                            for (const child of allChildren) {
+                                if (!result.nextNodes.includes(child.nodeId)) {
+                                    propagateSkip(child.nodeId);
+                                }
                             }
                         }
                     }
-                }
 
-                // Queue next nodes
-                for (const nextId of result.nextNodes) {
-                    if (!executed.has(nextId) || nextId === currentId) {
-                        queue.push(nextId);
+                    // Queue next nodes
+                    for (const nextId of result.nextNodes) {
+                        if (!executed.has(nextId) || nextId === nodeId) {
+                            queue.push(nextId);
+                        }
                     }
-                }
 
-                // Allow re-entry for loop nodes that intentionally re-queue themselves
-                if (result.nextNodes.includes(currentId)) {
-                    executed.delete(currentId);
+                    // Allow re-entry for loop nodes that intentionally re-queue themselves
+                    if (result.nextNodes.includes(nodeId)) {
+                        executed.delete(nodeId);
+                    }
                 }
             }
 
@@ -445,11 +497,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             if (finalOutput) {
                 const messages = context.session.messages;
                 const lastMessage = messages[messages.length - 1];
-                const shouldAddMessage = 
+                const shouldAddMessage =
                     !lastMessage ||
                     lastMessage.role !== 'assistant' ||
                     lastMessage.content !== finalOutput;
-                
+
                 if (shouldAddMessage) {
                     context.session.addMessage({
                         role: 'assistant',
@@ -629,11 +681,16 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
         // Apply context compaction for nodes that use LLM with history
         let historyMessages = context.session.messages;
-        if (OpenRouterExecutionAdapter.LLM_NODE_TYPES.has(node.type) && this.options.compaction) {
+        if (
+            OpenRouterExecutionAdapter.LLM_NODE_TYPES.has(node.type) &&
+            this.options.compaction
+        ) {
             const nodeData = node.data as unknown as Record<string, unknown>;
             const model =
                 (typeof nodeData.model === 'string' ? nodeData.model : null) ||
-                (typeof nodeData.conditionModel === 'string' ? nodeData.conditionModel : null) ||
+                (typeof nodeData.conditionModel === 'string'
+                    ? nodeData.conditionModel
+                    : null) ||
                 this.options.defaultModel ||
                 DEFAULT_MODEL;
             const compactionResult = await this.compactHistoryIfNeeded(
@@ -910,7 +967,9 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         }
 
         const nodeData = node.data as unknown as Record<string, unknown>;
-        const errorConfig = nodeData?.errorHandling as NodeErrorConfig | undefined;
+        const errorConfig = nodeData?.errorHandling as
+            | NodeErrorConfig
+            | undefined;
         const retryConfig = errorConfig?.retry;
         const resolvedRetry: NodeRetryConfig | undefined =
             retryConfig ??
@@ -927,7 +986,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
         // Check if this node type supports HITL
         const hitlConfig = nodeData?.hitl as HITLConfig | undefined;
-        const supportsHITL = OpenRouterExecutionAdapter.HITL_SUPPORTED_TYPES.has(node.type);
+        const supportsHITL =
+            OpenRouterExecutionAdapter.HITL_SUPPORTED_TYPES.has(node.type);
         const shouldUseHITL =
             supportsHITL && hitlConfig?.enabled && this.options.onHITLRequest;
 
@@ -1051,14 +1111,22 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
         const workflowName = context.session.id || 'Workflow';
         const childEdges = graph.children[node.id];
-        const childNodeIds = childEdges ? childEdges.map((c) => c.nodeId) : [];
+
+        // Get only default output handles (exclude error/rejected for skip routing)
+        const defaultChildNodeIds = childEdges
+            ? childEdges
+                  .filter(
+                      (c) =>
+                          !c.handleId ||
+                          (c.handleId !== 'error' && c.handleId !== 'rejected')
+                  )
+                  .map((c) => c.nodeId)
+            : [];
 
         // Helper to handle reject action
         const handleReject = (): { output: string; nextNodes: string[] } => {
             const rejectEdge = edges.find(
-                (e) =>
-                    e.source === node.id &&
-                    e.sourceHandle === 'rejected'
+                (e) => e.source === node.id && e.sourceHandle === 'rejected'
             );
             if (rejectEdge) {
                 callbacks.onNodeFinish(node.id, 'HITL: Rejected');
@@ -1067,12 +1135,12 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             throw new Error('HITL: Request rejected');
         };
 
-        // Helper to handle skip action
+        // Helper to handle skip action - only routes through default output handles
         const handleSkip = (): { output: string; nextNodes: string[] } => {
             callbacks.onNodeFinish(node.id, 'HITL: Skipped');
             return {
                 output: context.currentInput,
-                nextNodes: childNodeIds,
+                nextNodes: defaultChildNodeIds,
             };
         };
 
@@ -1080,9 +1148,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         const updateContextWithData = (data: unknown): void => {
             if (data) {
                 context.currentInput =
-                    typeof data === 'string'
-                        ? data
-                        : JSON.stringify(data);
+                    typeof data === 'string' ? data : JSON.stringify(data);
             }
         };
 
@@ -1230,7 +1296,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     ): HITLRequest {
         const now = new Date();
         const nodeData = node.data as unknown as Record<string, unknown>;
-        const nodeLabel = typeof nodeData.label === 'string' ? nodeData.label : node.id;
+        const nodeLabel =
+            typeof nodeData.label === 'string' ? nodeData.label : node.id;
 
         const request: HITLRequest = {
             id: generateHITLRequestId(),
@@ -1298,7 +1365,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         }
 
         const signal = this.abortController?.signal;
-        
+
         // Check if already aborted
         if (signal?.aborted) {
             throw new Error('Workflow cancelled');
@@ -1350,13 +1417,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         try {
             return await Promise.race(promises);
         } finally {
-            // Cleanup
-            if (abortHandler && this.abortController?.signal) {
-                this.abortController.signal.removeEventListener(
-                    'abort',
-                    abortHandler
-                );
-            }
+            // Cleanup timeout interval
             if (timeoutCheckInterval) {
                 clearInterval(timeoutCheckInterval);
             }
@@ -1387,16 +1448,17 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         while (queue.length > 0 && iterations < maxIterations) {
             iterations++;
             const currentId = queue.shift()!;
-            
+
             // Check for cancellation
             if (this.abortController?.signal.aborted) {
                 throw new Error('Workflow cancelled');
             }
-            
+
             if (executed.has(currentId)) continue;
 
             const parents = graph.parents[currentId];
-            const allParentsExecuted = !parents || parents.every((p) => executed.has(p));
+            const allParentsExecuted =
+                !parents || parents.every((p) => executed.has(p));
             if (!allParentsExecuted) {
                 queue.push(currentId);
                 continue;
@@ -1451,7 +1513,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         }
 
         // If retryOn is specified, only retry on those codes
-        if (config.retryOn && config.retryOn.length > 0 && !config.retryOn.includes(error.code)) {
+        if (
+            config.retryOn &&
+            config.retryOn.length > 0 &&
+            !config.retryOn.includes(error.code)
+        ) {
             return false;
         }
 
@@ -1460,11 +1526,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
     private async sleep(ms: number): Promise<void> {
         const signal = this.abortController?.signal;
-        
+
         if (signal?.aborted) {
             throw new Error('Workflow cancelled');
         }
-        
+
         return new Promise((resolve, reject) => {
             const timeoutId = setTimeout(() => {
                 resolve();
@@ -1557,7 +1623,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             } catch (error) {
                 // Fallback to truncate on custom compactor error
                 if (this.options.debug) {
-                    console.error('Custom compactor failed, falling back to truncate:', error);
+                    console.error(
+                        'Custom compactor failed, falling back to truncate:',
+                        error
+                    );
                 }
                 compactedMessages = toPreserve;
             }
@@ -1586,7 +1655,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             } catch (error) {
                 // Fallback to truncate on summarization error
                 if (this.options.debug) {
-                    console.error('Summarization failed, falling back to truncate:', error);
+                    console.error(
+                        'Summarization failed, falling back to truncate:',
+                        error
+                    );
                 }
                 compactedMessages = toPreserve;
             }

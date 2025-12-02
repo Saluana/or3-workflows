@@ -4,6 +4,9 @@
  * HITL is opt-in per node. The framework provides the pause/resume mechanism;
  * developers provide the UI via callbacks.
  *
+ * For long-running workflows that need persistence across process restarts,
+ * implement the HITLAdapter interface with your own storage backend.
+ *
  * @module hitl
  */
 
@@ -189,6 +192,160 @@ export interface HITLResponse {
  * ```
  */
 export type HITLCallback = (request: HITLRequest) => Promise<HITLResponse>;
+
+/**
+ * Adapter interface for persistent HITL storage.
+ *
+ * Implement this interface to persist HITL requests across process restarts
+ * for long-running workflows (multi-day approvals, async human tasks, etc.).
+ *
+ * The default in-memory implementation is suitable for interactive workflows
+ * where the process stays alive during human interaction.
+ *
+ * @example
+ * ```typescript
+ * // Redis-backed implementation
+ * class RedisHITLAdapter implements HITLAdapter {
+ *   async store(request: HITLRequest): Promise<void> {
+ *     await redis.hset('hitl:requests', request.id, JSON.stringify(request));
+ *     if (request.expiresAt) {
+ *       await redis.expireat('hitl:requests', new Date(request.expiresAt).getTime() / 1000);
+ *     }
+ *   }
+ *
+ *   async get(requestId: string): Promise<HITLRequest | null> {
+ *     const data = await redis.hget('hitl:requests', requestId);
+ *     return data ? JSON.parse(data) : null;
+ *   }
+ *
+ *   async respond(requestId: string, response: HITLResponse): Promise<void> {
+ *     await redis.hset('hitl:responses', requestId, JSON.stringify(response));
+ *     await redis.hdel('hitl:requests', requestId);
+ *   }
+ *
+ *   async getPending(workflowId?: string): Promise<HITLRequest[]> {
+ *     const all = await redis.hgetall('hitl:requests');
+ *     const requests = Object.values(all).map(v => JSON.parse(v));
+ *     return workflowId
+ *       ? requests.filter(r => r.context.workflowName === workflowId)
+ *       : requests;
+ *   }
+ *
+ *   async getResponse(requestId: string): Promise<HITLResponse | null> {
+ *     const data = await redis.hget('hitl:responses', requestId);
+ *     return data ? JSON.parse(data) : null;
+ *   }
+ *
+ *   async delete(requestId: string): Promise<void> {
+ *     await redis.hdel('hitl:requests', requestId);
+ *     await redis.hdel('hitl:responses', requestId);
+ *   }
+ * }
+ * ```
+ */
+export interface HITLAdapter {
+    /**
+     * Store a pending HITL request.
+     * Called when a node reaches a HITL pause point.
+     */
+    store(request: HITLRequest): Promise<void>;
+
+    /**
+     * Get a pending HITL request by ID.
+     * Returns null if not found or already responded.
+     */
+    get(requestId: string): Promise<HITLRequest | null>;
+
+    /**
+     * Record a response to a HITL request.
+     * Should remove from pending and store the response.
+     */
+    respond(requestId: string, response: HITLResponse): Promise<void>;
+
+    /**
+     * Get all pending (unanswered) HITL requests.
+     * Optionally filtered by workflow/session.
+     */
+    getPending(workflowId?: string, sessionId?: string): Promise<HITLRequest[]>;
+
+    /**
+     * Get the response for a request, if it exists.
+     * Used when resuming a workflow to check if human has responded.
+     */
+    getResponse(requestId: string): Promise<HITLResponse | null>;
+
+    /**
+     * Delete a request and its response (cleanup).
+     */
+    delete(requestId: string): Promise<void>;
+
+    /**
+     * Clear all pending requests (optionally filtered).
+     */
+    clear(workflowId?: string, sessionId?: string): Promise<void>;
+}
+
+/**
+ * Default in-memory HITL adapter.
+ *
+ * NOT suitable for production with long-running workflows.
+ * Use a persistent adapter (Redis, Postgres, etc.) for durability.
+ */
+export class InMemoryHITLAdapter implements HITLAdapter {
+    private requests: Map<string, HITLRequest> = new Map();
+    private responses: Map<string, HITLResponse> = new Map();
+
+    async store(request: HITLRequest): Promise<void> {
+        this.requests.set(request.id, request);
+    }
+
+    async get(requestId: string): Promise<HITLRequest | null> {
+        return this.requests.get(requestId) ?? null;
+    }
+
+    async respond(requestId: string, response: HITLResponse): Promise<void> {
+        this.responses.set(requestId, response);
+        this.requests.delete(requestId);
+    }
+
+    async getPending(
+        workflowId?: string,
+        sessionId?: string
+    ): Promise<HITLRequest[]> {
+        const all = Array.from(this.requests.values());
+        return all.filter((r) => {
+            if (workflowId && r.context.workflowName !== workflowId)
+                return false;
+            if (sessionId && r.context.sessionId !== sessionId) return false;
+            return true;
+        });
+    }
+
+    async getResponse(requestId: string): Promise<HITLResponse | null> {
+        return this.responses.get(requestId) ?? null;
+    }
+
+    async delete(requestId: string): Promise<void> {
+        this.requests.delete(requestId);
+        this.responses.delete(requestId);
+    }
+
+    async clear(workflowId?: string, sessionId?: string): Promise<void> {
+        if (!workflowId && !sessionId) {
+            this.requests.clear();
+            this.responses.clear();
+            return;
+        }
+
+        for (const [id, request] of this.requests) {
+            if (workflowId && request.context.workflowName !== workflowId)
+                continue;
+            if (sessionId && request.context.sessionId !== sessionId) continue;
+            this.requests.delete(id);
+            this.responses.delete(id);
+        }
+    }
+}
 
 // ============================================================================
 // Type Guards

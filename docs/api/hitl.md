@@ -10,6 +10,8 @@ import {
     type HITLRequest,
     type HITLResponse,
     type HITLAction,
+    type HITLAdapter,
+    InMemoryHITLAdapter,
     createDefaultHITLConfig,
 } from '@or3/workflow-core';
 ```
@@ -429,6 +431,197 @@ hitl: {
 -   **Approval**: For actions with consequences (sending emails, making changes)
 -   **Input**: When you need additional information
 -   **Review**: For quality control of generated content
+
+## Persistent HITL Storage
+
+For long-running workflows that need to survive process restarts (multi-day approvals, async human tasks), implement the `HITLAdapter` interface.
+
+### HITLAdapter Interface
+
+```typescript
+interface HITLAdapter {
+    /** Store a pending HITL request */
+    store(request: HITLRequest): Promise<void>;
+
+    /** Get a pending HITL request by ID */
+    get(requestId: string): Promise<HITLRequest | null>;
+
+    /** Record a response to a HITL request */
+    respond(requestId: string, response: HITLResponse): Promise<void>;
+
+    /** Get all pending (unanswered) HITL requests */
+    getPending(workflowId?: string, sessionId?: string): Promise<HITLRequest[]>;
+
+    /** Get the response for a request, if it exists */
+    getResponse(requestId: string): Promise<HITLResponse | null>;
+
+    /** Delete a request and its response */
+    delete(requestId: string): Promise<void>;
+
+    /** Clear all pending requests */
+    clear(workflowId?: string, sessionId?: string): Promise<void>;
+}
+```
+
+### InMemoryHITLAdapter
+
+The default in-memory implementation is suitable for interactive workflows where the process stays alive:
+
+```typescript
+import { InMemoryHITLAdapter } from '@or3/workflow-core';
+
+const hitlAdapter = new InMemoryHITLAdapter();
+
+// Store a request
+await hitlAdapter.store(request);
+
+// Get pending requests for a workflow
+const pending = await hitlAdapter.getPending('my-workflow');
+
+// Record a response
+await hitlAdapter.respond(request.id, response);
+```
+
+### Redis-backed Implementation Example
+
+For production with long-running workflows:
+
+```typescript
+import type {
+    HITLAdapter,
+    HITLRequest,
+    HITLResponse,
+} from '@or3/workflow-core';
+import Redis from 'ioredis';
+
+export class RedisHITLAdapter implements HITLAdapter {
+    constructor(private redis: Redis) {}
+
+    async store(request: HITLRequest): Promise<void> {
+        const key = `hitl:requests:${request.id}`;
+        await this.redis.set(key, JSON.stringify(request));
+
+        // Set expiry if configured
+        if (request.expiresAt) {
+            const ttl = Math.max(
+                0,
+                new Date(request.expiresAt).getTime() - Date.now()
+            );
+            await this.redis.pexpire(key, ttl);
+        }
+
+        // Index by workflow for getPending queries
+        await this.redis.sadd(
+            `hitl:workflow:${request.context.workflowName}`,
+            request.id
+        );
+    }
+
+    async get(requestId: string): Promise<HITLRequest | null> {
+        const data = await this.redis.get(`hitl:requests:${requestId}`);
+        return data ? JSON.parse(data) : null;
+    }
+
+    async respond(requestId: string, response: HITLResponse): Promise<void> {
+        // Get request to find workflow for cleanup
+        const request = await this.get(requestId);
+
+        // Store response
+        await this.redis.set(
+            `hitl:responses:${requestId}`,
+            JSON.stringify(response)
+        );
+
+        // Remove from pending
+        await this.redis.del(`hitl:requests:${requestId}`);
+        if (request) {
+            await this.redis.srem(
+                `hitl:workflow:${request.context.workflowName}`,
+                requestId
+            );
+        }
+    }
+
+    async getPending(workflowId?: string): Promise<HITLRequest[]> {
+        if (workflowId) {
+            const ids = await this.redis.smembers(
+                `hitl:workflow:${workflowId}`
+            );
+            const requests = await Promise.all(ids.map((id) => this.get(id)));
+            return requests.filter((r): r is HITLRequest => r !== null);
+        }
+
+        // Get all pending (use SCAN in production for large datasets)
+        const keys = await this.redis.keys('hitl:requests:*');
+        const requests = await Promise.all(
+            keys.map(async (key) => {
+                const data = await this.redis.get(key);
+                return data ? JSON.parse(data) : null;
+            })
+        );
+        return requests.filter((r): r is HITLRequest => r !== null);
+    }
+
+    async getResponse(requestId: string): Promise<HITLResponse | null> {
+        const data = await this.redis.get(`hitl:responses:${requestId}`);
+        return data ? JSON.parse(data) : null;
+    }
+
+    async delete(requestId: string): Promise<void> {
+        const request = await this.get(requestId);
+        await this.redis.del(`hitl:requests:${requestId}`);
+        await this.redis.del(`hitl:responses:${requestId}`);
+        if (request) {
+            await this.redis.srem(
+                `hitl:workflow:${request.context.workflowName}`,
+                requestId
+            );
+        }
+    }
+
+    async clear(workflowId?: string): Promise<void> {
+        if (workflowId) {
+            const ids = await this.redis.smembers(
+                `hitl:workflow:${workflowId}`
+            );
+            for (const id of ids) {
+                await this.delete(id);
+            }
+            await this.redis.del(`hitl:workflow:${workflowId}`);
+        } else {
+            // Clear all (use SCAN in production)
+            const keys = await this.redis.keys('hitl:*');
+            if (keys.length > 0) {
+                await this.redis.del(...keys);
+            }
+        }
+    }
+}
+```
+
+### Usage with Persistent Adapter
+
+```typescript
+import { RedisHITLAdapter } from './adapters/redis-hitl';
+import Redis from 'ioredis';
+
+const redis = new Redis(process.env.REDIS_URL);
+const hitlAdapter = new RedisHITLAdapter(redis);
+
+// Resume workflow after process restart
+const pending = await hitlAdapter.getPending('my-workflow');
+for (const request of pending) {
+    // Check if response exists (user may have responded while we were down)
+    const response = await hitlAdapter.getResponse(request.id);
+    if (response) {
+        // Resume workflow with the response
+        await resumeWorkflow(request, response);
+    } else {
+        // Re-show the HITL UI
+        await showApprovalModal(request);
+    }
+}
+```
 
 ## Next Steps
 
