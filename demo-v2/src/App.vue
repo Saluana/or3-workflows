@@ -20,7 +20,7 @@ import {
 
 // Local composables
 import {
-    useWorkflowExecution,
+    useDemoExecution,
     useWorkflowStorage,
     useMobileNav,
     type ChatMessage,
@@ -76,13 +76,13 @@ const {
     load,
 } = useWorkflowStorage();
 
-const { execute: executeWorkflowFn } = useWorkflowExecution();
+const { execute: executeWorkflowFn } = useDemoExecution();
 
 // Edge editing
 const selectedEdge = ref<Edge | null>(null);
 const showEdgeEditor = ref(false);
 
-// API Key
+// API Key (demo-only: avoid storing secrets in localStorage for production)
 const apiKey = ref(localStorage.getItem('or3-api-key') || '');
 const showApiKeyModal = ref(!apiKey.value);
 const tempApiKey = ref('');
