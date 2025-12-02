@@ -97,7 +97,14 @@ Tasks are organized by **work stream** to enable parallel development without fi
 **Priority:** Low  
 **Requirements:** 7.1
 
--   [ ] B.2.1 Extract chat interface to `demo-v2/src/components/ChatInterface.vue`
+> **Note:** This task has been moved to a dedicated spec with detailed phased implementation plan.
+> See: `.kiro/specs/demo-app-refactor/tasks.md`
+
+-   [ ] B.2.1 See `.kiro/specs/demo-app-refactor/` for detailed refactoring plan
+    -   Phase 1: Extract LeftSidebar component
+    -   Phase 2: Extract MobileNav component
+    -   Phase 3: Extract CanvasArea component
+    -   Phase 4: Final cleanup and verification
 -   [ ] B.2.2 Extract workflow manager to `demo-v2/src/components/WorkflowManager.vue`
 -   [ ] B.2.3 Extract settings modal to `demo-v2/src/components/SettingsModal.vue`
 -   [ ] B.2.4 Reduce `App.vue` to under 500 lines
@@ -268,21 +275,21 @@ Tasks are organized by **work stream** to enable parallel development without fi
 **Priority:** Low  
 **Requirements:** 7.2
 
--   [ ] G.1.1 Create `packages/workflow-core/src/types/` directory
--   [ ] G.1.2 Extract execution types to `types/execution.ts`
--   [ ] G.1.3 Extract schema types to `types/schemas.ts`
--   [ ] G.1.4 Extract HITL types to `types/hitl.ts`
--   [ ] G.1.5 Keep `types.ts` as barrel export for backward compatibility
--   [ ] G.1.6 Verify all imports still work
+-   [x] G.1.1 Create `packages/workflow-core/src/types/` directory
+-   [x] G.1.2 Extract execution types to `types/execution.ts`
+-   [x] G.1.3 Extract schema types to `types/schemas.ts`
+-   [x] G.1.4 Extract HITL types to `types/hitl.ts`
+-   [x] G.1.5 Keep `types.ts` as barrel export for backward compatibility
+-   [x] G.1.6 Verify all imports still work
 
 ### G.2 Add Command Validation (Future)
 
 **Priority:** Low  
 **Requirements:** 8.2
 
--   [ ] G.2.1 Audit README claims about command validation
--   [ ] G.2.2 Either implement validation in `CommandManager` or update docs
--   [ ] G.2.3 Add tests for validation behavior
+-   [x] G.2.1 Audit README claims about command validation
+-   [x] G.2.2 Either implement validation in `CommandManager` or update docs
+-   [x] G.2.3 Add tests for validation behavior
 
 ---
 
@@ -322,7 +329,7 @@ Tasks are organized by **work stream** to enable parallel development without fi
 | D.3-D.4 | Core Types    | -     | ✅ D.3 Complete |
 | E.3     | Vue Callbacks | -     | ✅ Complete     |
 | F.2     | Vue Registry  | -     | ✅ Complete     |
-| G.1-G.2 | Code Quality  | TBD   |                 |
+| G.1-G.2 | Code Quality  | TBD   | ✅ Complete     |
 
 ---
 

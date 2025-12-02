@@ -117,8 +117,9 @@ describe('WorkflowEditor Version Tracking', () => {
 
             expect(editor.getEdgeVersion(edgeId)).toBeGreaterThan(0);
 
-            // Delete source node - should also delete connected edge
-            editor.commands.deleteNode(sourceId);
+            // Delete target node (agent) - should also delete connected edge
+            // Note: Cannot delete start node as it would leave workflow invalid
+            editor.commands.deleteNode(targetId);
 
             expect(editor.getEdgeVersion(edgeId)).toBe(0);
         });

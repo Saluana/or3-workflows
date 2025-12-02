@@ -180,6 +180,8 @@ editor.commands.redo();
 editor.commands.commitHistory(); // Force flush pending changes
 ```
 
+Commands return `true` on success and `false` when validation fails (for example, duplicate start nodes or cycles). Use the boolean result to surface errors in your UI.
+
 ### Validation
 
 Validate workflows before execution:

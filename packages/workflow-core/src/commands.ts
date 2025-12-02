@@ -1,6 +1,14 @@
 import { z } from 'zod';
 import { WorkflowEditor } from './editor';
-import { WorkflowNode, WorkflowEdge, NodeData, BaseNodeData } from './types';
+import {
+    WorkflowNode,
+    WorkflowEdge,
+    NodeData,
+    BaseNodeData,
+    type ValidationError,
+    type ValidationErrorCode,
+} from './types';
+import { validateWorkflow } from './validation';
 
 // Validation schemas for command inputs
 const EdgeUpdateSchema = z.object({
@@ -23,6 +31,21 @@ export class CommandManager {
     private editor: WorkflowEditor;
     private historyTimeout: ReturnType<typeof setTimeout> | null = null;
     private pendingHistoryPush = false;
+    private readonly nonBlockingErrors = new Set<ValidationErrorCode>([
+        'DISCONNECTED_NODE',
+        'MISSING_REQUIRED_PORT',
+        'MISSING_MODEL',
+        'MISSING_PROMPT',
+        'MISSING_SUBFLOW_ID',
+        'SUBFLOW_NOT_FOUND',
+        'MISSING_INPUT_MAPPING',
+        'MISSING_OPERATION',
+        'INVALID_LIMIT',
+        'MISSING_CONDITION_PROMPT',
+        'INVALID_MAX_ITERATIONS',
+        'MISSING_BODY',
+        'MISSING_EXIT',
+    ]);
 
     constructor(editor: WorkflowEditor) {
         this.editor = editor;
@@ -54,7 +77,14 @@ export class CommandManager {
             data: data as NodeData,
         };
 
-        this.editor.nodes = [...this.editor.nodes, node];
+        const nextNodes = [...this.editor.nodes, node];
+        const nextEdges = [...this.editor.edges];
+
+        if (!this.isValidChange(nextNodes, nextEdges)) {
+            return false;
+        }
+
+        this.editor.nodes = nextNodes;
         this.editor.incrementNodeVersion(id);
         this.editor.touchMeta();
         this.pushHistory();
@@ -74,11 +104,17 @@ export class CommandManager {
             .filter((e) => e.source === id || e.target === id)
             .map((e) => e.id);
 
-        this.editor.nodes = this.editor.nodes.filter((n) => n.id !== id);
-        // Also delete connected edges
-        this.editor.edges = this.editor.edges.filter(
+        const nextNodes = this.editor.nodes.filter((n) => n.id !== id);
+        const nextEdges = this.editor.edges.filter(
             (e) => e.source !== id && e.target !== id
         );
+
+        if (!this.isValidChange(nextNodes, nextEdges)) {
+            return false;
+        }
+
+        this.editor.nodes = nextNodes;
+        this.editor.edges = nextEdges;
 
         // Clean up version tracking
         this.editor.removeNodeVersion(id);
@@ -110,12 +146,17 @@ export class CommandManager {
             data: { ...node.data, ...result.data },
         };
 
-        this.editor.nodes = [
+        const nextNodes = [
             ...this.editor.nodes.slice(0, idx),
             updatedNode,
             ...this.editor.nodes.slice(idx + 1),
         ];
 
+        if (!this.isValidChange(nextNodes, this.editor.edges)) {
+            return false;
+        }
+
+        this.editor.nodes = nextNodes;
         this.editor.incrementNodeVersion(id);
         this.editor.touchMeta();
         this.debouncedPushHistory();
@@ -137,7 +178,13 @@ export class CommandManager {
             selected: false,
         };
 
-        this.editor.nodes = [...this.editor.nodes, newNode];
+        const nextNodes = [...this.editor.nodes, newNode];
+
+        if (!this.isValidChange(nextNodes, this.editor.edges)) {
+            return false;
+        }
+
+        this.editor.nodes = nextNodes;
         this.editor.incrementNodeVersion(newId);
         this.editor.touchMeta();
         this.pushHistory();
@@ -177,6 +224,16 @@ export class CommandManager {
         sourceHandle?: string,
         targetHandle?: string
     ): boolean {
+        const sourceExists = this.editor.nodes.some((n) => n.id === source);
+        const targetExists = this.editor.nodes.some((n) => n.id === target);
+        if (!sourceExists || !targetExists) {
+            console.warn(
+                'Cannot create edge: source or target node does not exist',
+                { source, target }
+            );
+            return false;
+        }
+
         const id = crypto.randomUUID();
         const edge: WorkflowEdge = {
             id,
@@ -186,7 +243,12 @@ export class CommandManager {
             targetHandle,
         };
 
-        this.editor.edges = [...this.editor.edges, edge];
+        const nextEdges = [...this.editor.edges, edge];
+        if (!this.isValidChange(this.editor.nodes, nextEdges)) {
+            return false;
+        }
+
+        this.editor.edges = nextEdges;
         this.editor.incrementEdgeVersion(id);
         this.editor.touchMeta();
         this.pushHistory();
@@ -200,7 +262,13 @@ export class CommandManager {
         if (index === -1) return false;
 
         const edge = this.editor.edges[index];
-        this.editor.edges = this.editor.edges.filter((e) => e.id !== id);
+        const nextEdges = this.editor.edges.filter((e) => e.id !== id);
+
+        if (!this.isValidChange(this.editor.nodes, nextEdges)) {
+            return false;
+        }
+
+        this.editor.edges = nextEdges;
 
         this.editor.removeEdgeVersion(id);
         this.editor.touchMeta();
@@ -315,6 +383,41 @@ export class CommandManager {
             return true;
         }
         return false;
+    }
+
+    private getErrorKey(error: ValidationError): string {
+        return `${error.code}|${error.nodeId ?? ''}|${error.edgeId ?? ''}`;
+    }
+
+    private isValidChange(
+        nextNodes: WorkflowNode[],
+        nextEdges: WorkflowEdge[],
+        ignoreCodes: Set<ValidationErrorCode> = this.nonBlockingErrors
+    ): boolean {
+        const current = validateWorkflow(this.editor.nodes, this.editor.edges);
+        const next = validateWorkflow(nextNodes, nextEdges);
+
+        const currentBlocking = current.errors.filter(
+            (error) => !ignoreCodes.has(error.code)
+        );
+        const nextBlocking = next.errors.filter(
+            (error) => !ignoreCodes.has(error.code)
+        );
+
+        const currentKeys = new Set(
+            currentBlocking.map((error) => this.getErrorKey(error))
+        );
+
+        const introduced = nextBlocking.filter(
+            (error) => !currentKeys.has(this.getErrorKey(error))
+        );
+
+        if (introduced.length > 0) {
+            console.warn('Command rejected due to validation errors:', introduced);
+            return false;
+        }
+
+        return true;
     }
 
     /**
