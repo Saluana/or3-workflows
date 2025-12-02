@@ -322,7 +322,10 @@ const formatNumber = (value?: number) =>
                     </div>
 
                     <!-- Message with branches (parallel node output) -->
-                    <div v-else-if="msg.branches?.length" class="parallel-branches completed">
+                    <div
+                        v-else-if="msg.branches?.length"
+                        class="parallel-branches completed"
+                    >
                         <div class="branches-header">
                             <svg
                                 viewBox="0 0 24 24"

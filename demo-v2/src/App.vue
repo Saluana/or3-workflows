@@ -626,25 +626,32 @@ async function handleSendMessage() {
                 },
                 // Branch streaming callbacks
                 onBranchStart: (nodeId, branchId, branchLabel) => {
-                    console.log(`[BranchStart] BEFORE - nodeId=${nodeId}, branchId=${branchId}, currentKeys=${Object.keys(branchStreams.value).join(', ') || 'none'}`);
-                    
+                    console.log(
+                        `[BranchStart] BEFORE - nodeId=${nodeId}, branchId=${branchId}, currentKeys=${
+                            Object.keys(branchStreams.value).join(', ') ||
+                            'none'
+                        }`
+                    );
+
                     // Increment execution counter for this node to get a unique instance ID
                     // This ensures each loop iteration gets unique keys
                     if (!parallelExecutionCounter.value[nodeId]) {
                         parallelExecutionCounter.value[nodeId] = 0;
                     }
                     // Check if this is a new execution (first branch of a new batch)
-                    const existingBranches = Object.keys(branchStreams.value).filter(k => 
-                        branchStreams.value[k].nodeId === nodeId
-                    );
+                    const existingBranches = Object.keys(
+                        branchStreams.value
+                    ).filter((k) => branchStreams.value[k].nodeId === nodeId);
                     if (existingBranches.length === 0) {
                         // No active branches for this node, this is a new execution
                         parallelExecutionCounter.value[nodeId]++;
                     }
-                    
+
                     const execInstance = parallelExecutionCounter.value[nodeId];
                     const key = `${nodeId}-${execInstance}-${branchId}`;
-                    console.log(`[BranchStart] AFTER - key=${key}, execInstance=${execInstance}`);
+                    console.log(
+                        `[BranchStart] AFTER - key=${key}, execInstance=${execInstance}`
+                    );
                     branchStreams.value = {
                         ...branchStreams.value,
                         [key]: {
@@ -656,47 +663,59 @@ async function handleSendMessage() {
                             expanded: false,
                             isThinking: false,
                             thinkingContent: '',
-                        }
+                        },
                     };
                 },
                 onBranchToken: (nodeId, branchId, _branchLabel, token) => {
                     // Find the key that matches this node/branch (with any execution instance)
-                    const key = Object.keys(branchStreams.value).find(k => 
-                        branchStreams.value[k].nodeId === nodeId && 
-                        branchStreams.value[k].branchId === branchId
+                    const key = Object.keys(branchStreams.value).find(
+                        (k) =>
+                            branchStreams.value[k].nodeId === nodeId &&
+                            branchStreams.value[k].branchId === branchId
                     );
                     if (key && branchStreams.value[key]) {
                         // Direct mutation is fine for Vue 3 refs
                         branchStreams.value[key].isThinking = false;
                         branchStreams.value[key].content += token;
                     } else {
-                        console.warn(`[BranchToken] No matching branch found for nodeId=${nodeId}, branchId=${branchId}, keys=${Object.keys(branchStreams.value).join(', ')}`);
+                        console.warn(
+                            `[BranchToken] No matching branch found for nodeId=${nodeId}, branchId=${branchId}, keys=${Object.keys(
+                                branchStreams.value
+                            ).join(', ')}`
+                        );
                     }
                 },
                 onBranchReasoning: (nodeId, branchId, _branchLabel, token) => {
-                    const key = Object.keys(branchStreams.value).find(k => 
-                        branchStreams.value[k].nodeId === nodeId && 
-                        branchStreams.value[k].branchId === branchId
+                    const key = Object.keys(branchStreams.value).find(
+                        (k) =>
+                            branchStreams.value[k].nodeId === nodeId &&
+                            branchStreams.value[k].branchId === branchId
                     );
                     if (key && branchStreams.value[key]) {
                         branchStreams.value[key].isThinking = true;
-                        branchStreams.value[key].thinkingContent = 
-                            (branchStreams.value[key].thinkingContent ?? '') + token;
+                        branchStreams.value[key].thinkingContent =
+                            (branchStreams.value[key].thinkingContent ?? '') +
+                            token;
                     }
                 },
                 onBranchComplete: (nodeId, branchId, _branchLabel, output) => {
-                    const key = Object.keys(branchStreams.value).find(k => 
-                        branchStreams.value[k].nodeId === nodeId && 
-                        branchStreams.value[k].branchId === branchId
+                    const key = Object.keys(branchStreams.value).find(
+                        (k) =>
+                            branchStreams.value[k].nodeId === nodeId &&
+                            branchStreams.value[k].branchId === branchId
                     );
-                    console.log(`[BranchComplete] nodeId=${nodeId}, branchId=${branchId}, key=${key}, hasContent=${!!output}`);
+                    console.log(
+                        `[BranchComplete] nodeId=${nodeId}, branchId=${branchId}, key=${key}, hasContent=${!!output}`
+                    );
                     if (key && branchStreams.value[key]) {
                         branchStreams.value[key].content = output;
                         branchStreams.value[key].status = 'completed';
                         branchStreams.value[key].isThinking = false;
                         branchStreams.value[key].thinkingContent = '';
                     } else {
-                        console.warn(`[BranchComplete] No matching branch found!`);
+                        console.warn(
+                            `[BranchComplete] No matching branch found!`
+                        );
                     }
 
                     // Check if all branches for this node are completed
@@ -709,7 +728,9 @@ async function handleSendMessage() {
                             (b) =>
                                 b.status === 'completed' || b.status === 'error'
                         );
-                    console.log(`[BranchComplete] nodeBranches=${nodeBranches.length}, allCompleted=${allCompleted}`);
+                    console.log(
+                        `[BranchComplete] nodeBranches=${nodeBranches.length}, allCompleted=${allCompleted}`
+                    );
 
                     if (allCompleted) {
                         // Add a message with embedded branches to the chat
@@ -734,18 +755,31 @@ async function handleSendMessage() {
 
                         // Clear streaming branches for this node by creating a new object
                         // This ensures Vue reactivity properly tracks the change
-                        const keysToDelete = Object.keys(branchStreams.value).filter(k =>
-                            branchStreams.value[k].nodeId === nodeId
+                        const keysToDelete = Object.keys(
+                            branchStreams.value
+                        ).filter(
+                            (k) => branchStreams.value[k].nodeId === nodeId
                         );
-                        console.log(`[Branches] Deleting keys: ${keysToDelete.join(', ')}`);
+                        console.log(
+                            `[Branches] Deleting keys: ${keysToDelete.join(
+                                ', '
+                            )}`
+                        );
                         const remaining: Record<string, BranchStream> = {};
-                        for (const [k, v] of Object.entries(branchStreams.value)) {
+                        for (const [k, v] of Object.entries(
+                            branchStreams.value
+                        )) {
                             if (!keysToDelete.includes(k)) {
                                 remaining[k] = v;
                             }
                         }
                         branchStreams.value = remaining;
-                        console.log(`[Branches] Remaining keys: ${Object.keys(branchStreams.value).join(', ') || 'none'}`);
+                        console.log(
+                            `[Branches] Remaining keys: ${
+                                Object.keys(branchStreams.value).join(', ') ||
+                                'none'
+                            }`
+                        );
                     }
                 },
             }
