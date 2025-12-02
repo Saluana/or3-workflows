@@ -142,23 +142,25 @@ const emit = defineEmits<{
 }
 
 .mobile-sidebar-btn {
-    width: 40px;
-    height: 40px;
+    width: 48px;
+    height: 48px;
     background: var(--or3-color-accent, #8b5cf6);
     border-color: transparent;
     color: white;
-    box-shadow: 0 2px 8px rgba(139, 92, 246, 0.4);
+    box-shadow: 0 3px 10px rgba(139, 92, 246, 0.5);
+    border-radius: var(--or3-radius-md, 10px);
 }
 
 .mobile-sidebar-btn:hover,
 .mobile-sidebar-btn:active {
     background: var(--or3-color-accent-hover, #7c3aed);
-    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.5);
+    box-shadow: 0 5px 15px rgba(139, 92, 246, 0.6);
+    transform: scale(1.05);
 }
 
 .mobile-sidebar-btn .icon {
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
 }
 
 @media (max-width: 768px) {
@@ -168,6 +170,13 @@ const emit = defineEmits<{
         left: 0;
         right: 0;
         bottom: 60px;
+    }
+    
+    /* Adjust button position on mobile to avoid controls */
+    .mobile-sidebar-btn {
+        bottom: 80px;
+        left: 16px;
+        top: auto;
     }
 }
 </style>

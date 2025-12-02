@@ -194,9 +194,33 @@ const emit = defineEmits<{
         top: 48px;
         bottom: 60px;
         z-index: 150;
-        width: 280px;
-        max-width: 85vw;
-        box-shadow: 4px 0 12px rgba(0, 0, 0, 0.5);
+        width: 300px;
+        max-width: 90vw;
+        box-shadow: 4px 0 16px rgba(0, 0, 0, 0.6);
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    /* Improve scrolling on mobile */
+    .palette-container {
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    /* Make tabs more touch-friendly */
+    .sidebar-tab {
+        padding: var(--or3-spacing-lg, 16px);
+        font-size: var(--or3-text-sm, 13px);
+    }
+    
+    /* Make close button larger on mobile */
+    .sidebar-collapse-btn {
+        width: 36px;
+        height: 36px;
+    }
+    
+    .sidebar-collapse-btn .icon {
+        width: 16px;
+        height: 16px;
     }
 }
 </style>

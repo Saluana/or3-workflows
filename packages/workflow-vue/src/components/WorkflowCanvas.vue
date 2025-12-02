@@ -296,6 +296,36 @@ const onDragOver = (event: DragEvent) => {
     }
 };
 
+// Handle mobile touch drop
+const onMobileNodeDrop = (event: Event) => {
+    const customEvent = event as CustomEvent<{
+        nodeType: string;
+        defaultData: Record<string, unknown>;
+        x: number;
+        y: number;
+    }>;
+
+    const { nodeType, defaultData, x, y } = customEvent.detail;
+    
+    const position = screenToFlowCoordinate({ x, y });
+    props.editor.commands.createNode(nodeType, defaultData, position);
+};
+
+// Setup mobile drop listener
+onMounted(() => {
+    const canvas = document.querySelector('.vue-flow') as HTMLElement;
+    if (canvas) {
+        canvas.addEventListener('mobileNodeDrop', onMobileNodeDrop as EventListener);
+    }
+});
+
+onUnmounted(() => {
+    const canvas = document.querySelector('.vue-flow') as HTMLElement;
+    if (canvas) {
+        canvas.removeEventListener('mobileNodeDrop', onMobileNodeDrop as EventListener);
+    }
+});
+
 // Handle keyboard shortcuts
 const onKeyDown = (event: KeyboardEvent) => {
     // Ignore if in input
