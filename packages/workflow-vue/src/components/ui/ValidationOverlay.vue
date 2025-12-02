@@ -167,7 +167,8 @@ const lastRunLabel = computed(() =>
     position: absolute;
     right: 16px;
     top: 16px;
-    width: 320px;
+    width: min(360px, calc(100vw - 32px));
+    max-height: calc(100vh - 96px);
     background: var(--or3-color-surface, rgba(20, 20, 28, 0.9));
     border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
     border-radius: var(--or3-radius-md, 10px);
@@ -253,6 +254,9 @@ const lastRunLabel = computed(() =>
 
 .collapsible-content:not(.collapsed) .collapsible-inner {
     padding-top: 10px;
+    overflow-y: auto;
+    max-height: min(60vh, 520px);
+    scrollbar-width: thin;
 }
 
 .status-dot {
@@ -378,5 +382,19 @@ const lastRunLabel = computed(() =>
 .meta {
     font-size: 11px;
     color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+}
+
+@media (max-width: 768px) {
+    .validation-overlay {
+        left: 16px;
+        right: 16px;
+        top: 12px;
+        width: auto;
+        max-width: none;
+    }
+
+    .collapsible-content:not(.collapsed) .collapsible-inner {
+        max-height: min(50vh, 420px);
+    }
 }
 </style>

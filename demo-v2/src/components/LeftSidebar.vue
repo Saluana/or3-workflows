@@ -93,6 +93,8 @@ const emit = defineEmits<{
     position: relative;
     transition: width var(--or3-transition-normal, 200ms),
         transform var(--or3-transition-normal, 200ms);
+    height: 100%;
+    min-height: 100%;
 }
 
 .sidebar-header {
@@ -174,6 +176,7 @@ const emit = defineEmits<{
 
 .sidebar-content {
     flex: 1;
+    min-height: 0;
     overflow: hidden;
     display: flex;
     flex-direction: column;

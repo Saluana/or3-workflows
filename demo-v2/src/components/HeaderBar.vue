@@ -382,8 +382,9 @@ function getThemeIcon(): 'sun' | 'moon' | 'system' {
     padding: 0 var(--or3-spacing-lg, 16px);
     background: var(--or3-color-bg-secondary, #111115);
     border-bottom: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
-    gap: var(--or3-spacing-lg, 16px);
-    flex-wrap: wrap;
+    gap: var(--or3-spacing-md, 12px);
+    flex-wrap: nowrap;
+    min-width: 0;
 }
 
 /* Brand Section */
@@ -391,7 +392,7 @@ function getThemeIcon(): 'sun' | 'moon' | 'system' {
     display: flex;
     align-items: center;
     gap: var(--or3-spacing-xl, 24px);
-    flex-shrink: 0;
+    flex: 1 1 0;
     min-width: 0;
 }
 
@@ -430,6 +431,7 @@ function getThemeIcon(): 'sun' | 'moon' | 'system' {
     gap: var(--or3-spacing-sm, 8px);
     flex-wrap: wrap;
     row-gap: var(--or3-spacing-xs, 6px);
+    min-width: 0;
 }
 
 .workflow-name-input,
@@ -472,9 +474,11 @@ function getThemeIcon(): 'sun' | 'moon' | 'system' {
     display: flex;
     align-items: center;
     gap: var(--or3-spacing-xs, 4px);
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: flex-end;
     min-width: 0;
+    overflow-x: auto;
+    padding: 6px 0;
 }
 
 .toolbar-group {
@@ -544,30 +548,20 @@ function getThemeIcon(): 'sun' | 'moon' | 'system' {
 
 @media (max-width: 1100px) {
     .header {
-        align-items: flex-start;
+        align-items: center;
         padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 12px);
-        row-gap: var(--or3-spacing-sm, 8px);
     }
 
     .header-brand {
-        width: 100%;
-        justify-content: space-between;
-    }
-
-    .meta-section {
-        width: 100%;
+        flex: 1 1 auto;
+        justify-content: flex-start;
     }
 
     .header-toolbar {
-        width: 100%;
-        justify-content: space-between;
-        gap: var(--or3-spacing-sm, 8px);
-        overflow-x: auto;
+        flex: 1 1 auto;
+        justify-content: flex-end;
+        gap: var(--or3-spacing-xs, 4px);
         padding-bottom: var(--or3-spacing-2xs, 4px);
-    }
-
-    .toolbar-group {
-        flex-wrap: wrap;
     }
 
     .toolbar-divider {
@@ -725,6 +719,10 @@ function getThemeIcon(): 'sun' | 'moon' | 'system' {
 @media (max-width: 1024px) {
     .meta-section {
         display: none;
+    }
+
+    .header-toolbar {
+        justify-content: flex-end;
     }
 }
 
