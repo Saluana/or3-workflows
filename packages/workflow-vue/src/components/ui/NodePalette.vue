@@ -1,9 +1,29 @@
 <script setup lang="ts">
-import { WorkflowEditor } from '@or3/workflow-core';
+import { onMounted, onUnmounted, ref } from 'vue';
+import { NodeData, WorkflowEditor } from '@or3/workflow-core';
 
 defineProps<{
     editor?: WorkflowEditor;
 }>();
+
+const emit = defineEmits<{
+    (e: 'quick-add'): void;
+}>();
+
+const isMobile = ref(false);
+
+const syncIsMobile = () => {
+    isMobile.value = window.innerWidth <= 768;
+};
+
+onMounted(() => {
+    syncIsMobile();
+    window.addEventListener('resize', syncIsMobile);
+});
+
+onUnmounted(() => {
+    window.removeEventListener('resize', syncIsMobile);
+});
 
 const nodeTypes = [
     {
@@ -110,7 +130,7 @@ const nodeTypes = [
 const onDragStart = (
     event: DragEvent,
     nodeType: string,
-    defaultData: Record<string, unknown>
+    defaultData: NodeData
 ) => {
     if (event.dataTransfer) {
         event.dataTransfer.setData('application/vueflow', nodeType);
@@ -123,12 +143,16 @@ const onDragStart = (
 };
 
 // Touch event handling for mobile devices
-let touchData: { nodeType: string; defaultData: Record<string, unknown> } | null = null;
+let touchData: {
+    nodeType: string;
+    defaultData: NodeData;
+} | null = null;
+let dropFiredFromTouch = false;
 
 const onTouchStart = (
     event: TouchEvent,
     nodeType: string,
-    defaultData: Record<string, unknown>
+    defaultData: NodeData
 ) => {
     touchData = { nodeType, defaultData };
     const target = event.currentTarget as HTMLElement;
@@ -157,9 +181,54 @@ const onTouchEnd = (event: TouchEvent) => {
             },
         });
         canvas.dispatchEvent(customEvent);
+
+        dropFiredFromTouch = true;
+        // Prevent the synthetic click after touchend from double-adding
+        setTimeout(() => {
+            dropFiredFromTouch = false;
+        }, 0);
     }
     
     touchData = null;
+};
+
+const dropNodeOnCanvas = (
+    nodeType: string,
+    defaultData: NodeData
+) => {
+    const canvas = document.querySelector('.vue-flow') as HTMLElement | null;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    const customEvent = new CustomEvent('mobileNodeDrop', {
+        detail: {
+            nodeType,
+            defaultData,
+            x: centerX,
+            y: centerY,
+        },
+    });
+
+    canvas.dispatchEvent(customEvent);
+};
+
+const handleNodeTap = (
+    event: MouseEvent,
+    nodeType: string,
+    defaultData: NodeData
+) => {
+    if (dropFiredFromTouch) {
+        dropFiredFromTouch = false;
+        return;
+    }
+
+    if (!isMobile.value) return;
+    event.preventDefault();
+    dropNodeOnCanvas(nodeType, defaultData);
+    emit('quick-add');
 };
 </script>
 
@@ -188,6 +257,7 @@ const onTouchEnd = (event: TouchEvent) => {
                 @dragstart="onDragStart($event, node.type, node.defaultData)"
                 @touchstart="onTouchStart($event, node.type, node.defaultData)"
                 @touchend="onTouchEnd($event)"
+                @click="handleNodeTap($event, node.type, node.defaultData)"
             >
                 <div
                     class="node-icon"

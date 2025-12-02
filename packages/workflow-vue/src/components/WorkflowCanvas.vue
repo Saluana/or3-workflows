@@ -27,6 +27,8 @@ const props = defineProps<{
     nodeStatuses?: Record<string, 'idle' | 'active' | 'completed' | 'error'>;
 }>();
 
+type CreateNodeData = Parameters<WorkflowEditor['commands']['createNode']>[1];
+
 const emit = defineEmits<{
     (e: 'nodeClick', node: Node): void;
     (e: 'edgeClick', edge: Edge): void;
@@ -300,7 +302,7 @@ const onDragOver = (event: DragEvent) => {
 const onMobileNodeDrop = (event: Event) => {
     const customEvent = event as CustomEvent<{
         nodeType: string;
-        defaultData: Record<string, unknown>;
+        defaultData: CreateNodeData;
         x: number;
         y: number;
     }>;

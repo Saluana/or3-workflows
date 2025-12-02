@@ -5,6 +5,7 @@ import type { Node, Edge } from '@vue-flow/core';
 // Import from our v2 packages
 import {
     type WorkflowData,
+    type NodeData,
     type TokenUsageDetails,
     validateWorkflow,
 } from '@or3/workflow-core';
@@ -514,9 +515,10 @@ async function handleSendMessage() {
         setNodeStatus(n.id, 'idle');
         // Clear iteration data from loop nodes
         if (n.type === 'whileLoop' && editor.value) {
-            editor.value.commands.updateNodeData(n.id, {
-                iteration: null,
-            });
+            editor.value.commands.updateNodeData(
+                n.id,
+                { iteration: null } as unknown as Partial<NodeData>
+            );
         }
     });
 
@@ -621,10 +623,13 @@ async function handleSendMessage() {
                 onLoopIteration: (nodeId, iteration, maxIterations) => {
                     // Update the node data so the WhileLoopNode component can display it
                     if (editor.value) {
-                        editor.value.commands.updateNodeData(nodeId, {
-                            iteration,
-                            maxIterations,
-                        });
+                        editor.value.commands.updateNodeData(
+                            nodeId,
+                            {
+                                iteration,
+                                maxIterations,
+                            } as unknown as Partial<NodeData>
+                        );
                     }
                 },
                 // Branch streaming callbacks
@@ -955,6 +960,7 @@ function syncMetaToEditor() {
                 :is-mobile="isMobile"
                 @update:active-panel="activePanel = $event"
                 @update:collapsed="showLeftSidebar = !$event"
+                @quick-add="showLeftSidebar = false"
             />
 
             <!-- Mobile sidebar backdrop -->
