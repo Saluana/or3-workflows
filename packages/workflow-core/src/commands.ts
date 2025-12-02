@@ -55,6 +55,7 @@ export class CommandManager {
         };
 
         this.editor.nodes = [...this.editor.nodes, node];
+        this.editor.incrementNodeVersion(id);
         this.editor.touchMeta();
         this.pushHistory();
         this.editor.emit('nodeCreate', node);
@@ -67,10 +68,22 @@ export class CommandManager {
         if (index === -1) return false;
 
         const node = this.editor.nodes[index];
+
+        // Track edges being deleted for version cleanup
+        const deletedEdgeIds = this.editor.edges
+            .filter((e) => e.source === id || e.target === id)
+            .map((e) => e.id);
+
         this.editor.nodes = this.editor.nodes.filter((n) => n.id !== id);
         // Also delete connected edges
         this.editor.edges = this.editor.edges.filter(
             (e) => e.source !== id && e.target !== id
+        );
+
+        // Clean up version tracking
+        this.editor.removeNodeVersion(id);
+        deletedEdgeIds.forEach((edgeId) =>
+            this.editor.removeEdgeVersion(edgeId)
         );
 
         this.editor.touchMeta();
@@ -103,6 +116,7 @@ export class CommandManager {
             ...this.editor.nodes.slice(idx + 1),
         ];
 
+        this.editor.incrementNodeVersion(id);
         this.editor.touchMeta();
         this.debouncedPushHistory();
         this.editor.emit('nodeUpdate', updatedNode);
@@ -114,15 +128,17 @@ export class CommandManager {
         const node = this.editor.nodes.find((n) => n.id === id);
         if (!node) return false;
 
+        const newId = crypto.randomUUID();
         const newNode: WorkflowNode = {
             ...node,
-            id: crypto.randomUUID(),
+            id: newId,
             position: { x: node.position.x + 20, y: node.position.y + 20 },
             data: JSON.parse(JSON.stringify(node.data)),
             selected: false,
         };
 
         this.editor.nodes = [...this.editor.nodes, newNode];
+        this.editor.incrementNodeVersion(newId);
         this.editor.touchMeta();
         this.pushHistory();
         this.editor.emit('nodeCreate', newNode);
@@ -146,6 +162,7 @@ export class CommandManager {
             ...this.editor.nodes.slice(idx + 1),
         ];
 
+        this.editor.incrementNodeVersion(id);
         this.editor.touchMeta();
         this.debouncedPushHistory();
         this.editor.emit('nodeUpdate', updatedNode);
@@ -170,6 +187,7 @@ export class CommandManager {
         };
 
         this.editor.edges = [...this.editor.edges, edge];
+        this.editor.incrementEdgeVersion(id);
         this.editor.touchMeta();
         this.pushHistory();
         this.editor.emit('edgeCreate', edge);
@@ -184,6 +202,7 @@ export class CommandManager {
         const edge = this.editor.edges[index];
         this.editor.edges = this.editor.edges.filter((e) => e.id !== id);
 
+        this.editor.removeEdgeVersion(id);
         this.editor.touchMeta();
         this.pushHistory();
         this.editor.emit('edgeDelete', edge);
@@ -219,6 +238,7 @@ export class CommandManager {
             ...this.editor.edges.slice(idx + 1),
         ];
 
+        this.editor.incrementEdgeVersion(id);
         this.editor.touchMeta();
         this.debouncedPushHistory();
         this.editor.emit('edgeUpdate', updatedEdge);
@@ -231,19 +251,43 @@ export class CommandManager {
         const nodeExists = this.editor.nodes.some((n) => n.id === id);
         if (!nodeExists) return false;
 
-        this.editor.nodes = this.editor.nodes.map((n) => ({
-            ...n,
-            selected: n.id === id ? true : additive ? n.selected : false,
-        }));
+        // Track which nodes change selection state
+        const changedNodeIds: string[] = [];
+
+        this.editor.nodes = this.editor.nodes.map((n) => {
+            const newSelected =
+                n.id === id ? true : additive ? n.selected : false;
+            if (n.selected !== newSelected) {
+                changedNodeIds.push(n.id);
+            }
+            return { ...n, selected: newSelected };
+        });
+
+        // Increment versions for changed nodes
+        changedNodeIds.forEach((nodeId) =>
+            this.editor.incrementNodeVersion(nodeId)
+        );
+
         this.editor.emit('selectionUpdate');
         return true;
     }
 
     public deselectAll(): boolean {
-        this.editor.nodes = this.editor.nodes.map((n) => ({
-            ...n,
-            selected: false,
-        }));
+        // Track which nodes change selection state
+        const changedNodeIds: string[] = [];
+
+        this.editor.nodes = this.editor.nodes.map((n) => {
+            if (n.selected) {
+                changedNodeIds.push(n.id);
+            }
+            return { ...n, selected: false };
+        });
+
+        // Increment versions for changed nodes
+        changedNodeIds.forEach((nodeId) =>
+            this.editor.incrementNodeVersion(nodeId)
+        );
+
         this.editor.emit('selectionUpdate');
         return true;
     }

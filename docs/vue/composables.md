@@ -6,115 +6,84 @@ Vue 3 composables for workflow editing, execution, and storage.
 
 The `@or3/workflow-vue` package provides composables that integrate the workflow engine with Vue's reactivity system.
 
-## useEditor
+## useWorkflowEditor
 
-Initialize and manage a WorkflowEditor instance:
+Create and manage a `WorkflowEditor` instance with Vue reactivity:
 
 ```typescript
-import { useEditor } from '@or3/workflow-vue';
+import { useWorkflowEditor } from '@or3/workflow-vue';
 import { StarterKit } from '@or3/workflow-core';
 
-const { editor, isReady } = useEditor({
-    extensions: [StarterKit.configure()],
-    autofocus: true,
-    onCreate: ({ editor }) => {
-        console.log('Editor created');
+const editor = useWorkflowEditor({
+    extensions: StarterKit.configure(),
+    content: {
+        nodes: [{ id: 'start', type: 'start', data: { label: 'Start' } }],
+        edges: [],
+        meta: { version: '2.0.0', name: 'Example' },
     },
     onUpdate: ({ editor }) => {
-        console.log('Workflow updated');
+        console.log('Workflow updated', editor.getJSON());
     },
-});
-
-// Wait for editor to be ready
-watch(isReady, (ready) => {
-    if (ready) {
-        editor.value?.commands.addNode({
-            /* ... */
-        });
-    }
+    onSelectionUpdate: ({ editor }) => {
+        console.log('Selection changed', editor.getSelected());
+    },
 });
 ```
 
 ### Options
 
 ```typescript
-interface UseEditorOptions {
+interface UseWorkflowEditorOptions {
     /** Extensions to load */
-    extensions: Extension[];
+    extensions?: Extension[];
 
     /** Initial workflow data */
     content?: WorkflowData;
-
-    /** Focus on creation */
-    autofocus?: boolean;
-
-    /** Enable/disable editing */
-    editable?: boolean;
-
-    /** Called when editor is created */
-    onCreate?: (props: { editor: WorkflowEditor }) => void;
 
     /** Called on every change */
     onUpdate?: (props: { editor: WorkflowEditor }) => void;
 
     /** Called when selection changes */
     onSelectionUpdate?: (props: { editor: WorkflowEditor }) => void;
-
-    /** Called on validation errors */
-    onValidation?: (errors: ValidationError[]) => void;
-
-    /** Called before destroy */
-    onDestroy?: () => void;
 }
 ```
 
 ### Returns
 
 ```typescript
-interface UseEditorReturn {
-    /** Reactive editor instance */
-    editor: Ref<WorkflowEditor | undefined>;
-
-    /** Whether editor is initialized */
-    isReady: Ref<boolean>;
-}
+type UseWorkflowEditorReturn = import('vue').ShallowRef<WorkflowEditor | null>;
 ```
 
 ### Example
 
 ```vue
 <script setup lang="ts">
-import { useEditor } from '@or3/workflow-vue';
+import { WorkflowCanvas } from '@or3/workflow-vue';
+import { useWorkflowEditor } from '@or3/workflow-vue';
 import { StarterKit } from '@or3/workflow-core';
 
-const { editor, isReady } = useEditor({
-    extensions: [StarterKit.configure()],
-    content: {
-        nodes: [{ id: 'start', type: 'start', data: { label: 'Start' } }],
-    },
-    onUpdate: ({ editor }) => {
-        // Autosave
-        localStorage.setItem('draft', JSON.stringify(editor.getJSON()));
-    },
+const editor = useWorkflowEditor({
+    extensions: StarterKit.configure(),
 });
 
 function addAgent() {
-    editor.value?.commands.addNode({
-        id: crypto.randomUUID(),
-        type: 'agent',
-        data: { label: 'New Agent', model: 'anthropic/claude-sonnet-4' },
-    });
+    editor.value?.commands.createNode(
+        'agent',
+        { label: 'New Agent', model: 'anthropic/claude-3.5-sonnet' },
+        { x: 200, y: 300 }
+    );
 }
 </script>
 
 <template>
-    <div v-if="isReady">
+    <div v-if="editor">
         <WorkflowCanvas :editor="editor" />
         <button @click="addAgent">Add Agent</button>
     </div>
-    <div v-else>Loading...</div>
 </template>
 ```
+
+`useEditor` remains exported as a compatibility alias, but `useWorkflowEditor` is the recommended import.
 
 ---
 
@@ -205,50 +174,32 @@ Execute workflows with reactive state:
 import { useWorkflowExecution } from '@or3/workflow-vue';
 import { OpenRouterExecutionAdapter } from '@or3/workflow-core';
 
-const executor = new OpenRouterExecutionAdapter({
-    apiKey: import.meta.env.VITE_OPENROUTER_API_KEY,
-    defaultModel: 'anthropic/claude-sonnet-4',
-});
-
 const {
     execute,
-    pause,
-    resume,
     stop,
-    state,
-    messages,
-    isExecuting,
-    isPaused,
+    reset,
+    isRunning,
+    currentNodeId,
+    nodeStatuses,
+    nodeOutputs,
     error,
-    hitlRequest,
-    respondToHitl,
-} = useWorkflowExecution(editor, executor);
+    result,
+} = useWorkflowExecution();
 ```
 
-### Options
+### Usage
 
 ```typescript
-const {
-    // ... returns
-} = useWorkflowExecution(editor, executor, {
-    /** Called on each message */
-    onMessage: (message) => {
-        console.log('Message:', message);
-    },
+const adapter = new OpenRouterExecutionAdapter(client, {
+    defaultModel: 'openai/gpt-4o-mini',
+});
 
-    /** Called when execution completes */
-    onComplete: (result) => {
-        console.log('Complete:', result);
+await execute(adapter, workflow, { text: 'Hello' }, {
+    onNodeFinish: (nodeId, output) => {
+        console.log(nodeId, output);
     },
-
-    /** Called on error */
-    onError: (error) => {
-        console.error('Error:', error);
-    },
-
-    /** Called when HITL is required */
-    onHitlRequest: (request) => {
-        console.log('Human input needed:', request);
+    onToken: (_nodeId, token) => {
+        streamingContent.value += token;
     },
 });
 ```
@@ -257,94 +208,79 @@ const {
 
 ```typescript
 interface UseWorkflowExecutionReturn {
-    /** Start execution */
-    execute: (input?: string) => Promise<ExecutionResult>;
-
-    /** Pause execution */
-    pause: () => void;
-
-    /** Resume paused execution */
-    resume: () => void;
-
-    /** Stop execution */
-    stop: () => void;
-
-    /** Current execution state */
-    state: Ref<ExecutionState>;
-
-    /** Accumulated messages */
-    messages: Ref<Message[]>;
-
-    /** Whether executing */
-    isExecuting: ComputedRef<boolean>;
-
-    /** Whether paused (including HITL) */
-    isPaused: ComputedRef<boolean>;
-
-    /** Current error if any */
+    // State
+    isRunning: Ref<boolean>;
+    currentNodeId: Ref<string | null>;
+    nodeStatuses: Ref<Record<string, NodeStatus>>;
+    nodeOutputs: Ref<Record<string, string>>;
     error: Ref<Error | null>;
+    result: Ref<ExecutionResult | null>;
 
-    /** Current HITL request if waiting */
-    hitlRequest: Ref<HitlRequest | null>;
-
-    /** Respond to HITL request */
-    respondToHitl: (response: HitlResponse) => void;
+    // Actions
+    execute: (
+        adapter: ExecutionAdapter,
+        workflow: WorkflowData,
+        input: ExecutionInput,
+        callbacks?: Partial<ExecutionCallbacks>
+    ) => Promise<ExecutionResult>;
+    stop: (adapter: ExecutionAdapter) => void;
+    reset: () => void;
 }
 ```
 
-### Example with HITL
+### Example
 
 ```vue
 <script setup lang="ts">
-import { useWorkflowExecution } from '@or3/workflow-vue';
+import { ref } from 'vue';
+import OpenRouter from '@openrouter/sdk';
+import { OpenRouterExecutionAdapter } from '@or3/workflow-core';
+import { useWorkflowExecution, useWorkflowEditor } from '@or3/workflow-vue';
 
-const { execute, messages, isExecuting, hitlRequest, respondToHitl } =
-    useWorkflowExecution(editor.value!, executor);
+const editor = useWorkflowEditor();
+const {
+    execute,
+    stop,
+    isRunning,
+    nodeStatuses,
+    nodeOutputs,
+    result,
+} = useWorkflowExecution();
 
-const userInput = ref('');
+const streamingContent = ref('');
 
-async function startExecution() {
-    await execute('Hello, help me with my order');
-}
+const client = new OpenRouter({
+    apiKey: import.meta.env.VITE_OPENROUTER_API_KEY,
+});
+const adapter = new OpenRouterExecutionAdapter(client, {
+    defaultModel: 'openai/gpt-4o-mini',
+});
 
-function submitHitlResponse() {
-    if (hitlRequest.value) {
-        respondToHitl({
-            decision: 'approve',
-            feedback: userInput.value,
-        });
-        userInput.value = '';
-    }
+async function run(message: string) {
+    if (!editor.value) return;
+    streamingContent.value = '';
+
+    await execute(adapter, editor.value.getJSON(), { text: message }, {
+        onToken: (_nodeId, token) => {
+            streamingContent.value += token;
+        },
+    });
 }
 </script>
 
 <template>
     <div class="chat-panel">
-        <!-- Messages -->
-        <div v-for="msg in messages" :key="msg.id" class="message">
-            {{ msg.content }}
+        <div v-for="(output, nodeId) in nodeOutputs" :key="nodeId">
+            <strong>{{ nodeId }}</strong>: {{ output }}
         </div>
 
-        <!-- HITL Dialog -->
-        <div v-if="hitlRequest" class="hitl-dialog">
-            <h3>Human Review Required</h3>
-            <p>{{ hitlRequest.message }}</p>
-            <p><strong>Context:</strong> {{ hitlRequest.context }}</p>
-
-            <textarea v-model="userInput" placeholder="Your feedback..." />
-
-            <div class="actions">
-                <button @click="respondToHitl({ decision: 'reject' })">
-                    Reject
-                </button>
-                <button @click="submitHitlResponse">Approve</button>
-            </div>
-        </div>
-
-        <!-- Execute button -->
-        <button @click="startExecution" :disabled="isExecuting">
-            {{ isExecuting ? 'Executing...' : 'Start' }}
+        <button @click="run('Hello')" :disabled="isRunning">
+            {{ isRunning ? 'Executing...' : 'Run' }}
         </button>
+        <button @click="stop(adapter)" :disabled="!isRunning">Stop</button>
+
+        <div class="streaming">{{ streamingContent }}</div>
+        <div v-if="result">Final Output: {{ result.output }}</div>
     </div>
 </template>
 ```
@@ -543,32 +479,30 @@ const { isSelected, isExecuting, hasError, validationErrors } = useNodeState(
 ```vue
 <script setup lang="ts">
 import {
-    useEditor,
+    useWorkflowEditor,
     useWorkflowExecution,
     useWorkflowStorage,
 } from '@or3/workflow-vue';
-import { StarterKit } from '@or3/workflow-core';
+import { StarterKit, LocalStorageAdapter } from '@or3/workflow-core';
 
 // Editor
-const { editor, isReady } = useEditor({
-    extensions: [StarterKit.configure()],
+const editor = useWorkflowEditor({
+    extensions: StarterKit.configure(),
 });
 
-// Execution (only after editor ready)
-const execution = computed(() => {
-    if (!editor.value) return null;
-    return useWorkflowExecution(editor.value, executor);
-});
+// Execution
+const execution = useWorkflowExecution();
 
 // Storage
+const storage = new LocalStorageAdapter();
 const { workflows, save, load } = useWorkflowStorage(storage);
 
 // Autosave on changes
 watch(
     () => editor.value?.getJSON(),
-    debounce((data) => {
+    (data) => {
         if (data) storage.saveAutosave(data);
-    }, 1000),
+    },
     { deep: true }
 );
 </script>

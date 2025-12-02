@@ -26,6 +26,13 @@ export {
     type StorageAdapter,
     type WorkflowSummary,
     type ValidationContext,
+    type LLMProvider,
+    // Tool definition types
+    type ToolDefinition,
+    type ToolFunctionDefinition,
+    type ToolParameterSchema,
+    type ToolCallResult,
+    type ExecutableToolDefinition,
     // Type guards
     isAgentNodeData,
     isRouterNodeData,

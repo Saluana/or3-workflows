@@ -62,8 +62,12 @@ import { validateWorkflow } from './validation';
 // Constants
 // ============================================================================
 
-/** Default model used when no model is specified */
-const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
+/**
+ * Default model used when no model is specified.
+ * This is a reliable, cost-effective model that works well for most use cases.
+ * Can be overridden via ExecutionOptions.defaultModel.
+ */
+const DEFAULT_MODEL = 'openai/gpt-4o-mini';
 
 /** Maximum retry attempts for API calls */
 const DEFAULT_MAX_RETRIES = 2;

@@ -45,10 +45,10 @@ import {
     WorkflowCanvas,
     NodePalette,
     NodeInspector,
-    useEditor,
+    useWorkflowEditor,
 } from '@or3/workflow-vue';
 
-const editor = useEditor();
+const editor = useWorkflowEditor();
 </script>
 
 <template>
@@ -70,24 +70,30 @@ const editor = useEditor();
 ## 4. Execute the Workflow
 
 ```typescript
-import { OpenRouterExecutionAdapter, StarterKit } from '@or3/workflow-core';
+import { OpenRouterExecutionAdapter } from '@or3/workflow-core';
 import OpenRouter from '@openrouter/sdk';
 
 const client = new OpenRouter({ apiKey: 'your-api-key' });
 
-const adapter = new OpenRouterExecutionAdapter({
-    client,
-    extensions: StarterKit.configure(),
-    onNodeStart: (nodeId) => console.log('Started:', nodeId),
-    onNodeComplete: (nodeId) => console.log('Completed:', nodeId),
-    onStreamChunk: (chunk) => process.stdout.write(chunk),
+const adapter = new OpenRouterExecutionAdapter(client, {
+    defaultModel: 'openai/gpt-4o-mini',
+    maxRetries: 2,
 });
 
-const result = await adapter.execute({
-    nodes: editor.nodes,
-    edges: editor.edges,
-    input: 'Hello, how can you help me today?',
-});
+const workflow = editor.getJSON();
+
+const result = await adapter.execute(
+    workflow,
+    { text: 'Hello, how can you help me today?' },
+    {
+        onNodeStart: (nodeId) => console.log('Started:', nodeId),
+        onNodeFinish: (nodeId, output) =>
+            console.log(`Completed ${nodeId}: ${output}`),
+        onNodeError: (nodeId, error) =>
+            console.error(`Error in ${nodeId}`, error),
+        onToken: (nodeId, token) => process.stdout.write(token),
+    }
+);
 
 console.log('Final output:', result.output);
 ```
@@ -118,15 +124,15 @@ import {
     NodePalette,
     NodeInspector,
     ChatPanel,
-    useEditor,
+    useWorkflowEditor,
     useWorkflowExecution,
     useWorkflowStorage,
-    createExecutionState,
 } from '@or3/workflow-vue';
-import { LocalStorageAdapter, StarterKit } from '@or3/workflow-core';
+import OpenRouter from '@openrouter/sdk';
+import { LocalStorageAdapter, StarterKit, OpenRouterExecutionAdapter } from '@or3/workflow-core';
 
 // Editor setup
-const editor = useEditor({
+const editor = useWorkflowEditor({
     extensions: StarterKit.configure({
         agent: { defaultModel: 'openai/gpt-4o-mini' },
     }),
@@ -136,35 +142,41 @@ const editor = useEditor({
 const storage = new LocalStorageAdapter();
 const { save, load } = useWorkflowStorage(storage);
 
-// Execution state
-const executionState = createExecutionState();
-const { execute, stop, isRunning } = useWorkflowExecution();
+// Execution
+const { execute, stop, isRunning, nodeStatuses, result } = useWorkflowExecution();
+const streamingContent = ref('');
+let adapter: OpenRouterExecutionAdapter | null = null;
 
-// API key (use env var in production!)
+// API key (avoid storing in localStorage outside of local demos)
 const apiKey = ref('');
 
 // Handle chat messages
 async function onSendMessage(message: string) {
     if (!editor.value) return;
 
+    const client = new OpenRouter({ apiKey: apiKey.value });
+    adapter = new OpenRouterExecutionAdapter(client, {
+        defaultModel: 'openai/gpt-4o-mini',
+    });
+
+    streamingContent.value = '';
+
     await execute(
-        apiKey.value,
-        editor.value.nodes,
-        editor.value.edges,
-        message,
-        [],
+        adapter,
+        editor.value.getJSON(),
+        { text: message },
         {
-            onNodeStatus: (id, status) => {
-                executionState.nodeStatuses.value[id] = status;
-            },
-            onStreamingContent: (content) => {
-                executionState.streamingContent.value = content;
-            },
-            onAppendContent: (chunk) => {
-                executionState.streamingContent.value += chunk;
+            onToken: (_nodeId, token) => {
+                streamingContent.value += token;
             },
         }
     );
+}
+
+function handleStop() {
+    if (adapter) {
+        stop(adapter);
+    }
 }
 
 // Load autosave on mount
@@ -185,7 +197,7 @@ onMounted(async () => {
         <main class="canvas">
             <WorkflowCanvas
                 :editor="editor"
-                :node-statuses="executionState.nodeStatuses.value"
+                :node-statuses="nodeStatuses.value"
             />
         </main>
 
@@ -194,9 +206,9 @@ onMounted(async () => {
             <ChatPanel
                 :messages="[]"
                 :is-executing="isRunning"
-                :streaming-content="executionState.streamingContent.value"
+                :streaming-content="streamingContent"
                 @send="onSendMessage"
-                @stop="stop"
+                @stop="handleStop"
             />
         </aside>
     </div>
@@ -228,3 +240,8 @@ onMounted(async () => {
 -   [Extensions](./api/extensions.md) - Node extension system
 -   [Execution](./api/execution.md) - Execution adapter
 -   [Theming](./theming.md) - Customize the look
+
+## Security Considerations
+
+-   Avoid persisting API keys in `localStorage` except for local demos. Use environment variables or encrypted server storage instead.
+-   For production apps, proxy OpenRouter requests through a backend service so keys and request signing stay on the server.

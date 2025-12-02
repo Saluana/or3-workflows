@@ -117,39 +117,51 @@ const available = StarterKit.getAvailableExtensions();
 
 ```typescript
 interface NodeExtension {
-    // Required
-    name: string; // Unique identifier
-    type: string; // Node type for serialization
+    // Required fields
+    name: string;
+    type: 'node';
+    inputs: PortDefinition[];
+    outputs: PortDefinition[];
+    defaultData: Record<string, unknown>;
 
     // Optional metadata
-    label?: string; // Display name in UI
-    description?: string; // Tooltip/help text
-    category?: string; // Grouping in palette
+    label?: string;
+    description?: string;
+    category?: string;
+    icon?: string;
 
-    // Port definitions
-    inputs?: PortDefinition[];
-    outputs?: PortDefinition[];
-    getDynamicOutputs?: (node: WorkflowNode) => PortDefinition[];
-
-    // Data
-    defaultData?: Record<string, unknown>;
-    getDefaultData?: () => Record<string, unknown>;
-
-    // Validation
-    validate?: (node: WorkflowNode, edges: WorkflowEdge[]) => ValidationIssue[];
-
-    // Execution
-    execute?: (context: ExecutionContext) => Promise<ExecutionResult>;
-
-    // Lifecycle
+    // Lifecycle and commands
+    addCommands?: () => Record<string, Command>;
     onCreate?: () => void;
     onDestroy?: () => void;
+
+    // Execution (required)
+    execute(
+        context: ExecutionContext,
+        node: WorkflowNode,
+        provider?: LLMProvider
+    ): Promise<NodeExecutionResult>;
+
+    // Validation (required)
+    validate(
+        node: WorkflowNode,
+        edges: WorkflowEdge[],
+        context?: ValidationContext
+    ): (ValidationError | ValidationWarning)[];
+
+    // Optional: dynamic outputs for palette previewing
+    getDynamicOutputs?: (
+        node: WorkflowNode
+    ) => { id: string; label: string }[];
 }
 
 interface PortDefinition {
     id: string;
     label?: string;
-    type?: 'input' | 'output';
+    type: 'input' | 'output';
+    dataType?: 'any' | 'string' | 'object' | 'array';
+    required?: boolean;
+    multiple?: boolean;
 }
 ```
 
@@ -160,17 +172,20 @@ import type {
     NodeExtension,
     WorkflowNode,
     WorkflowEdge,
+    ExecutionContext,
+    ValidationError,
+    ValidationWarning,
 } from '@or3/workflow-core';
 
 export const TransformNodeExtension: NodeExtension = {
     name: 'transform',
-    type: 'transform',
+    type: 'node',
     label: 'Transform',
     description: 'Transform input data using a template',
     category: 'processing',
 
-    inputs: [{ id: 'input', label: 'Input' }],
-    outputs: [{ id: 'output', label: 'Output' }],
+    inputs: [{ id: 'input', type: 'input', label: 'Input' }],
+    outputs: [{ id: 'output', type: 'output', label: 'Output' }],
 
     defaultData: {
         label: 'Transform',
@@ -179,12 +194,12 @@ export const TransformNodeExtension: NodeExtension = {
     },
 
     validate(node: WorkflowNode, edges: WorkflowEdge[]) {
-        const issues = [];
+        const issues: Array<ValidationError | ValidationWarning> = [];
         const data = node.data as { template?: string };
 
         if (!data.template) {
             issues.push({
-                type: 'error' as const,
+                type: 'error',
                 code: 'MISSING_TEMPLATE',
                 message: 'Transform node requires a template',
                 nodeId: node.id,
@@ -195,7 +210,7 @@ export const TransformNodeExtension: NodeExtension = {
         const hasInput = edges.some((e) => e.target === node.id);
         if (!hasInput) {
             issues.push({
-                type: 'warning' as const,
+                type: 'warning',
                 code: 'NO_INPUT',
                 message: 'Transform node has no input connection',
                 nodeId: node.id,
@@ -205,18 +220,17 @@ export const TransformNodeExtension: NodeExtension = {
         return issues;
     },
 
-    async execute(context) {
-        const { node, input } = context;
-        const data = node.data as { template: string; uppercase: boolean };
-
-        let output = data.template.replace('{{input}}', input);
-        if (data.uppercase) {
-            output = output.toUpperCase();
-        }
+    async execute(context: ExecutionContext, node: WorkflowNode) {
+        const data = node.data as { template: string; uppercase?: boolean };
+        const rendered = (data.template || '{{input}}').replace(
+            '{{input}}',
+            context.input
+        );
+        const outgoing = context.getOutgoingEdges(node.id);
 
         return {
-            output,
-            nextNodes: [], // Will be determined by edges
+            output: data.uppercase ? rendered.toUpperCase() : rendered,
+            nextNodes: outgoing.map((edge) => edge.target),
         };
     },
 };
@@ -229,13 +243,13 @@ For nodes like routers that have configurable outputs:
 ```typescript
 export const SwitchNodeExtension: NodeExtension = {
     name: 'switch',
-    type: 'switch',
+    type: 'node',
     label: 'Switch',
 
-    inputs: [{ id: 'input', label: 'Input' }],
+    inputs: [{ id: 'input', type: 'input', label: 'Input' }],
 
     // Base outputs
-    outputs: [{ id: 'default', label: 'Default' }],
+    outputs: [{ id: 'default', type: 'output', label: 'Default' }],
 
     // Dynamic outputs based on node data
     getDynamicOutputs(node) {
@@ -257,7 +271,95 @@ export const SwitchNodeExtension: NodeExtension = {
             { id: 'case-2', label: 'Case 2', condition: '' },
         ],
     },
+
+    validate(node) {
+        const data = node.data as { cases?: Array<{ id: string; label: string }> };
+        if (!data?.cases?.length) return [];
+
+        const missingLabels = data.cases.filter((c) => !c.label);
+        if (missingLabels.length) {
+            return [
+                {
+                    type: 'warning',
+                    code: 'MISSING_EDGE_LABEL',
+                    message: 'Switch cases should include labels',
+                    nodeId: node.id,
+                },
+            ];
+        }
+
+        return [];
+    },
+
+    async execute(context, node) {
+        const data = node.data as { cases?: Array<{ id: string }> };
+        const targetHandleId = data.cases?.[0]?.id ?? 'default';
+        const outgoing = context.getOutgoingEdges(node.id, targetHandleId);
+
+        return {
+            output: context.input,
+            nextNodes: outgoing.map((edge) => edge.target),
+        };
+    },
 };
+```
+
+### Creating a Custom Executable Node
+
+Custom nodes must provide both `validate()` and `execute()`. Register them with the editor **and** the execution registry so validation and runtime can resolve them.
+
+```typescript
+import {
+    WorkflowEditor,
+    registerExtension,
+    type NodeExtension,
+    type WorkflowNode,
+    type WorkflowEdge,
+    type ExecutionContext,
+} from '@or3/workflow-core';
+
+export const EchoNodeExtension: NodeExtension = {
+    name: 'echo',
+    type: 'node',
+    label: 'Echo',
+    category: 'demo',
+
+    inputs: [{ id: 'input', type: 'input', label: 'Input' }],
+    outputs: [{ id: 'next', type: 'output', label: 'Next' }],
+    defaultData: { label: 'Echo' },
+
+    validate(node: WorkflowNode, edges: WorkflowEdge[]) {
+        const outgoing = edges.filter((e) => e.source === node.id);
+        if (!outgoing.length) {
+            return [
+                {
+                    type: 'warning',
+                    code: 'NO_OUTPUT',
+                    message: 'Echo node should connect to at least one target',
+                    nodeId: node.id,
+                },
+            ];
+        }
+        return [];
+    },
+
+    async execute(context: ExecutionContext, node: WorkflowNode) {
+        const outgoing = context.getOutgoingEdges(node.id, 'next');
+        return {
+            output: context.input,
+            nextNodes: outgoing.map((edge) => edge.target),
+        };
+    },
+};
+
+// Editor usage
+const editor = new WorkflowEditor({
+    extensions: [EchoNodeExtension],
+});
+
+// Required until the editor↔execution bridge is available:
+// make the node discoverable by validateWorkflow() and execution adapters.
+registerExtension(EchoNodeExtension);
 ```
 
 ---
@@ -277,7 +379,7 @@ interface ApiNodeOptions {
 
 export const ApiNodeExtension = createConfigurableExtension<ApiNodeOptions>({
     name: 'api',
-    type: 'api',
+    type: 'node',
     label: 'API Call',
 
     // Default options
@@ -293,10 +395,10 @@ export const ApiNodeExtension = createConfigurableExtension<ApiNodeOptions>({
         path: '/',
     },
 
-    inputs: [{ id: 'input', label: 'Input' }],
+    inputs: [{ id: 'input', type: 'input', label: 'Input' }],
     outputs: [
-        { id: 'success', label: 'Success' },
-        { id: 'error', label: 'Error' },
+        { id: 'success', type: 'output', label: 'Success' },
+        { id: 'error', type: 'output', label: 'Error' },
     ],
 
     async execute(context) {
@@ -310,14 +412,16 @@ export const ApiNodeExtension = createConfigurableExtension<ApiNodeOptions>({
                 signal: AbortSignal.timeout(options.timeout),
             });
 
+            const outgoing = context.getOutgoingEdges(node.id, 'success');
             return {
                 output: await response.text(),
-                nextHandleId: 'success',
+                nextNodes: outgoing.map((edge) => edge.target),
             };
         } catch (error) {
+            const outgoing = context.getOutgoingEdges(node.id, 'error');
             return {
-                output: error.message,
-                nextHandleId: 'error',
+                output: (error as Error).message,
+                nextNodes: outgoing.map((edge) => edge.target),
             };
         }
     },
@@ -363,8 +467,8 @@ Entry point for workflow execution. Every workflow needs exactly one.
 ```typescript
 {
   name: 'start',
-  type: 'start',
-  outputs: [{ id: 'output', label: 'Start' }],
+  type: 'node',
+  outputs: [{ id: 'output', type: 'output', label: 'Start' }],
   defaultData: { label: 'Start' },
 }
 ```
@@ -376,11 +480,11 @@ LLM-powered node for AI processing.
 ```typescript
 {
   name: 'agent',
-  type: 'agent',
-  inputs: [{ id: 'input' }],
+  type: 'node',
+  inputs: [{ id: 'input', type: 'input' }],
   outputs: [
-    { id: 'output', label: 'Output' },
-    { id: 'error', label: 'Error' },
+    { id: 'output', type: 'output', label: 'Output' },
+    { id: 'error', type: 'output', label: 'Error' },
   ],
   defaultData: {
     label: 'Agent',
@@ -399,9 +503,13 @@ Routes execution based on LLM classification.
 ```typescript
 {
   name: 'router',
-  type: 'router',
-  inputs: [{ id: 'input' }],
-  // Dynamic outputs based on routes
+  type: 'node',
+  inputs: [{ id: 'input', type: 'input' }],
+  outputs: [
+    { id: 'route-1', type: 'output', label: 'Route 1' },
+    { id: 'route-2', type: 'output', label: 'Route 2' },
+    { id: 'error', type: 'output', label: 'Error' },
+  ],
   defaultData: {
     label: 'Router',
     routes: [
@@ -419,9 +527,12 @@ Executes multiple branches concurrently.
 ```typescript
 {
   name: 'parallel',
-  type: 'parallel',
-  inputs: [{ id: 'input' }],
-  // Dynamic outputs based on branches
+  type: 'node',
+  inputs: [{ id: 'input', type: 'input' }],
+  outputs: [
+    { id: 'branch-1', type: 'output', label: 'Branch 1' },
+    { id: 'branch-2', type: 'output', label: 'Branch 2' },
+  ],
   defaultData: {
     label: 'Parallel',
     branches: [
@@ -440,11 +551,11 @@ Iterative execution with LLM-evaluated condition.
 ```typescript
 {
   name: 'whileLoop',
-  type: 'whileLoop',
-  inputs: [{ id: 'input' }],
+  type: 'node',
+  inputs: [{ id: 'input', type: 'input' }],
   outputs: [
-    { id: 'body', label: 'Loop Body' },
-    { id: 'done', label: 'Exit' },
+    { id: 'body', type: 'output', label: 'Loop Body' },
+    { id: 'done', type: 'output', label: 'Exit' },
   ],
   defaultData: {
     label: 'While Loop',
@@ -462,9 +573,9 @@ Query or store workflow memory.
 ```typescript
 {
   name: 'memory',
-  type: 'memory',
-  inputs: [{ id: 'input' }],
-  outputs: [{ id: 'output' }],
+  type: 'node',
+  inputs: [{ id: 'input', type: 'input' }],
+  outputs: [{ id: 'output', type: 'output' }],
   defaultData: {
     label: 'Memory',
     operation: 'query', // 'query' | 'store'
@@ -481,11 +592,11 @@ Execute registered tools/functions.
 ```typescript
 {
   name: 'tool',
-  type: 'tool',
-  inputs: [{ id: 'input' }],
+  type: 'node',
+  inputs: [{ id: 'input', type: 'input' }],
   outputs: [
-    { id: 'output', label: 'Output' },
-    { id: 'error', label: 'Error' },
+    { id: 'output', type: 'output', label: 'Output' },
+    { id: 'error', type: 'output', label: 'Error' },
   ],
   defaultData: {
     label: 'Tool',
@@ -502,11 +613,11 @@ Execute a nested workflow.
 ```typescript
 {
   name: 'subflow',
-  type: 'subflow',
-  inputs: [{ id: 'input' }],
+  type: 'node',
+  inputs: [{ id: 'input', type: 'input' }],
   outputs: [
-    { id: 'output', label: 'Output' },
-    { id: 'error', label: 'Error' },
+    { id: 'output', type: 'output', label: 'Output' },
+    { id: 'error', type: 'output', label: 'Error' },
   ],
   defaultData: {
     label: 'Subflow',
@@ -524,8 +635,8 @@ Terminal node that formats the final result.
 ```typescript
 {
   name: 'output',
-  type: 'output',
-  inputs: [{ id: 'input' }],
+  type: 'node',
+  inputs: [{ id: 'input', type: 'input' }],
   outputs: [], // Terminal node
   defaultData: {
     label: 'Output',
@@ -545,7 +656,18 @@ Extensions can hook into the editor lifecycle:
 ```typescript
 const MyExtension: NodeExtension = {
     name: 'myExtension',
-    type: 'custom',
+    type: 'node',
+    inputs: [],
+    outputs: [],
+    defaultData: {},
+
+    async execute() {
+        return { output: '', nextNodes: [] };
+    },
+
+    validate() {
+        return [];
+    },
 
     onCreate() {
         // Called when extension is registered
@@ -582,6 +704,8 @@ editor.extensions.has('myExtension'); // true
 const ext = editor.extensions.get('myExtension');
 ```
 
+> Until the editor-to-execution bridge ships, also call `registerExtension(MyExtension)` from `@or3/workflow-core` so validation and execution adapters can resolve custom nodes.
+
 ---
 
 ## Best Practices
@@ -609,7 +733,18 @@ interface MyNodeData {
 
 const MyExtension: NodeExtension = {
     name: 'myNode',
-    type: 'myNode',
+    type: 'node',
+    inputs: [{ id: 'input', type: 'input' }],
+    outputs: [{ id: 'output', type: 'output' }],
+    defaultData: { label: 'My Node', value: 0, enabled: true },
+
+    async execute(context, node) {
+        const outgoing = context.getOutgoingEdges(node.id, 'output');
+        return {
+            output: context.input,
+            nextNodes: outgoing.map((edge) => edge.target),
+        };
+    },
 
     validate(node) {
         const data = node.data as MyNodeData;

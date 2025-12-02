@@ -75,12 +75,12 @@ import {
     WorkflowCanvas,
     NodePalette,
     NodeInspector,
-    useEditor,
+    useWorkflowEditor,
 } from '@or3/workflow-vue';
 import type { WorkflowData } from '@or3/workflow-core';
 
 // Create the editor instance
-const editor = useEditor();
+const editor = useWorkflowEditor();
 
 // Load a workflow
 const workflow: WorkflowData = {
@@ -327,24 +327,32 @@ Executes a specific tool/function and passes results downstream.
 The demo includes a full execution engine using OpenRouter:
 
 ```typescript
-import { OpenRouterExecutionAdapter } from '@or3/workflow-core';
+import OpenRouter from '@openrouter/sdk';
+import {
+    OpenRouterExecutionAdapter,
+    type WorkflowData,
+} from '@or3/workflow-core';
 
-const adapter = new OpenRouterExecutionAdapter({
-    apiKey: process.env.OPENROUTER_API_KEY!,
-    extensions: StarterKit.configure(),
-    onNodeStart: (nodeId) => setNodeStatus(nodeId, 'active'),
-    onNodeComplete: (nodeId, result) => setNodeStatus(nodeId, 'completed'),
-    onNodeError: (nodeId, error) => setNodeStatus(nodeId, 'error'),
-    onStreamChunk: (chunk) => appendContent(chunk),
-    onHITLRequest: async (request) => showApprovalModal(request),
+const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY! });
+const adapter = new OpenRouterExecutionAdapter(client, {
+    defaultModel: 'openai/gpt-4o-mini',
 });
 
-const result = await adapter.execute({
-    nodes,
-    edges,
-    input: userMessage,
-    conversationHistory,
-});
+const workflow: WorkflowData = /* editor.getJSON() or saved workflow */;
+const userMessage = 'Hello, how can you help me today?';
+
+const result = await adapter.execute(
+    workflow,
+    { text: userMessage },
+    {
+        onNodeStart: (nodeId) => console.log('Started:', nodeId),
+        onNodeFinish: (nodeId, output) =>
+            console.log(`Finished ${nodeId}: ${output}`),
+        onNodeError: (nodeId, error) =>
+            console.error(`Error in ${nodeId}`, error),
+        onToken: (_nodeId, token) => process.stdout.write(token),
+    }
+);
 ```
 
 ## Human-in-the-Loop (HITL)
@@ -352,13 +360,15 @@ const result = await adapter.execute({
 Pause workflow execution for human review, approval, or input:
 
 ```typescript
-import { OpenRouterExecutionAdapter } from '@or3/workflow-core';
-import type { HITLRequest, HITLResponse, HITLAction } from '@or3/workflow-core';
+import OpenRouter from '@openrouter/sdk';
+import {
+    OpenRouterExecutionAdapter,
+    type HITLRequest,
+    type HITLResponse,
+} from '@or3/workflow-core';
 
-const adapter = new OpenRouterExecutionAdapter({
-    apiKey,
-    extensions: StarterKit.configure(),
-
+const client = new OpenRouter({ apiKey });
+const adapter = new OpenRouterExecutionAdapter(client, {
     // Handle HITL requests
     onHITLRequest: async (request: HITLRequest): Promise<HITLResponse> => {
         // Show modal to user, wait for response
@@ -393,16 +403,15 @@ const node = {
 Automatically summarize conversation history when approaching token limits:
 
 ```typescript
+import OpenRouter from '@openrouter/sdk';
 import {
     OpenRouterExecutionAdapter,
     ApproximateTokenCounter,
 } from '@or3/workflow-core';
 
-const adapter = new OpenRouterExecutionAdapter({
-    apiKey,
-    extensions: StarterKit.configure(),
+const client = new OpenRouter({ apiKey });
+const adapter = new OpenRouterExecutionAdapter(client, {
     tokenCounter: new ApproximateTokenCounter(),
-
     compaction: {
         enabled: true,
         maxTokens: 100000, // When to trigger
@@ -562,7 +571,7 @@ or3-workflows/
 │   │
 │   └── workflow-vue/      # Vue 3 components
 │       ├── src/
-│       │   ├── composables/   # useEditor, useExecutionState
+│       │   ├── composables/   # useWorkflowEditor, useExecutionState
 │       │   └── components/
 │       │       ├── WorkflowCanvas.vue
 │       │       ├── nodes/     # Node renderers

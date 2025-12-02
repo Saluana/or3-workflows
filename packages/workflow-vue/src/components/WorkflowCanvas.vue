@@ -40,46 +40,47 @@ const { onConnect, onNodeDragStop, screenToFlowCoordinate, fitView } =
 const nodes = ref<Node[]>([]);
 const edges = ref<Edge[]>([]);
 
-// Cache for comparing changes
+// Cache for comparing changes using version-based fingerprints
+// This is O(1) per node/edge instead of O(n) with JSON.stringify
 let lastNodeMap = new Map<string, string>();
 let lastEdgeMap = new Map<string, string>();
+let lastGlobalVersion = -1;
 
 /**
  * Create a fingerprint of a node for comparison.
- * Only includes properties that affect rendering.
+ * Uses version counter from editor for O(1) comparison instead of JSON.stringify.
+ * The fingerprint includes: version (captures all data changes) + status (from props)
  */
-const getNodeFingerprint = (n: any, status: string): string => {
-    return JSON.stringify({
-        type: n.type,
-        position: n.position,
-        data: n.data,
-        selected: n.selected,
-        status,
-    });
+const getNodeFingerprint = (nodeId: string, status: string): string => {
+    const version = props.editor.getNodeVersion(nodeId);
+    return `${version}:${status}`;
 };
 
 /**
  * Create a fingerprint of an edge for comparison.
+ * Uses version counter from editor for O(1) comparison instead of JSON.stringify.
+ * The fingerprint includes: version (captures all data changes) + animated state
  */
-const getEdgeFingerprint = (e: any, animated: boolean): string => {
-    return JSON.stringify({
-        source: e.source,
-        target: e.target,
-        sourceHandle: e.sourceHandle,
-        targetHandle: e.targetHandle,
-        label: e.label,
-        data: e.data,
-        animated,
-    });
+const getEdgeFingerprint = (edgeId: string, animated: boolean): string => {
+    const version = props.editor.getEdgeVersion(edgeId);
+    return `${version}:${animated}`;
 };
 
 /**
  * Sync from editor using diffing to minimize re-renders.
+ * Uses version-based comparison for O(1) per-node/edge change detection.
  * Only updates nodes/edges that have actually changed.
  */
 const syncFromEditor = () => {
     const editorNodes = props.editor.getNodes();
     const editorEdges = props.editor.getEdges();
+    const currentGlobalVersion = props.editor.getGlobalVersion();
+
+    // Quick check: if global version hasn't changed and no status changes, skip entirely
+    // This is the fast path for most renders
+    if (lastGlobalVersion === currentGlobalVersion && !props.nodeStatuses) {
+        return;
+    }
 
     const newNodeMap = new Map<string, string>();
     const newEdgeMap = new Map<string, string>();
@@ -101,11 +102,11 @@ const syncFromEditor = () => {
         }
     }
 
-    // Check for changed nodes
+    // Check for changed nodes using version-based fingerprints (O(1) per node)
     if (!nodesChanged) {
         for (const n of editorNodes) {
             const status = props.nodeStatuses?.[n.id] || 'idle';
-            const fingerprint = getNodeFingerprint(n, status);
+            const fingerprint = getNodeFingerprint(n.id, status);
             newNodeMap.set(n.id, fingerprint);
 
             if (lastNodeMap.get(n.id) !== fingerprint) {
@@ -131,7 +132,7 @@ const syncFromEditor = () => {
         lastNodeMap = new Map();
         for (const n of editorNodes) {
             const status = props.nodeStatuses?.[n.id] || 'idle';
-            lastNodeMap.set(n.id, getNodeFingerprint(n, status));
+            lastNodeMap.set(n.id, getNodeFingerprint(n.id, status));
         }
     }
 
@@ -152,13 +153,13 @@ const syncFromEditor = () => {
         }
     }
 
-    // Check for changed edges
+    // Check for changed edges using version-based fingerprints (O(1) per edge)
     if (!edgesChanged) {
         for (const e of editorEdges) {
             const animated =
                 props.nodeStatuses?.[e.source] === 'active' ||
                 props.nodeStatuses?.[e.target] === 'active';
-            const fingerprint = getEdgeFingerprint(e, animated);
+            const fingerprint = getEdgeFingerprint(e.id, animated);
             newEdgeMap.set(e.id, fingerprint);
 
             if (lastEdgeMap.get(e.id) !== fingerprint) {
@@ -188,9 +189,12 @@ const syncFromEditor = () => {
             const animated =
                 props.nodeStatuses?.[e.source] === 'active' ||
                 props.nodeStatuses?.[e.target] === 'active';
-            lastEdgeMap.set(e.id, getEdgeFingerprint(e, animated));
+            lastEdgeMap.set(e.id, getEdgeFingerprint(e.id, animated));
         }
     }
+
+    // Update global version cache
+    lastGlobalVersion = currentGlobalVersion;
 };
 
 // Watch for nodeStatuses changes to update node visuals during execution

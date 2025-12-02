@@ -1,5 +1,11 @@
 import type { OpenRouter } from '@openrouter/sdk';
-import type { LLMProvider, ChatMessage, ModelCapabilities } from '../types';
+import type {
+    LLMProvider,
+    ChatMessage,
+    ModelCapabilities,
+    ToolDefinition,
+    ToolCallResult,
+} from '../types';
 
 /** Streaming response chunk from OpenRouter */
 interface StreamChunk {
@@ -46,8 +52,12 @@ export class OpenRouterLLMProvider implements LLMProvider {
         options?: {
             temperature?: number;
             maxTokens?: number;
-            tools?: any[];
-            toolChoice?: any;
+            tools?: ToolDefinition[];
+            toolChoice?:
+                | 'auto'
+                | 'none'
+                | 'required'
+                | { type: 'function'; function: { name: string } };
             responseFormat?: { type: 'json_object' | 'text' };
             onToken?: (token: string) => void;
             onReasoning?: (token: string) => void;
@@ -55,7 +65,7 @@ export class OpenRouterLLMProvider implements LLMProvider {
         }
     ): Promise<{
         content: string | null;
-        toolCalls?: any[];
+        toolCalls?: ToolCallResult[];
         usage?: {
             promptTokens: number;
             completionTokens: number;
@@ -74,7 +84,7 @@ export class OpenRouterLLMProvider implements LLMProvider {
         })) as AsyncIterable<StreamChunk>;
 
         let content = '';
-        const toolCallsMap = new Map<number, any>();
+        const toolCallsMap = new Map<number, ToolCallResult>();
 
         // We need to handle cancellation if signal is provided.
         // However, the OpenRouter SDK doesn't seem to accept a signal in `send`.
@@ -113,16 +123,15 @@ export class OpenRouterLLMProvider implements LLMProvider {
                     if (!toolCallsMap.has(index)) {
                         toolCallsMap.set(index, {
                             id: toolCall.id || '',
-                            type: toolCall.type || 'function',
+                            type: 'function' as const,
                             function: {
                                 name: toolCall.function?.name || '',
                                 arguments: toolCall.function?.arguments || '',
                             },
                         });
                     } else {
-                        const current = toolCallsMap.get(index);
+                        const current = toolCallsMap.get(index)!;
                         if (toolCall.id) current.id = toolCall.id;
-                        if (toolCall.type) current.type = toolCall.type;
                         // Tool names should replace, not concatenate - they're sent once
                         if (toolCall.function?.name)
                             current.function.name = toolCall.function.name;

@@ -223,7 +223,7 @@ function registerDemoTools() {
     demoToolsRegistered = true;
 }
 
-export function useWorkflowExecution() {
+export function useDemoExecution() {
     const {
         execute: coreExecute,
         stop,

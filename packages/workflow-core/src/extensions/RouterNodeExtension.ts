@@ -10,6 +10,7 @@ import type {
     ValidationError,
     ValidationWarning,
     ChatMessage,
+    ToolDefinition,
 } from '../types';
 import { estimateTokenUsage } from '../compaction';
 
@@ -152,9 +153,9 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
 - Use the 'select_route' tool to make your decision.`;
 
         // Define the tool for route selection
-        const tools = [
+        const tools: ToolDefinition[] = [
             {
-                type: 'function',
+                type: 'function' as const,
                 function: {
                     name: 'select_route',
                     description:

@@ -1,9 +1,9 @@
 export {
-    useWorkflowExecution,
+    useDemoExecution,
     type ChatMessage,
     type ExecutionCallbacks,
     type BranchStream,
     type BranchData,
-} from './useWorkflowExecution';
+} from './useDemoExecution';
 export { useWorkflowStorage, type SavedWorkflow } from './useWorkflowStorage';
 export { useMobileNav } from './useMobileNav';

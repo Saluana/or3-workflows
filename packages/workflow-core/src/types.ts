@@ -448,6 +448,95 @@ export interface Extension {
     onDestroy?: () => void;
 }
 
+// ============================================================================
+// Tool Definition Types
+// ============================================================================
+
+/**
+ * Parameter schema for a tool function.
+ * Follows JSON Schema format for defining parameter types and constraints.
+ * Uses a flexible structure to support various parameter definitions.
+ */
+export interface ToolParameterSchema {
+    /** Must be 'object' for function parameters */
+    type: 'object';
+    /** Property definitions for each parameter */
+    properties?: Record<string, Record<string, unknown>>;
+    /** List of required parameter names */
+    required?: string[];
+    /** Whether to allow additional properties not defined in the schema */
+    additionalProperties?: boolean;
+    /** Allow additional JSON Schema properties */
+    [key: string]: unknown;
+}
+
+/**
+ * Definition of a function that can be called by the LLM.
+ * Follows OpenAI's function calling format.
+ */
+export interface ToolFunctionDefinition {
+    /** The name of the function (must be a-z, A-Z, 0-9, underscores, max 64 chars) */
+    name: string;
+    /** A description of what the function does */
+    description?: string;
+    /** The parameters the function accepts */
+    parameters?: ToolParameterSchema | Record<string, unknown>;
+}
+
+/**
+ * OpenAI-compatible tool definition.
+ * Used by LLM providers to enable function calling capabilities.
+ *
+ * @example
+ * ```typescript
+ * const weatherTool: ToolDefinition = {
+ *     type: 'function',
+ *     function: {
+ *         name: 'get_weather',
+ *         description: 'Get the current weather for a location',
+ *         parameters: {
+ *             type: 'object',
+ *             properties: {
+ *                 location: {
+ *                     type: 'string',
+ *                     description: 'The city and state, e.g. San Francisco, CA'
+ *                 },
+ *                 unit: {
+ *                     type: 'string',
+ *                     enum: ['celsius', 'fahrenheit'],
+ *                     description: 'Temperature unit'
+ *                 }
+ *             },
+ *             required: ['location']
+ *         }
+ *     }
+ * };
+ * ```
+ */
+export interface ToolDefinition {
+    /** The type of tool - currently only 'function' is supported */
+    type: 'function';
+    /** The function definition */
+    function: ToolFunctionDefinition;
+}
+
+/**
+ * Result of a tool call made by the LLM.
+ */
+export interface ToolCallResult {
+    /** Unique identifier for this tool call */
+    id: string;
+    /** The type of tool called */
+    type: 'function';
+    /** The function call details */
+    function: {
+        /** Name of the function that was called */
+        name: string;
+        /** JSON string of the arguments passed to the function */
+        arguments: string;
+    };
+}
+
 /**
  * Interface for an LLM Provider.
  * Abstracts the underlying LLM client (OpenRouter, OpenAI, Anthropic, etc.)
@@ -462,8 +551,14 @@ export interface LLMProvider {
         options?: {
             temperature?: number;
             maxTokens?: number;
-            tools?: any[]; // TODO: Define strict tool types
-            toolChoice?: any; // Allow tool choice configuration
+            /** Tool definitions for function calling */
+            tools?: ToolDefinition[];
+            /** Control tool selection behavior */
+            toolChoice?:
+                | 'auto'
+                | 'none'
+                | 'required'
+                | { type: 'function'; function: { name: string } };
             responseFormat?: { type: 'json_object' | 'text' };
             onToken?: (token: string) => void;
             onReasoning?: (token: string) => void;
@@ -471,7 +566,7 @@ export interface LLMProvider {
         }
     ): Promise<{
         content: string | null;
-        toolCalls?: any[];
+        toolCalls?: ToolCallResult[];
         usage?: {
             promptTokens: number;
             completionTokens: number;
@@ -1218,15 +1313,13 @@ export interface ExecutionOptions {
     onMaxToolIterations?: 'warning' | 'error' | 'hitl';
 }
 
-/** Tool definition in OpenRouter/OpenAI format */
-export interface ToolDefinition {
-    type: 'function';
-    function: {
-        name: string;
-        description?: string;
-        parameters: Record<string, any>;
-    };
-    handler?: (args: any) => Promise<string> | string;
+/**
+ * Tool definition with handler for execution context.
+ * Extends the base ToolDefinition with an optional handler function.
+ */
+export interface ExecutableToolDefinition extends ToolDefinition {
+    /** Handler function to execute when the tool is called */
+    handler?: (args: unknown) => Promise<string> | string;
 }
 
 /** Context passed to node executors during execution */
@@ -1296,8 +1389,8 @@ export interface ExecutionContext {
     subflowDepth?: number;
     /** Maximum subflow nesting depth (from ExecutionOptions) */
     maxSubflowDepth?: number;
-    /** Global tools available to all agents */
-    tools?: ToolDefinition[];
+    /** Global tools available to all agents (with handlers for execution) */
+    tools?: ExecutableToolDefinition[];
     /** Maximum tool call iterations (from node or global options) */
     maxToolIterations?: number;
     /** Behavior when max tool iterations is reached */

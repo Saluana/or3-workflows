@@ -17,6 +17,13 @@ export {
 } from './composables/useExecutionState';
 export { useNodeState } from './composables/useNodeState';
 
+// Node Component Registry
+export {
+    createNodeRegistry,
+    defaultNodeRegistry,
+    type NodeComponentRegistry,
+} from './nodeRegistry';
+
 // Core components
 export { default as WorkflowCanvas } from './components/WorkflowCanvas.vue';
 export { default as NodePalette } from './components/ui/NodePalette.vue';

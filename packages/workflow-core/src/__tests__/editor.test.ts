@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { WorkflowEditor, createWorkflowEditor } from '../editor';
+import { extensionRegistry } from '../execution';
 import type { WorkflowData, NodeExtension } from '../types';
 
 // Sample workflow for testing
@@ -47,9 +48,20 @@ const mockExtension: NodeExtension = {
     addCommands: () => ({
         customCommand: () => true,
     }),
-    execute: async () => ({ success: true, output: {} }),
+    execute: async () => ({ output: 'test output', nextNodes: [] }),
     validate: () => [],
 };
+
+// Create a fresh mock extension for each test that needs to verify registration
+const createMockNodeExtension = (name: string): NodeExtension => ({
+    name,
+    type: 'node',
+    inputs: [{ id: 'input', type: 'input' }],
+    outputs: [{ id: 'output', type: 'output' }],
+    defaultData: { label: name },
+    execute: async () => ({ output: 'test', nextNodes: [] }),
+    validate: () => [],
+});
 
 describe('WorkflowEditor', () => {
     let editor: WorkflowEditor;
@@ -470,6 +482,138 @@ describe('WorkflowEditor', () => {
             const workflow = createTestWorkflow();
             const editor = createWorkflowEditor({ content: workflow });
             expect(editor.nodes).toHaveLength(2);
+        });
+    });
+
+    describe('extension bridge to execution registry', () => {
+        afterEach(() => {
+            // Clean up test extensions from the global registry
+            extensionRegistry.delete('testCustomNode');
+            extensionRegistry.delete('testBridgeNode');
+        });
+
+        it('should register NodeExtension with global execution registry', () => {
+            const customExtension = createMockNodeExtension('testCustomNode');
+
+            // Verify it's not in the registry before
+            expect(extensionRegistry.has('testCustomNode')).toBe(false);
+
+            editor.registerExtension(customExtension);
+
+            // Should be in both editor and global registry
+            expect(editor.extensions.has('testCustomNode')).toBe(true);
+            expect(extensionRegistry.has('testCustomNode')).toBe(true);
+            expect(extensionRegistry.get('testCustomNode')).toBe(
+                customExtension
+            );
+        });
+
+        it('should not register behavior extensions to execution registry', () => {
+            const behaviorExtension = {
+                name: 'testBehavior',
+                type: 'behavior' as const,
+                addCommands: () => ({}),
+            };
+
+            editor.registerExtension(behaviorExtension);
+
+            // Should be in editor but NOT in global registry
+            expect(editor.extensions.has('testBehavior')).toBe(true);
+            expect(extensionRegistry.has('testBehavior')).toBe(false);
+        });
+
+        it('should bridge extension for use in validation and execution', () => {
+            const customExtension = createMockNodeExtension('testBridgeNode');
+            editor.registerExtension(customExtension);
+
+            // Get the extension from global registry
+            const registeredExtension = extensionRegistry.get('testBridgeNode');
+
+            expect(registeredExtension).toBeDefined();
+            expect(registeredExtension?.execute).toBe(customExtension.execute);
+            expect(registeredExtension?.validate).toBe(
+                customExtension.validate
+            );
+        });
+    });
+
+    describe('lifecycle hooks', () => {
+        it('should call onUpdate callback when update event is emitted', () => {
+            const onUpdate = vi.fn();
+            const editor = new WorkflowEditor({ onUpdate });
+
+            editor.emit('update');
+
+            expect(onUpdate).toHaveBeenCalledTimes(1);
+            expect(onUpdate).toHaveBeenCalledWith({ editor });
+        });
+
+        it('should call onSelectionUpdate callback when selectionUpdate event is emitted', () => {
+            const onSelectionUpdate = vi.fn();
+            const editor = new WorkflowEditor({ onSelectionUpdate });
+
+            editor.emit('selectionUpdate');
+
+            expect(onSelectionUpdate).toHaveBeenCalledTimes(1);
+            expect(onSelectionUpdate).toHaveBeenCalledWith({ editor });
+        });
+
+        it('should call onUpdate on load', () => {
+            const onUpdate = vi.fn();
+            const editor = new WorkflowEditor({ onUpdate });
+
+            editor.load(createTestWorkflow());
+
+            // load() calls emit('update')
+            expect(onUpdate).toHaveBeenCalled();
+        });
+
+        it('should call both event listeners and lifecycle hooks', () => {
+            const onUpdate = vi.fn();
+            const eventListener = vi.fn();
+
+            const editor = new WorkflowEditor({ onUpdate });
+            editor.on('update', eventListener);
+
+            editor.emit('update');
+
+            expect(onUpdate).toHaveBeenCalledTimes(1);
+            expect(eventListener).toHaveBeenCalledTimes(1);
+        });
+
+        it('should handle errors in lifecycle callbacks gracefully', () => {
+            const errorSpy = vi
+                .spyOn(console, 'error')
+                .mockImplementation(() => {});
+            const onUpdate = vi.fn().mockImplementation(() => {
+                throw new Error('Test error');
+            });
+
+            const editor = new WorkflowEditor({ onUpdate });
+
+            // Should not throw
+            expect(() => editor.emit('update')).not.toThrow();
+            expect(errorSpy).toHaveBeenCalled();
+
+            errorSpy.mockRestore();
+        });
+
+        it('should not call lifecycle hooks for other events', () => {
+            const onUpdate = vi.fn();
+            const onSelectionUpdate = vi.fn();
+
+            const editor = new WorkflowEditor({ onUpdate, onSelectionUpdate });
+
+            editor.emit('metaUpdate', {});
+            editor.emit('nodeCreate', {
+                id: 'test',
+                type: 'agent',
+                position: { x: 0, y: 0 },
+                data: {},
+            });
+
+            expect(onUpdate).not.toHaveBeenCalled();
+            expect(onSelectionUpdate).not.toHaveBeenCalled();
         });
     });
 });
