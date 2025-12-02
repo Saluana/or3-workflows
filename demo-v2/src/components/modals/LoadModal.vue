@@ -140,9 +140,11 @@ const emit = defineEmits<{
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
     z-index: 1000;
+    padding: var(--or3-spacing-lg, 16px);
+    overflow-y: auto;
 }
 
 .modal {
@@ -151,8 +153,9 @@ const emit = defineEmits<{
     border-radius: var(--or3-radius-xl, 20px);
     padding: var(--or3-spacing-2xl, 32px);
     width: 480px;
-    max-width: 90vw;
+    max-width: min(560px, 94vw);
     box-shadow: var(--or3-shadow-xl, 0 24px 64px rgba(0, 0, 0, 0.5));
+    margin: auto;
 }
 
 .modal-lg {
@@ -197,7 +200,7 @@ const emit = defineEmits<{
 }
 
 .workflow-list {
-    max-height: 320px;
+    max-height: min(420px, 60vh);
     overflow-y: auto;
     margin-bottom: var(--or3-spacing-xl, 24px);
 }
@@ -360,6 +363,18 @@ const emit = defineEmits<{
 .btn-ghost:hover {
     background: var(--or3-color-surface-subtle, rgba(255, 255, 255, 0.06));
     color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
+}
+
+@media (max-width: 640px) {
+    .modal {
+        width: 100%;
+        padding: var(--or3-spacing-xl, 24px);
+        border-radius: var(--or3-radius-lg, 16px);
+    }
+
+    .workflow-list {
+        max-height: min(360px, 55vh);
+    }
 }
 
 /* Transitions */

@@ -139,10 +139,11 @@ const emit = defineEmits<{
 @media (max-width: 768px) {
     .canvas-container {
         position: fixed;
-        top: 48px;
+        top: 56px;
         left: 0;
         right: 0;
-        bottom: 60px;
+        bottom: calc(72px + env(safe-area-inset-bottom, 0));
+        padding-bottom: env(safe-area-inset-bottom, 0);
     }
 }
 </style>
