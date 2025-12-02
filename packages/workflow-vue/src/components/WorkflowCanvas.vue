@@ -534,6 +534,22 @@ defineExpose({
     color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95)) !important;
 }
 
+/* Active state for lock button */
+.vue-flow__controls-button:active,
+.vue-flow__controls-button.active {
+    background: var(--or3-color-accent-muted, rgba(139, 92, 246, 0.15)) !important;
+    color: var(--or3-color-accent, #8b5cf6) !important;
+}
+
+/* Make controls more touch-friendly on mobile */
+@media (max-width: 768px) {
+    .vue-flow__controls-button {
+        min-width: 44px !important;
+        min-height: 44px !important;
+        font-size: 18px !important;
+    }
+}
+
 .vue-flow__controls-button svg {
     fill: currentColor !important;
 }
