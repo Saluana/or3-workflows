@@ -32,45 +32,28 @@ const emit = defineEmits<{
 
 <template>
     <div class="canvas-container">
-        <!-- Sidebar toggle button -->
-        <button
-            v-if="!showLeftSidebar && !isMobile"
-            class="sidebar-expand-btn"
-            @click="emit('expand-sidebar')"
-            title="Expand sidebar"
+        <div
+            v-if="!showLeftSidebar"
+            class="canvas-actions"
+            :class="{ 'is-mobile': isMobile }"
         >
-            <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                class="icon"
+            <button
+                class="sidebar-expand-btn"
+                @click="emit('expand-sidebar')"
+                title="Expand sidebar"
             >
-                <polyline points="13 17 18 12 13 7"></polyline>
-                <polyline points="6 17 11 12 6 7"></polyline>
-            </svg>
-        </button>
-
-        <!-- Mobile sidebar toggle button (always visible on mobile) -->
-        <button
-            v-if="isMobile"
-            class="sidebar-expand-btn mobile-sidebar-btn"
-            @click="emit('expand-sidebar')"
-            title="Open menu"
-        >
-            <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                class="icon"
-            >
-                <rect x="3" y="3" width="7" height="7"></rect>
-                <rect x="14" y="3" width="7" height="7"></rect>
-                <rect x="14" y="14" width="7" height="7"></rect>
-                <rect x="3" y="14" width="7" height="7"></rect>
-            </svg>
-        </button>
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    class="icon"
+                >
+                    <polyline points="13 17 18 12 13 7"></polyline>
+                    <polyline points="6 17 11 12 6 7"></polyline>
+                </svg>
+            </button>
+        </div>
         <WorkflowCanvas
             v-if="editor"
             :editor="editor"
@@ -110,57 +93,47 @@ const emit = defineEmits<{
     z-index: 10;
 }
 
-.sidebar-expand-btn {
+.canvas-actions {
     position: absolute;
     top: 12px;
     left: 12px;
-    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 12;
+}
+
+.canvas-actions.is-mobile {
+    top: 16px;
+    left: 16px;
+}
+
+.sidebar-expand-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: 34px;
+    height: 34px;
     padding: 0;
-    background: var(--or3-color-bg-secondary, #111115);
-    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
-    border-radius: var(--or3-radius-sm, 6px);
-    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
+    background: var(--or3-color-surface-card, #f5f5f7);
+    border: 1px solid var(--or3-color-border, rgba(17, 24, 39, 0.1));
+    border-radius: var(--or3-radius-sm, 8px);
+    color: var(--or3-color-text-primary, #0f172a);
     cursor: pointer;
     transition: all var(--or3-transition-fast, 120ms);
-    box-shadow: var(--or3-shadow-sm, 0 2px 4px rgba(0, 0, 0, 0.25));
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
 }
 
 .sidebar-expand-btn:hover {
-    background: var(--or3-color-bg-tertiary, #18181d);
-    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.72));
+    background: var(--or3-color-bg-elevated, #ffffff);
+    color: var(--or3-color-accent, #8b5cf6);
     border-color: var(--or3-color-accent, #8b5cf6);
+    box-shadow: 0 10px 30px rgba(139, 92, 246, 0.25);
 }
 
 .sidebar-expand-btn .icon {
     width: 16px;
     height: 16px;
-}
-
-.mobile-sidebar-btn {
-    width: 48px;
-    height: 48px;
-    background: var(--or3-color-accent, #8b5cf6);
-    border-color: transparent;
-    color: white;
-    box-shadow: 0 3px 10px rgba(139, 92, 246, 0.5);
-    border-radius: var(--or3-radius-md, 10px);
-}
-
-.mobile-sidebar-btn:hover,
-.mobile-sidebar-btn:active {
-    background: var(--or3-color-accent-hover, #7c3aed);
-    box-shadow: 0 5px 15px rgba(139, 92, 246, 0.6);
-    transform: scale(1.05);
-}
-
-.mobile-sidebar-btn .icon {
-    width: 22px;
-    height: 22px;
 }
 
 @media (max-width: 768px) {
@@ -170,13 +143,6 @@ const emit = defineEmits<{
         left: 0;
         right: 0;
         bottom: 60px;
-    }
-    
-    /* Adjust button position on mobile to avoid controls */
-    .mobile-sidebar-btn {
-        bottom: 80px;
-        left: 16px;
-        top: auto;
     }
 }
 </style>

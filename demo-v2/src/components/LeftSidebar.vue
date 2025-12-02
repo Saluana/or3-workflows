@@ -15,6 +15,7 @@ defineProps<Props>();
 const emit = defineEmits<{
     (e: 'update:activePanel', value: 'palette' | 'inspector'): void;
     (e: 'update:collapsed', value: boolean): void;
+    (e: 'quick-add'): void;
 }>();
 </script>
 
@@ -73,7 +74,7 @@ const emit = defineEmits<{
 
         <div v-if="!collapsed" class="sidebar-content">
             <div v-if="activePanel === 'palette'" class="palette-container">
-                <NodePalette />
+                <NodePalette @quick-add="emit('quick-add')" />
             </div>
             <NodeInspector
                 v-else-if="activePanel === 'inspector' && editor"
@@ -191,12 +192,12 @@ const emit = defineEmits<{
     .left-sidebar.mobile-overlay {
         position: fixed;
         left: 0;
-        top: 48px;
-        bottom: 60px;
+        top: 0;
+        bottom: 0;
         z-index: 150;
-        width: 300px;
-        max-width: 90vw;
-        box-shadow: 4px 0 16px rgba(0, 0, 0, 0.6);
+        width: 100vw;
+        max-width: none;
+        box-shadow: 4px 0 24px rgba(0, 0, 0, 0.6);
         transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
     
