@@ -959,6 +959,7 @@ function syncMetaToEditor() {
 
             <!-- Canvas -->
             <CanvasArea
+                v-if="!isMobile || mobileView === 'editor'"
                 :editor="editor"
                 :node-statuses="nodeStatuses"
                 :show-left-sidebar="showLeftSidebar"
@@ -976,7 +977,7 @@ function syncMetaToEditor() {
 
             <!-- Right sidebar - Chat -->
             <ChatPanel
-                v-if="showChatPanel"
+                v-if="showChatPanel || (isMobile && mobileView === 'chat')"
                 v-model:chat-input="chatInput"
                 :messages="messages"
                 :node-statuses="nodeStatuses"
