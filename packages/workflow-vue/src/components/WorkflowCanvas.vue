@@ -544,9 +544,9 @@ defineExpose({
 /* Make controls more touch-friendly on mobile */
 @media (max-width: 768px) {
     .vue-flow__controls-button {
-        min-width: 44px !important;
-        min-height: 44px !important;
-        font-size: 18px !important;
+        min-width: 32px !important;
+        min-height: 32px !important;
+        font-size: 16px !important;
     }
 }
 

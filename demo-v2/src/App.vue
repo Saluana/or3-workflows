@@ -957,6 +957,13 @@ function syncMetaToEditor() {
                 @update:collapsed="showLeftSidebar = !$event"
             />
 
+            <!-- Mobile sidebar backdrop -->
+            <div
+                v-if="isMobile && showLeftSidebar"
+                class="mobile-sidebar-backdrop"
+                @click="showLeftSidebar = false"
+            ></div>
+
             <!-- Canvas -->
             <CanvasArea
                 v-if="!isMobile || mobileView === 'editor'"
@@ -1534,6 +1541,25 @@ function syncMetaToEditor() {
 }
 
 /* Responsive */
+
+/* Mobile sidebar backdrop */
+.mobile-sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(2px);
+    z-index: 140;
+    animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
 
 @media (max-width: 768px) {
     .main {

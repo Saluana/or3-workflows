@@ -32,6 +32,7 @@ const emit = defineEmits<{
 
 <template>
     <div class="canvas-container">
+        <!-- Sidebar toggle button -->
         <button
             v-if="!showLeftSidebar && !isMobile"
             class="sidebar-expand-btn"
@@ -47,6 +48,27 @@ const emit = defineEmits<{
             >
                 <polyline points="13 17 18 12 13 7"></polyline>
                 <polyline points="6 17 11 12 6 7"></polyline>
+            </svg>
+        </button>
+
+        <!-- Mobile sidebar toggle button (always visible on mobile) -->
+        <button
+            v-if="isMobile"
+            class="sidebar-expand-btn mobile-sidebar-btn"
+            @click="emit('expand-sidebar')"
+            title="Open menu"
+        >
+            <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                class="icon"
+            >
+                <rect x="3" y="3" width="7" height="7"></rect>
+                <rect x="14" y="3" width="7" height="7"></rect>
+                <rect x="14" y="14" width="7" height="7"></rect>
+                <rect x="3" y="14" width="7" height="7"></rect>
             </svg>
         </button>
         <WorkflowCanvas
@@ -117,6 +139,26 @@ const emit = defineEmits<{
 .sidebar-expand-btn .icon {
     width: 16px;
     height: 16px;
+}
+
+.mobile-sidebar-btn {
+    width: 40px;
+    height: 40px;
+    background: var(--or3-color-accent, #8b5cf6);
+    border-color: transparent;
+    color: white;
+    box-shadow: 0 2px 8px rgba(139, 92, 246, 0.4);
+}
+
+.mobile-sidebar-btn:hover,
+.mobile-sidebar-btn:active {
+    background: var(--or3-color-accent-hover, #7c3aed);
+    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.5);
+}
+
+.mobile-sidebar-btn .icon {
+    width: 20px;
+    height: 20px;
 }
 
 @media (max-width: 768px) {

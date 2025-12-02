@@ -20,9 +20,9 @@ const emit = defineEmits<{
 
 <template>
     <aside
-        v-if="!collapsed || !isMobile"
+        v-if="!collapsed"
         class="sidebar left-sidebar"
-        :class="{ collapsed }"
+        :class="{ collapsed, 'mobile-overlay': isMobile }"
     >
         <div class="sidebar-header">
             <button
@@ -188,19 +188,15 @@ const emit = defineEmits<{
 }
 
 @media (max-width: 768px) {
-    .left-sidebar {
+    .left-sidebar.mobile-overlay {
         position: fixed;
         left: 0;
         top: 48px;
         bottom: 60px;
-        z-index: 100;
-        transform: translateX(-100%);
-        transition: transform 0.3s ease;
+        z-index: 150;
         width: 280px;
-    }
-
-    .left-sidebar:not(.collapsed) {
-        transform: translateX(0);
+        max-width: 85vw;
+        box-shadow: 4px 0 12px rgba(0, 0, 0, 0.5);
     }
 }
 </style>
