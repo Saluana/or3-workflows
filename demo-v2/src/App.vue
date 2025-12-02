@@ -8,15 +8,7 @@ import {
     type TokenUsageDetails,
     validateWorkflow,
 } from '@or3/workflow-core';
-import {
-    WorkflowCanvas,
-    NodePalette,
-    NodeInspector,
-    EdgeLabelEditor,
-    ValidationOverlay,
-    useEditor,
-    createExecutionState,
-} from '@or3/workflow-vue';
+import { useEditor, createExecutionState } from '@or3/workflow-vue';
 
 // Local composables
 import {
@@ -32,6 +24,9 @@ import type { WorkflowSummary } from '@or3/workflow-core';
 import {
     HeaderBar,
     ChatPanel,
+    LeftSidebar,
+    MobileNav,
+    CanvasArea,
     ApiKeyModal,
     SaveModal,
     LoadModal,
@@ -829,115 +824,31 @@ function syncMetaToEditor() {
         <!-- Main content -->
         <main class="main">
             <!-- Left sidebar -->
-            <aside
-                v-if="showLeftSidebar || !isMobile"
-                class="sidebar left-sidebar"
-                :class="{ collapsed: !showLeftSidebar }"
-            >
-                <div class="sidebar-header">
-                    <button
-                        class="sidebar-collapse-btn"
-                        @click="showLeftSidebar = !showLeftSidebar"
-                        title="Toggle sidebar"
-                    >
-                        <svg
-                            v-if="showLeftSidebar"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            class="icon"
-                        >
-                            <polyline points="11 17 6 12 11 7"></polyline>
-                            <polyline points="18 17 13 12 18 7"></polyline>
-                        </svg>
-                        <svg
-                            v-else
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            class="icon"
-                        >
-                            <polyline points="13 17 18 12 13 7"></polyline>
-                            <polyline points="6 17 11 12 6 7"></polyline>
-                        </svg>
-                    </button>
-                </div>
-                <div v-if="showLeftSidebar" class="sidebar-tabs">
-                    <button
-                        class="sidebar-tab"
-                        :class="{ active: activePanel === 'palette' }"
-                        @click="activePanel = 'palette'"
-                    >
-                        Nodes
-                    </button>
-                    <button
-                        class="sidebar-tab"
-                        :class="{ active: activePanel === 'inspector' }"
-                        @click="activePanel = 'inspector'"
-                    >
-                        Inspector
-                    </button>
-                </div>
-
-                <div v-if="showLeftSidebar" class="sidebar-content">
-                    <div
-                        v-if="activePanel === 'palette'"
-                        class="palette-container"
-                    >
-                        <NodePalette />
-                    </div>
-                    <NodeInspector
-                        v-else-if="activePanel === 'inspector' && editor"
-                        :editor="editor"
-                        @close="activePanel = 'palette'"
-                    />
-                </div>
-            </aside>
+            <LeftSidebar
+                :editor="editor"
+                :active-panel="activePanel"
+                :collapsed="!showLeftSidebar"
+                :is-mobile="isMobile"
+                @update:active-panel="activePanel = $event"
+                @update:collapsed="showLeftSidebar = !$event"
+            />
 
             <!-- Canvas -->
-            <div class="canvas-container">
-                <button
-                    v-if="!showLeftSidebar && !isMobile"
-                    class="sidebar-expand-btn"
-                    @click="showLeftSidebar = true"
-                    title="Expand sidebar"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <polyline points="13 17 18 12 13 7"></polyline>
-                        <polyline points="6 17 11 12 6 7"></polyline>
-                    </svg>
-                </button>
-                <WorkflowCanvas
-                    v-if="editor"
-                    :editor="editor"
-                    :node-statuses="nodeStatuses"
-                    @node-click="handleNodeClick"
-                    @edge-click="handleEdgeClick"
-                    @pane-click="handlePaneClick"
-                />
-                <ValidationOverlay
-                    v-if="editor"
-                    class="canvas-overlay"
-                    :editor="editor"
-                />
-
-                <!-- Edge Label Editor -->
-                <EdgeLabelEditor
-                    :edge="selectedEdge"
-                    :show="showEdgeEditor"
-                    @close="showEdgeEditor = false"
-                    @update="updateEdgeLabel"
-                    @delete="deleteEdge"
-                />
-            </div>
+            <CanvasArea
+                :editor="editor"
+                :node-statuses="nodeStatuses"
+                :show-left-sidebar="showLeftSidebar"
+                :is-mobile="isMobile"
+                :selected-edge="selectedEdge"
+                :show-edge-editor="showEdgeEditor"
+                @expand-sidebar="showLeftSidebar = true"
+                @node-click="handleNodeClick"
+                @edge-click="handleEdgeClick"
+                @pane-click="handlePaneClick"
+                @update-edge-label="updateEdgeLabel"
+                @delete-edge="deleteEdge"
+                @close-edge-editor="showEdgeEditor = false"
+            />
 
             <!-- Right sidebar - Chat -->
             <ChatPanel
@@ -959,227 +870,22 @@ function syncMetaToEditor() {
                 @toggle-message-node-output="toggleMessageNodeOutput"
             />
 
-            <!-- Mobile Bottom Navigation -->
-            <nav v-if="isMobile" class="mobile-nav">
-                <button
-                    class="mobile-nav-btn"
-                    :class="{ active: mobileView === 'editor' }"
-                    @click="toggleMobileView('editor')"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                    >
-                        <rect x="3" y="3" width="7" height="7"></rect>
-                        <rect x="14" y="3" width="7" height="7"></rect>
-                        <rect x="14" y="14" width="7" height="7"></rect>
-                        <rect x="3" y="14" width="7" height="7"></rect>
-                    </svg>
-                    <span>Editor</span>
-                </button>
-                <button
-                    class="mobile-nav-btn"
-                    :class="{ active: mobileView === 'chat' }"
-                    @click="toggleMobileView('chat')"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                    >
-                        <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path>
-                    </svg>
-                    <span>Chat</span>
-                    <span v-if="messages.length > 0" class="nav-badge">{{
-                        messages.length
-                    }}</span>
-                </button>
-                <button
-                    class="mobile-nav-btn"
-                    @click="showMobileMenu = !showMobileMenu"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                    >
-                        <line x1="3" y1="12" x2="21" y2="12"></line>
-                        <line x1="3" y1="6" x2="21" y2="6"></line>
-                        <line x1="3" y1="18" x2="21" y2="18"></line>
-                    </svg>
-                    <span>More</span>
-                </button>
-            </nav>
-
-            <!-- Mobile Menu Overlay -->
-            <Transition name="slide-up">
-                <div
-                    v-if="showMobileMenu"
-                    class="mobile-menu-overlay"
-                    @click.self="showMobileMenu = false"
-                >
-                    <div class="mobile-menu">
-                        <div class="mobile-menu-header">
-                            <span>Actions</span>
-                            <button
-                                class="btn btn-ghost"
-                                @click="showMobileMenu = false"
-                            >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    class="icon"
-                                >
-                                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                                </svg>
-                            </button>
-                        </div>
-                        <div class="mobile-menu-items">
-                            <button
-                                class="mobile-menu-item"
-                                @click="
-                                    handleUndo();
-                                    showMobileMenu = false;
-                                "
-                            >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    class="icon"
-                                >
-                                    <path d="M3 7v6h6"></path>
-                                    <path
-                                        d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"
-                                    ></path>
-                                </svg>
-                                <span>Undo</span>
-                            </button>
-                            <button
-                                class="mobile-menu-item"
-                                @click="
-                                    handleRedo();
-                                    showMobileMenu = false;
-                                "
-                            >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    class="icon"
-                                >
-                                    <path d="M21 7v6h-6"></path>
-                                    <path
-                                        d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"
-                                    ></path>
-                                </svg>
-                                <span>Redo</span>
-                            </button>
-                            <div class="mobile-menu-divider"></div>
-                            <button
-                                class="mobile-menu-item"
-                                @click="
-                                    showSaveModal = true;
-                                    showMobileMenu = false;
-                                "
-                            >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    class="icon"
-                                >
-                                    <path
-                                        d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"
-                                    ></path>
-                                    <path
-                                        d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"
-                                    ></path>
-                                    <path d="M7 3v4a1 1 0 0 0 1 1h7"></path>
-                                </svg>
-                                <span>Save Workflow</span>
-                            </button>
-                            <button
-                                class="mobile-menu-item"
-                                @click="
-                                    showLoadModal = true;
-                                    showMobileMenu = false;
-                                "
-                            >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    class="icon"
-                                >
-                                    <path
-                                        d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"
-                                    ></path>
-                                </svg>
-                                <span>Load Workflow</span>
-                            </button>
-                            <button
-                                class="mobile-menu-item"
-                                @click="
-                                    handleExport();
-                                    showMobileMenu = false;
-                                "
-                            >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    class="icon"
-                                >
-                                    <path
-                                        d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
-                                    ></path>
-                                    <polyline
-                                        points="7 10 12 15 17 10"
-                                    ></polyline>
-                                    <line x1="12" x2="12" y1="15" y2="3"></line>
-                                </svg>
-                                <span>Export JSON</span>
-                            </button>
-                            <div class="mobile-menu-divider"></div>
-                            <button
-                                class="mobile-menu-item"
-                                @click="
-                                    showApiKeyModal = true;
-                                    showMobileMenu = false;
-                                "
-                            >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    class="icon"
-                                >
-                                    <path
-                                        d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"
-                                    ></path>
-                                </svg>
-                                <span>{{
-                                    hasApiKey ? 'Change API Key' : 'Set API Key'
-                                }}</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </Transition>
+            <!-- Mobile Navigation -->
+            <MobileNav
+                v-if="isMobile"
+                :mobile-view="mobileView"
+                :message-count="messages.length"
+                :has-api-key="hasApiKey"
+                :show-menu="showMobileMenu"
+                @toggle-view="toggleMobileView"
+                @update:show-menu="showMobileMenu = $event"
+                @undo="handleUndo"
+                @redo="handleRedo"
+                @save="showSaveModal = true"
+                @load="showLoadModal = true"
+                @export="handleExport"
+                @open-api-key="showApiKeyModal = true"
+            />
         </main>
 
         <!-- Modals -->
@@ -1248,158 +954,6 @@ function syncMetaToEditor() {
     flex: 1;
     overflow: hidden;
     position: relative;
-}
-
-/* Sidebars */
-.sidebar {
-    display: flex;
-    flex-direction: column;
-    background: var(--or3-color-bg-secondary, #111115);
-    position: relative;
-    transition: width var(--or3-transition-normal, 200ms),
-        transform var(--or3-transition-normal, 200ms);
-}
-
-.sidebar-header {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    padding: var(--or3-spacing-sm, 8px);
-    border-bottom: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
-}
-
-.sidebar-collapse-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: var(--or3-radius-sm, 6px);
-    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
-    cursor: pointer;
-    transition: all var(--or3-transition-fast, 120ms);
-}
-
-.sidebar-collapse-btn:hover {
-    background: var(--or3-color-surface-subtle, rgba(255, 255, 255, 0.06));
-    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.72));
-}
-
-.sidebar-expand-btn {
-    position: absolute;
-    top: 12px;
-    left: 12px;
-    z-index: 10;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    background: var(--or3-color-bg-secondary, #111115);
-    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
-    border-radius: var(--or3-radius-sm, 6px);
-    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
-    cursor: pointer;
-    transition: all var(--or3-transition-fast, 120ms);
-    box-shadow: var(--or3-shadow-sm, 0 2px 4px rgba(0, 0, 0, 0.25));
-}
-
-.sidebar-expand-btn:hover {
-    background: var(--or3-color-bg-tertiary, #18181d);
-    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.72));
-    border-color: var(--or3-color-accent, #8b5cf6);
-}
-
-.sidebar-expand-btn .icon {
-    width: 16px;
-    height: 16px;
-}
-
-.sidebar-collapse-btn .icon {
-    width: 14px;
-    height: 14px;
-}
-
-.left-sidebar {
-    width: 280px;
-    border-right: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
-}
-
-.left-sidebar.collapsed {
-    width: 0;
-    overflow: hidden;
-    border: none;
-}
-
-.right-sidebar {
-    width: 380px;
-    border-left: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
-}
-
-.right-sidebar.collapsed {
-    width: 0;
-    overflow: hidden;
-    border: none;
-}
-
-.sidebar-tabs {
-    display: flex;
-    border-bottom: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
-}
-
-.sidebar-tab {
-    flex: 1;
-    padding: var(--or3-spacing-md, 12px) var(--or3-spacing-lg, 16px);
-    font-size: var(--or3-text-sm, 12px);
-    font-weight: var(--or3-font-medium, 500);
-    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
-    cursor: pointer;
-    transition: all var(--or3-transition-fast, 120ms);
-}
-
-.sidebar-tab:hover {
-    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.72));
-    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.06));
-}
-
-.sidebar-tab.active {
-    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
-    border-bottom-color: var(--or3-color-accent, #8b5cf6);
-}
-
-.sidebar-content {
-    flex: 1;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-}
-
-.palette-container {
-    flex: 1;
-    overflow-y: auto;
-    padding: var(--or3-spacing-lg, 16px);
-}
-
-/* Canvas */
-.canvas-container {
-    flex: 1;
-    position: relative;
-    overflow: hidden;
-}
-
-.canvas-overlay {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    z-index: 10;
 }
 
 /* Chat */
@@ -1854,303 +1408,11 @@ function syncMetaToEditor() {
     margin-bottom: var(--or3-spacing-xs, 4px);
 }
 
-/* Sidebar Toggle */
-.sidebar-toggle {
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 24px;
-    height: 48px;
-    background: var(--or3-color-bg-secondary, #12121a);
-    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
-    border-radius: 0 var(--or3-radius-md, 10px) var(--or3-radius-md, 10px) 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    z-index: 10;
-    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
-    transition: all 0.15s ease;
-    padding: 0;
-    right: -24px;
-}
-
-.sidebar-toggle:hover {
-    background: var(--or3-color-surface, rgba(26, 26, 36, 0.8));
-    color: var(--or3-color-text, rgba(255, 255, 255, 0.87));
-}
-
-.sidebar-toggle svg {
-    width: 14px;
-    height: 14px;
-}
-
-.left-sidebar.collapsed {
-    width: 0;
-    overflow: hidden;
-    border: none;
-}
-
-.left-sidebar.collapsed .sidebar-toggle {
-    right: -24px;
-    border-left: none;
-}
-
-.right-sidebar.collapsed {
-    width: 0;
-    overflow: hidden;
-    border: none;
-}
-
-/* Mobile Navigation */
-.mobile-nav {
-    display: none;
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: var(--or3-color-bg-secondary, #111115);
-    border-top: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
-    padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 12px);
-    z-index: 200;
-    justify-content: space-around;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-}
-
-.mobile-nav-btn {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 16px);
-    background: none;
-    border: none;
-    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
-    font-size: var(--or3-text-xs, 11px);
-    font-weight: var(--or3-font-medium, 500);
-    cursor: pointer;
-    transition: all var(--or3-transition-fast, 120ms);
-    border-radius: var(--or3-radius-md, 10px);
-    position: relative;
-}
-
-.mobile-nav-btn:hover,
-.mobile-nav-btn.active {
-    color: var(--or3-color-accent, #8b5cf6);
-    background: var(--or3-color-accent-muted, rgba(139, 92, 246, 0.15));
-}
-
-.mobile-nav-btn svg {
-    width: 22px;
-    height: 22px;
-}
-
-.nav-badge {
-    position: absolute;
-    top: 4px;
-    right: 8px;
-    width: 8px;
-    height: 8px;
-    background: var(--or3-color-accent, #8b5cf6);
-    border-radius: 50%;
-    box-shadow: 0 0 8px var(--or3-color-accent, #8b5cf6);
-}
-
-/* Mobile Menu Overlay */
-.mobile-menu-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.75);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-    z-index: 300;
-    animation: fadeIn 0.2s ease;
-}
-
-.mobile-menu {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: var(--or3-color-bg-secondary, #111115);
-    border-radius: var(--or3-radius-xl, 20px) var(--or3-radius-xl, 20px) 0 0;
-    padding: var(--or3-spacing-xl, 24px);
-    z-index: 301;
-    max-height: 70vh;
-    overflow-y: auto;
-    animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.4);
-}
-
-.mobile-menu h3 {
-    font-size: var(--or3-text-base, 14px);
-    font-weight: var(--or3-font-semibold, 600);
-    margin: 0 0 var(--or3-spacing-lg, 16px) 0;
-    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
-}
-
-.mobile-menu-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-bottom: var(--or3-spacing-lg, 16px);
-    margin-bottom: var(--or3-spacing-lg, 16px);
-    border-bottom: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
-    font-size: var(--or3-text-base, 14px);
-    font-weight: var(--or3-font-semibold, 600);
-    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
-}
-
-.mobile-menu-items {
-    display: flex;
-    flex-direction: column;
-    gap: var(--or3-spacing-sm, 8px);
-}
-
-.mobile-menu-divider {
-    height: 1px;
-    background: var(--or3-color-border, rgba(255, 255, 255, 0.12));
-    margin: var(--or3-spacing-md, 12px) 0;
-}
-
-.mobile-menu-item {
-    display: flex;
-    align-items: center;
-    gap: var(--or3-spacing-md, 16px);
-    padding: var(--or3-spacing-md, 16px);
-    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.06));
-    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
-    border-radius: var(--or3-radius-md, 10px);
-    margin-bottom: var(--or3-spacing-sm, 8px);
-    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
-    cursor: pointer;
-    transition: all var(--or3-transition-fast, 120ms);
-    width: 100%;
-    text-align: left;
-    font-size: var(--or3-text-sm, 13px);
-    font-weight: var(--or3-font-medium, 500);
-}
-
-.mobile-menu-item:hover {
-    background: var(--or3-color-surface-subtle, rgba(255, 255, 255, 0.06));
-    border-color: var(--or3-color-accent, #8b5cf6);
-}
-
-.mobile-menu-item svg {
-    width: 20px;
-    height: 20px;
-    color: var(--or3-color-accent, #8b5cf6);
-}
-
-@keyframes fadeIn {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
-    }
-}
-
-@keyframes slideUp {
-    from {
-        transform: translateY(100%);
-    }
-    to {
-        transform: translateY(0);
-    }
-}
-
-/* Vue Transitions */
-.slide-up-enter-active,
-.slide-up-leave-active {
-    transition: opacity 0.3s ease;
-}
-
-.slide-up-enter-active .mobile-menu,
-.slide-up-leave-active .mobile-menu {
-    transition: transform 0.3s ease;
-}
-
-.slide-up-enter-from,
-.slide-up-leave-to {
-    opacity: 0;
-}
-
-.slide-up-enter-from .mobile-menu,
-.slide-up-leave-to .mobile-menu {
-    transform: translateY(100%);
-}
-
 /* Responsive */
-@media (max-width: 900px) {
-    .left-sidebar {
-        width: 220px;
-    }
-
-    .right-sidebar {
-        width: 320px;
-    }
-}
 
 @media (max-width: 768px) {
-    .header {
-        padding: var(--or3-spacing-xs, 4px) var(--or3-spacing-sm, 8px);
-    }
-
-    .header-left .btn,
-    .header-center .btn {
-        display: none;
-    }
-
-    .left-sidebar {
-        position: fixed;
-        left: 0;
-        top: 48px;
-        bottom: 60px;
-        z-index: 100;
-        transform: translateX(-100%);
-        transition: transform 0.3s ease;
-        width: 280px;
-    }
-
-    .left-sidebar:not(.collapsed) {
-        transform: translateX(0);
-    }
-
-    .left-sidebar .sidebar-toggle {
-        display: none;
-    }
-
-    .right-sidebar {
-        position: fixed;
-        right: 0;
-        top: 48px;
-        bottom: 60px;
-        width: 100%;
-        z-index: 100;
-        transform: translateX(100%);
-        transition: transform 0.3s ease;
-    }
-
-    .right-sidebar:not(.collapsed) {
-        transform: translateX(0);
-    }
-
     .main {
         padding-bottom: 60px;
-    }
-
-    .mobile-nav {
-        display: flex;
-    }
-
-    .canvas-container {
-        position: fixed;
-        top: 48px;
-        left: 0;
-        right: 0;
-        bottom: 60px;
     }
 }
 
