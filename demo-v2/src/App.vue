@@ -97,6 +97,9 @@ const branchStreams = ref<Record<string, BranchStream>>({});
 // Track parallel execution instances to generate unique keys per loop iteration
 const parallelExecutionCounter = ref<Record<string, number>>({});
 
+// Constant for merge branch identifier
+const MERGE_BRANCH_ID = '__merge__';
+
 // Thinking/reasoning state (for main output)
 const isThinking = ref(false);
 const thinkingContent = ref('');
@@ -640,17 +643,17 @@ async function handleSendMessage() {
                     }
                     
                     // Check if this is a new execution (first branch of a new batch)
-                    // Exclude merge branches (branchId === '__merge__') from this check
+                    // Exclude merge branches from this check
                     const existingBranches = Object.keys(
                         branchStreams.value
                     ).filter(
                         (k) =>
                             branchStreams.value[k].nodeId === nodeId &&
-                            branchStreams.value[k].branchId !== '__merge__'
+                            branchStreams.value[k].branchId !== MERGE_BRANCH_ID
                     );
                     
                     // Only increment counter for non-merge branches starting a new execution
-                    if (branchId !== '__merge__' && existingBranches.length === 0) {
+                    if (branchId !== MERGE_BRANCH_ID && existingBranches.length === 0) {
                         // No active branches for this node, this is a new execution
                         parallelExecutionCounter.value[nodeId]++;
                     }
@@ -658,7 +661,7 @@ async function handleSendMessage() {
                     const execInstance = parallelExecutionCounter.value[nodeId];
                     const key = `${nodeId}-${execInstance}-${branchId}`;
                     console.log(
-                        `[BranchStart] AFTER - key=${key}, execInstance=${execInstance}, isMergeBranch=${branchId === '__merge__'}`
+                        `[BranchStart] AFTER - key=${key}, execInstance=${execInstance}, isMergeBranch=${branchId === MERGE_BRANCH_ID}`
                     );
                     branchStreams.value = {
                         ...branchStreams.value,
@@ -713,7 +716,7 @@ async function handleSendMessage() {
                             branchStreams.value[k].branchId === branchId
                     );
                     console.log(
-                        `[BranchComplete] nodeId=${nodeId}, branchId=${branchId}, key=${key}, hasContent=${!!output}, isMergeBranch=${branchId === '__merge__'}`
+                        `[BranchComplete] nodeId=${nodeId}, branchId=${branchId}, key=${key}, hasContent=${!!output}, isMergeBranch=${branchId === MERGE_BRANCH_ID}`
                     );
                     if (key && branchStreams.value[key]) {
                         branchStreams.value[key].content = output;
@@ -727,21 +730,17 @@ async function handleSendMessage() {
                     }
 
                     // Handle merge branch completion separately
-                    if (branchId === '__merge__') {
+                    if (branchId === MERGE_BRANCH_ID) {
                         // Merge branch completes after regular branches
                         // Just clear the merge branch from streams
                         console.log(
                             `[BranchComplete] Clearing merge branch for nodeId=${nodeId}`
                         );
-                        const remaining: Record<string, BranchStream> = {};
-                        for (const [k, v] of Object.entries(
-                            branchStreams.value
-                        )) {
-                            if (!(v.nodeId === nodeId && v.branchId === '__merge__')) {
-                                remaining[k] = v;
-                            }
-                        }
-                        branchStreams.value = remaining;
+                        branchStreams.value = Object.fromEntries(
+                            Object.entries(branchStreams.value).filter(
+                                ([, v]) => !(v.nodeId === nodeId && v.branchId === MERGE_BRANCH_ID)
+                            )
+                        );
                         return; // Don't proceed with regular branch completion logic
                     }
 
@@ -750,7 +749,7 @@ async function handleSendMessage() {
                     const nodeBranches = Object.values(
                         branchStreams.value
                     ).filter(
-                        (b) => b.nodeId === nodeId && b.branchId !== '__merge__'
+                        (b) => b.nodeId === nodeId && b.branchId !== MERGE_BRANCH_ID
                     );
                     const allCompleted =
                         nodeBranches.length > 0 &&
@@ -786,27 +785,23 @@ async function handleSendMessage() {
 
                         // Clear only the regular branches, not merge branches
                         // Merge branches will be cleared when they complete
-                        const keysToDelete = Object.keys(
-                            branchStreams.value
-                        ).filter(
-                            (k) =>
-                                branchStreams.value[k].nodeId === nodeId &&
-                                branchStreams.value[k].branchId !== '__merge__'
+                        const keysToDeleteSet = new Set(
+                            Object.keys(branchStreams.value).filter(
+                                (k) =>
+                                    branchStreams.value[k].nodeId === nodeId &&
+                                    branchStreams.value[k].branchId !== MERGE_BRANCH_ID
+                            )
                         );
                         console.log(
-                            `[Branches] Deleting regular branch keys: ${keysToDelete.join(
+                            `[Branches] Deleting regular branch keys: ${Array.from(keysToDeleteSet).join(
                                 ', '
                             )}`
                         );
-                        const remaining: Record<string, BranchStream> = {};
-                        for (const [k, v] of Object.entries(
-                            branchStreams.value
-                        )) {
-                            if (!keysToDelete.includes(k)) {
-                                remaining[k] = v;
-                            }
-                        }
-                        branchStreams.value = remaining;
+                        branchStreams.value = Object.fromEntries(
+                            Object.entries(branchStreams.value).filter(
+                                ([k]) => !keysToDeleteSet.has(k)
+                            )
+                        );
                         console.log(
                             `[Branches] Remaining keys after regular branch cleanup: ${
                                 Object.keys(branchStreams.value).join(', ') ||
