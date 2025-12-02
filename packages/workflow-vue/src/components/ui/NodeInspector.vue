@@ -253,6 +253,7 @@ interface BranchConfig {
     label: string;
     model?: string;
     prompt?: string;
+    tools?: string[];
 }
 
 const parallelData = computed(() => {
@@ -303,6 +304,34 @@ const updateBranchPrompt = (branchId: string, prompt: string) => {
         b.id === branchId ? { ...b, prompt: prompt || undefined } : b
     );
     props.editor.commands.updateNodeData(selectedNode.value.id, { branches });
+};
+
+const updateBranchTools = (branchId: string, tools: string[]) => {
+    if (!selectedNode.value) return;
+    const branches = parallelData.value.branches.map((b: BranchConfig) =>
+        b.id === branchId ? { ...b, tools } : b
+    );
+    props.editor.commands.updateNodeData(selectedNode.value.id, { branches });
+};
+
+const toggleBranchTool = (branchId: string, toolId: string) => {
+    const branch = parallelData.value.branches.find(
+        (b: BranchConfig) => b.id === branchId
+    );
+    if (!branch) return;
+
+    const currentTools = branch.tools || [];
+    const idx = currentTools.indexOf(toolId);
+    let newTools: string[];
+
+    if (idx === -1) {
+        newTools = [...currentTools, toolId];
+    } else {
+        newTools = [...currentTools];
+        newTools.splice(idx, 1);
+    }
+
+    updateBranchTools(branchId, newTools);
 };
 
 // Track which branch is expanded for editing
@@ -823,7 +852,7 @@ const handleDelete = () => {
                         ? 'Instructions'
                         : isWhileNode
                         ? 'Condition'
-                        : 'Prompt'
+                        : 'Instructions'
                 }}
             </button>
             <button
@@ -1071,8 +1100,8 @@ const handleDelete = () => {
                             isRouterNode
                                 ? 'Routing Instructions'
                                 : isParallelNode
-                                ? 'Merge Prompt'
-                                : 'System Prompt'
+                                ? 'Merge Instructions'
+                                : 'Instructions'
                         }}
                     </label>
                     <textarea
@@ -1250,12 +1279,6 @@ const handleDelete = () => {
                                     >
                                         {{ branch.model.split('/').pop() }}
                                     </span>
-                                    <span
-                                        v-if="branch.prompt"
-                                        class="branch-badge prompt"
-                                    >
-                                        prompt
-                                    </span>
                                 </div>
                             </div>
                             <div class="branch-actions">
@@ -1334,6 +1357,24 @@ const handleDelete = () => {
                                     placeholder="Override system prompt for this branch..."
                                     rows="3"
                                 ></textarea>
+                            </div>
+                            <div class="branch-field">
+                                <label class="field-label-sm">Tools (optional)</label>
+                                <div class="branch-tools">
+                                    <label
+                                        v-for="tool in availableTools"
+                                        :key="tool.id"
+                                        class="branch-tool-item"
+                                        :class="{ enabled: (branch.tools || []).includes(tool.id) }"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            :checked="(branch.tools || []).includes(tool.id)"
+                                            @change="toggleBranchTool(branch.id, tool.id)"
+                                        />
+                                        <span class="tool-name-sm">{{ tool.name }}</span>
+                                    </label>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2399,6 +2440,43 @@ const handleDelete = () => {
     padding-top: var(--or3-spacing-md, 16px);
 }
 
+.branch-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.branch-tool-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    background: var(--or3-color-bg-tertiary, #1a1a24);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.branch-tool-item:hover {
+    border-color: var(--or3-color-border-hover, rgba(255, 255, 255, 0.15));
+}
+
+.branch-tool-item.enabled {
+    border-color: var(--or3-color-accent, #8b5cf6);
+    background: var(--or3-color-accent-muted, rgba(139, 92, 246, 0.1));
+}
+
+.branch-tool-item input {
+    margin: 0;
+}
+
+.tool-name-sm {
+    font-size: 11px;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.7));
+}
+
 .info-box {
     padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 16px);
     background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.03));
@@ -2871,7 +2949,7 @@ const handleDelete = () => {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: var(--or3-spacing-md, 14px) var(--or3-spacing-md, 16px);
+    padding: 10px 12px;
     cursor: pointer;
     transition: background 0.15s;
     gap: var(--or3-spacing-sm, 8px);
@@ -2884,19 +2962,38 @@ const handleDelete = () => {
 .branch-inputs {
     flex: 1;
     display: flex;
-    align-items: center;
-    gap: var(--or3-spacing-sm, 12px);
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
     min-width: 0;
 }
 
 .branch-label {
-    flex: 1;
+    width: 100%;
     min-width: 0;
     font-weight: 500;
+    background: transparent;
+    border: 1px solid transparent;
+    padding: 2px 6px;
+    margin: 0 -6px;
+    border-radius: 4px;
+    transition: all 0.15s;
+    font-size: 13px;
+}
+
+.branch-label:hover {
+    background: var(--or3-color-bg-tertiary, rgba(255, 255, 255, 0.05));
+}
+
+.branch-label:focus {
+    background: var(--or3-color-bg-primary, #0a0a0f);
+    border-color: var(--or3-color-primary, #6366f1);
+    outline: none;
 }
 
 .branch-badges {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
     flex-shrink: 0;
 }

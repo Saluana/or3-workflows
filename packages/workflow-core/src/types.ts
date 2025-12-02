@@ -353,6 +353,7 @@ export interface BranchDefinition {
     label: string;
     model?: string;
     prompt?: string;
+    tools?: string[];
 }
 
 /**
@@ -731,6 +732,7 @@ const BranchDefinitionSchema = z.object({
     label: z.string(),
     model: z.string().optional(),
     prompt: z.string().optional(),
+    tools: z.array(z.string()).optional(),
 });
 
 const ParallelNodeDataSchema = BaseNodeDataSchema.extend({

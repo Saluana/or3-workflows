@@ -24,6 +24,7 @@ const classes = computed(() => [
 
 <template>
     <div :class="classes">
+        <div class="node-id">{{ id.slice(0, 6) }}</div>
         <slot />
     </div>
 </template>
@@ -125,5 +126,25 @@ const classes = computed(() => [
 
 .variant-secondary.status-active {
     box-shadow: var(--or3-shadow-glow, 0 0 20px rgba(100, 116, 139, 0.3));
+}
+
+.node-id {
+    position: absolute;
+    top: -20px;
+    right: 0;
+    font-size: 10px;
+    font-family: monospace;
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+    background: var(--or3-color-bg-tertiary, #18181d);
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.node-wrapper:hover .node-id {
+    opacity: 1;
 }
 </style>

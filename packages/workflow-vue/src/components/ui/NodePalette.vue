@@ -8,9 +8,9 @@ defineProps<{
 const nodeTypes = [
     {
         type: 'agent',
-        label: 'Agent Node',
+        label: 'AI Agent',
         description:
-            'Connect to any LLM model to process and respond to messages',
+            'Connect to an AI model to process and respond to messages',
         colorVar: '--or3-color-accent',
         defaultData: {
             label: 'New Agent',
@@ -20,20 +20,20 @@ const nodeTypes = [
     },
     {
         type: 'router',
-        label: 'Router Node',
+        label: 'Decision',
         description:
-            'Intelligently route messages to different paths based on intent',
+            'Route messages to different paths based on intent',
         colorVar: '--or3-color-warning',
         defaultData: {
-            label: 'Router',
+            label: 'Decision',
             // Routes are derived from connected edges
         },
     },
     {
         type: 'parallel',
-        label: 'Parallel Node',
+        label: 'Parallel',
         description:
-            'Execute multiple branches simultaneously and combine results',
+            'Run multiple tasks at once and combine results',
         colorVar: '--or3-color-info',
         defaultData: {
             label: 'Parallel',
@@ -44,8 +44,8 @@ const nodeTypes = [
     },
     {
         type: 'tool',
-        label: 'Tool Node',
-        description: 'Call external APIs, functions, or custom tools',
+        label: 'Tool',
+        description: 'Call external APIs or functions',
         colorVar: '--or3-color-secondary',
         defaultData: {
             label: 'Tool',
@@ -54,9 +54,9 @@ const nodeTypes = [
     },
     {
         type: 'memory',
-        label: 'Memory Node',
+        label: 'Memory',
         description:
-            'Store and retrieve long-term context across conversations',
+            'Store and retrieve long-term context',
         colorVar: '--or3-color-info',
         defaultData: {
             label: 'Memory',
@@ -67,11 +67,11 @@ const nodeTypes = [
     },
     {
         type: 'whileLoop',
-        label: 'While Loop',
+        label: 'Loop',
         description: 'Repeat a sequence until a condition is met',
         colorVar: '--or3-color-info',
         defaultData: {
-            label: 'While Loop',
+            label: 'Loop',
             conditionPrompt:
                 'Should we continue iterating? Respond with "continue" or "done".',
             maxIterations: 10,
@@ -80,11 +80,11 @@ const nodeTypes = [
     },
     {
         type: 'subflow',
-        label: 'Subflow',
-        description: 'Embed and reuse another workflow as a single node',
+        label: 'Sub-workflow',
+        description: 'Embed another workflow as a single node',
         colorVar: '--or3-color-secondary',
         defaultData: {
-            label: 'Subflow',
+            label: 'Sub-workflow',
             subflowId: '',
             inputMappings: {},
             shareSession: true,
@@ -92,8 +92,8 @@ const nodeTypes = [
     },
     {
         type: 'output',
-        label: 'Output Node',
-        description: 'Define the final output format and structure',
+        label: 'Output',
+        description: 'Define the final output format',
         colorVar: '--or3-color-success',
         defaultData: {
             label: 'Output',

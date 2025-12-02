@@ -3,9 +3,15 @@ import { ref, watch, nextTick, computed } from 'vue';
 import { useExecutionState, type UseExecutionStateReturn } from '../../composables/useExecutionState';
 
 export interface ChatMessage {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   content: string;
   nodeId?: string;
+  toolCalls?: Array<{
+    function: {
+      name: string;
+      arguments: string;
+    };
+  }>;
 }
 
 const props = defineProps<{
@@ -117,7 +123,13 @@ const handleKeydown = (e: KeyboardEvent) => {
           </svg>
         </div>
         <div class="message-body">
-          <div class="message-content">{{ msg.content }}</div>
+          <div v-if="msg.toolCalls && msg.toolCalls.length > 0" class="tool-calls">
+            <div v-for="(tool, tIdx) in msg.toolCalls" :key="tIdx" class="tool-call">
+              <span class="tool-icon">🛠️</span>
+              <span class="tool-name">Used {{ tool.function.name }}</span>
+            </div>
+          </div>
+          <div class="message-content" v-if="msg.content">{{ msg.content }}</div>
           <div v-if="msg.nodeId" class="message-meta">via {{ msg.nodeId }}</div>
         </div>
       </div>
@@ -297,6 +309,33 @@ const handleKeydown = (e: KeyboardEvent) => {
   margin-top: var(--or3-spacing-xs, 4px);
   font-size: 11px;
   color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+}
+
+.tool-calls {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.tool-call {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+  background: var(--or3-color-surface-hover, rgba(34, 34, 46, 0.5));
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+}
+
+.tool-icon {
+  font-size: 10px;
+}
+
+.tool-name {
+  font-family: monospace;
 }
 
 .cursor {

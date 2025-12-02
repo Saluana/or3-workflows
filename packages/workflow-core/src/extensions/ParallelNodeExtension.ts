@@ -15,11 +15,144 @@ import { estimateTokenUsage } from '../compaction';
 
 const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
 
+/** Default maximum number of tool call iterations */
+const DEFAULT_MAX_TOOL_ITERATIONS = 10;
+
+/** Tool definition for LLM calls */
+interface ToolForLLM {
+    type: 'function';
+    function: {
+        name: string;
+        description?: string;
+        parameters?: Record<string, unknown>;
+    };
+}
+
+/** Result from running a tool loop */
+interface ToolLoopResult {
+    finalContent: string;
+    iterations: number;
+    messages: ChatMessage[];
+}
+
+/**
+ * Run the tool execution loop for a branch.
+ */
+async function runToolLoop(
+    provider: LLMProvider,
+    model: string,
+    messages: ChatMessage[],
+    toolsForLLM: ToolForLLM[] | undefined,
+    toolHandlers: Map<string, (args: unknown) => Promise<string> | string>,
+    context: ExecutionContext,
+    branchId: string,
+    branchLabel: string,
+    maxIterations: number
+): Promise<ToolLoopResult> {
+    const currentMessages = [...messages];
+    let iterations = 0;
+    let finalContent = '';
+
+    while (iterations < maxIterations) {
+        const requestMessages = [...currentMessages];
+        const result = await provider.chat(model, currentMessages, {
+            tools: toolsForLLM,
+            onToken: (token) => {
+                context.onBranchToken?.(branchId, branchLabel, token);
+            },
+            onReasoning: (token) => {
+                context.onBranchReasoning?.(branchId, branchLabel, token);
+            },
+        });
+
+        if (context.tokenCounter && context.onTokenUsage) {
+            let usage = estimateTokenUsage({
+                model,
+                messages: requestMessages,
+                output: result.content || '',
+                tokenCounter: context.tokenCounter,
+                compaction: context.compaction,
+            });
+
+            if (result.usage) {
+                usage = {
+                    ...usage,
+                    promptTokens: result.usage.promptTokens,
+                    completionTokens: result.usage.completionTokens,
+                    totalTokens: result.usage.totalTokens,
+                };
+            }
+
+            context.onTokenUsage(usage);
+        }
+
+        // If no tool calls, we're done
+        if (!result.toolCalls || result.toolCalls.length === 0) {
+            finalContent = result.content || '';
+            break;
+        }
+
+        // Add assistant message with tool calls
+        currentMessages.push({
+            role: 'assistant',
+            content: result.content || '',
+        });
+
+        // Execute tool calls
+        for (const toolCall of result.toolCalls) {
+            const toolName = toolCall.function?.name;
+            const toolArgs = toolCall.function?.arguments;
+
+            let parsedArgs: unknown;
+            try {
+                parsedArgs =
+                    typeof toolArgs === 'string'
+                        ? JSON.parse(toolArgs)
+                        : toolArgs;
+            } catch {
+                parsedArgs = toolArgs;
+            }
+
+            let toolResult: string;
+            const handler = toolHandlers.get(toolName);
+
+            if (handler) {
+                try {
+                    toolResult = await handler(parsedArgs);
+                } catch (err) {
+                    toolResult = `Error executing tool ${toolName}: ${
+                        err instanceof Error ? err.message : String(err)
+                    }`;
+                }
+            } else if (context.onToolCall) {
+                try {
+                    toolResult = await context.onToolCall(toolName, parsedArgs);
+                } catch (err) {
+                    toolResult = `Error executing tool ${toolName}: ${
+                        err instanceof Error ? err.message : String(err)
+                    }`;
+                }
+            } else {
+                toolResult = `Tool ${toolName} not found or no handler registered`;
+            }
+
+            currentMessages.push({
+                role: 'system',
+                content: `[Tool Result: ${toolName}]\n${toolResult}`,
+            });
+        }
+
+        iterations++;
+    }
+
+    return { finalContent, iterations, messages: currentMessages };
+}
+
 /**
  * Parallel Node Extension
  *
  * Executes multiple branches concurrently and optionally merges the results.
- * Each branch can have its own model and prompt configuration.
+ * Each branch can have its own model, prompt, and tools.
  */
 export const ParallelNodeExtension: NodeExtension = {
     name: 'parallel',
@@ -99,6 +232,18 @@ export const ParallelNodeExtension: NodeExtension = {
             });
         };
 
+        // Prepare global tools map
+        const globalTools = context.tools || [];
+        const toolHandlers = new Map<
+            string,
+            (args: unknown) => Promise<string> | string
+        >();
+        for (const tool of globalTools) {
+            if (tool.handler) {
+                toolHandlers.set(tool.function.name, tool.handler);
+            }
+        }
+
         // Execute all branches internally using their model/prompt configs
         // Branches are internal LLM calls, not external node connections
         const branchExecutions = branches.map((branch) => {
@@ -112,6 +257,25 @@ export const ParallelNodeExtension: NodeExtension = {
                 { role: 'user', content: context.input },
             ];
 
+            // Prepare tools for this branch
+            const branchToolNames = branch.tools || [];
+            let toolsForLLM: ToolForLLM[] | undefined;
+
+            if (branchToolNames.length > 0) {
+                toolsForLLM = branchToolNames.map((name): ToolForLLM => {
+                    const globalTool = globalTools.find(
+                        (t) => t.function.name === name
+                    );
+                    if (globalTool) {
+                        return {
+                            type: 'function',
+                            function: globalTool.function,
+                        };
+                    }
+                    return { type: 'function', function: { name } };
+                });
+            }
+
             const executionPromise = (async () => {
                 if (!provider) {
                     throw new Error('Parallel node requires LLM provider');
@@ -120,47 +284,20 @@ export const ParallelNodeExtension: NodeExtension = {
                 // Notify branch start
                 context.onBranchStart?.(branch.id, branch.label);
 
-                const result = await provider.chat(branchModel, messages, {
-                    // Stream tokens for this branch
-                    onToken: (token) => {
-                        context.onBranchToken?.(
-                            branch.id,
-                            branch.label,
-                            token
-                        );
-                    },
-                    // Stream reasoning tokens for this branch
-                    onReasoning: (token) => {
-                        context.onBranchReasoning?.(
-                            branch.id,
-                            branch.label,
-                            token
-                        );
-                    },
-                });
+                // Run tool loop
+                const result = await runToolLoop(
+                    provider,
+                    branchModel,
+                    messages,
+                    toolsForLLM,
+                    toolHandlers,
+                    context,
+                    branch.id,
+                    branch.label,
+                    DEFAULT_MAX_TOOL_ITERATIONS
+                );
 
-                if (context.tokenCounter && context.onTokenUsage) {
-                    let usage = estimateTokenUsage({
-                        model: branchModel,
-                        messages,
-                        output: result.content || '',
-                        tokenCounter: context.tokenCounter,
-                        compaction: context.compaction,
-                    });
-
-                    if (result.usage) {
-                        usage = {
-                            ...usage,
-                            promptTokens: result.usage.promptTokens,
-                            completionTokens: result.usage.completionTokens,
-                            totalTokens: result.usage.totalTokens,
-                        };
-                    }
-
-                    context.onTokenUsage(usage);
-                }
-
-                const output = result.content || '';
+                const output = result.finalContent;
 
                 // Notify branch complete
                 context.onBranchComplete?.(branch.id, branch.label, output);
@@ -454,3 +591,4 @@ export const ParallelNodeExtension: NodeExtension = {
         }));
     },
 };
+
