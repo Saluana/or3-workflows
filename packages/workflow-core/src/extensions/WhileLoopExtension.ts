@@ -88,6 +88,11 @@ export const WhileLoopExtension: NodeExtension = {
         const buildBodyInput = (baseInput: string): string => {
             const parts: string[] = [];
 
+            // Add loop instructions if provided
+            if (data.loopPrompt?.trim()) {
+                parts.push(`[Instructions: ${data.loopPrompt.trim()}]`);
+            }
+
             // Add iteration context if enabled
             if (includeIterationContext) {
                 parts.push(`[Iteration ${iteration + 1} of ${maxIterations}]`);

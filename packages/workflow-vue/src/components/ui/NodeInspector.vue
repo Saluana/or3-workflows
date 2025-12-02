@@ -552,6 +552,10 @@ const updateOutputMode = (event: Event) => {
     debouncedUpdate('outputMode', (event.target as HTMLSelectElement).value);
 };
 
+const updateLoopPrompt = (event: Event) => {
+    debouncedUpdate('loopPrompt', (event.target as HTMLTextAreaElement).value);
+};
+
 // HITL update handlers
 const updateHITL = (partial: Partial<HITLConfig>) => {
     if (!selectedNode.value) return;
@@ -1154,6 +1158,27 @@ const handleDelete = () => {
                                 <option value="error">Stop with Error</option>
                             </select>
                         </div>
+                    </div>
+
+                    <!-- Loop Instructions -->
+                    <div
+                        class="field-group"
+                        style="margin-top: var(--or3-spacing-md)"
+                    >
+                        <label class="field-label">Loop Instructions</label>
+                        <textarea
+                            :value="whileData.loopPrompt || ''"
+                            class="prompt-textarea loop-prompt"
+                            placeholder='Tell the AI what to do each time.
+
+Example: "Improve this text, making it clearer and more engaging."'
+                            @input="updateLoopPrompt"
+                            rows="3"
+                        ></textarea>
+                        <p class="field-hint">
+                            These instructions are added to the input at the
+                            start of each run.
+                        </p>
                     </div>
 
                     <!-- Output Configuration -->
@@ -3351,6 +3376,10 @@ const handleDelete = () => {
 
 .condition-prompt {
     min-height: 120px;
+}
+
+.loop-prompt {
+    min-height: 80px;
 }
 
 .loop-grid {

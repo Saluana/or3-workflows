@@ -368,6 +368,13 @@ export interface WhileLoopNodeData extends BaseNodeData {
     onMaxIterations: 'error' | 'warning' | 'continue';
     customEvaluator?: string;
 
+    /**
+     * Instructions to prepend to each iteration's input.
+     * Use this to guide what happens in each loop cycle.
+     * Example: "Improve this text, making it clearer and more concise."
+     */
+    loopPrompt?: string;
+
     // Loop mode settings
     /**
      * Loop mode: 'condition' uses LLM to evaluate, 'fixed' runs exactly maxIterations times
