@@ -43,6 +43,10 @@ export const WhileLoopExtension: NodeExtension = {
             'Based on the current output, should we continue iterating to improve the result? Respond with only "continue" or "done".',
         maxIterations: 10,
         onMaxIterations: 'warning',
+        loopMode: 'condition',
+        includePreviousOutputs: true,
+        includeIterationContext: false,
+        outputMode: 'last',
     },
 
     async execute(
@@ -52,27 +56,11 @@ export const WhileLoopExtension: NodeExtension = {
     ): Promise<{ output: string; nextNodes: string[] }> {
         const data = node.data as WhileLoopNodeData;
 
-        // We need persistent state for the loop.
-        // Since ExecutionContext is recreated or passed around, we need a way to persist state.
-        // The adapter's `loopStates` map was used for this.
-        // We can use `context.outputs` to store state keyed by node ID if we serialize it?
-        // Or we might need a `state` property in ExecutionContext that is mutable/persistent.
-        // But `context.outputs` is for node outputs.
-        // The original implementation in execution.ts used `this.loopStates`.
-        // We don't have access to the adapter instance here.
-        // HOWEVER, `executeSubgraph` is provided by the adapter.
-        // If we handle the loop logic INSIDE this execute method (blocking), we don't need external state persistence across `execute` calls
-        // IF we run the whole loop here.
-
-        // The original implementation returned `nextNodes: [node.id]` to re-queue itself.
-        // That approach relies on the adapter maintaining state between calls.
-        // If we want to move logic here, we can either:
-        // 1. Run the ENTIRE loop inside this execute method (blocking the adapter's queue for this branch).
-        // 2. Keep the re-queueing mechanism but store state somewhere.
-
-        // Option 1 is cleaner for the extension model IF we have `executeSubgraph`.
-        // `executeSubgraph` allows us to run the body nodes until they finish.
-        // So let's try Option 1: The "While Loop" node runs the whole loop loop synchronously (from the adapter's perspective).
+        // Get settings with defaults
+        const loopMode = data.loopMode ?? 'condition';
+        const includePreviousOutputs = data.includePreviousOutputs ?? true;
+        const includeIterationContext = data.includeIterationContext ?? false;
+        const outputMode = data.outputMode ?? 'last';
 
         if (!context.executeSubgraph) {
             throw new Error(
@@ -94,8 +82,43 @@ export const WhileLoopExtension: NodeExtension = {
         const maxIterations = data.maxIterations || 10;
         const outputs: string[] = [];
 
+        /**
+         * Build the input for the body, enriched with context based on settings
+         */
+        const buildBodyInput = (baseInput: string): string => {
+            const parts: string[] = [];
+
+            // Add iteration context if enabled
+            if (includeIterationContext) {
+                parts.push(`[Iteration ${iteration + 1} of ${maxIterations}]`);
+            }
+
+            // Add previous outputs context (enabled by default)
+            if (includePreviousOutputs && outputs.length > 0) {
+                parts.push(`[Previous attempts (${outputs.length}):]`);
+                outputs.forEach((output, idx) => {
+                    // Truncate long outputs to avoid context explosion
+                    const truncated =
+                        output.length > 500
+                            ? output.substring(0, 500) + '...[truncated]'
+                            : output;
+                    parts.push(`Attempt ${idx + 1}: ${truncated}`);
+                });
+                parts.push('[Current input to improve:]');
+            }
+
+            parts.push(baseInput);
+
+            return parts.join('\n\n');
+        };
+
         // Helper function to evaluate the loop condition
         const evaluateCondition = async (): Promise<boolean> => {
+            // Fixed mode: always continue until max iterations
+            if (loopMode === 'fixed') {
+                return iteration < maxIterations;
+            }
+
             if (
                 data.customEvaluator &&
                 context.customEvaluators?.[data.customEvaluator]
@@ -186,13 +209,17 @@ Respond with only "continue" or "done".`;
         };
 
         // Check condition BEFORE first iteration (proper while-loop semantics)
+        // For fixed mode, we always start (evaluateCondition returns true if iteration < max)
         let shouldContinue = await evaluateCondition();
 
         while (shouldContinue && iteration < maxIterations) {
-            // Execute Body
+            // Build enriched input for the body
+            const enrichedInput = buildBodyInput(currentInput);
+
+            // Execute Body with enriched context
             const result = await context.executeSubgraph(
                 bodyStartNodeId,
-                currentInput
+                enrichedInput
             );
 
             // Update State
@@ -223,9 +250,22 @@ Respond with only "continue" or "done".`;
             // 'continue' mode: silently continue without warning or error
         }
 
+        // Build final output based on output mode
+        let finalOutput: string;
+        if (outputMode === 'accumulate') {
+            finalOutput = JSON.stringify({
+                iterations: iteration,
+                outputs: outputs,
+                finalOutput: currentInput,
+            });
+        } else {
+            // 'last' mode - just return the final output
+            finalOutput = currentInput;
+        }
+
         // Done
         return {
-            output: currentInput,
+            output: finalOutput,
             nextNodes: exitEdges.map((e) => e.target),
         };
     },
@@ -236,12 +276,18 @@ Respond with only "continue" or "done".`;
     ): (ValidationError | ValidationWarning)[] {
         const errors: (ValidationError | ValidationWarning)[] = [];
         const data = node.data as WhileLoopNodeData;
+        const loopMode = data.loopMode ?? 'condition';
 
-        if (!data.conditionPrompt || data.conditionPrompt.trim() === '') {
+        // Condition prompt only required in condition mode
+        if (
+            loopMode === 'condition' &&
+            (!data.conditionPrompt || data.conditionPrompt.trim() === '')
+        ) {
             errors.push({
                 type: 'error',
                 code: 'MISSING_CONDITION_PROMPT',
-                message: 'While loop requires a condition prompt',
+                message:
+                    'While loop requires a condition prompt (or switch to fixed mode)',
                 nodeId: node.id,
             });
         }

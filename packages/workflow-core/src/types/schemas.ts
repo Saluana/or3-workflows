@@ -114,6 +114,10 @@ const WhileLoopNodeDataSchema = BaseNodeDataSchema.extend({
         .positive('maxIterations must be a positive integer'),
     onMaxIterations: z.enum(['error', 'warning', 'continue']),
     customEvaluator: z.string().optional(),
+    loopMode: z.enum(['condition', 'fixed']).optional(),
+    includePreviousOutputs: z.boolean().optional(),
+    includeIterationContext: z.boolean().optional(),
+    outputMode: z.enum(['last', 'accumulate']).optional(),
 });
 
 const SubflowNodeDataSchema = BaseNodeDataSchema.extend({

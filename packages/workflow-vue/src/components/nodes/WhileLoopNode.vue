@@ -10,6 +10,8 @@ const props = defineProps<{
         conditionPrompt?: string;
         maxIterations?: number;
         status?: 'idle' | 'active' | 'completed' | 'error';
+        loopMode?: 'condition' | 'fixed';
+        outputMode?: 'last' | 'accumulate';
     };
     selected?: boolean;
 }>();
@@ -17,40 +19,63 @@ const props = defineProps<{
 const label = computed(() => props.data.label || 'While Loop');
 const status = computed(() => props.data.status || 'idle');
 const maxIterations = computed(() => props.data.maxIterations ?? 10);
+const loopMode = computed(() => props.data.loopMode ?? 'condition');
+const outputMode = computed(() => props.data.outputMode ?? 'last');
 const iteration = computed(() =>
     typeof (props.data as any).iteration === 'number'
         ? (props.data as any).iteration
         : null
 );
+
+const modeLabel = computed(() =>
+    loopMode.value === 'fixed' ? 'Fixed' : 'While'
+);
 </script>
 
 <template>
-    <NodeWrapper
-        :id="id"
-        :selected="selected"
-        :status="status"
-        variant="info"
-    >
+    <NodeWrapper :id="id" :selected="selected" :status="status" variant="info">
         <Handle type="target" :position="Position.Top" class="handle" />
 
         <div class="while-node">
             <div class="node-header">
                 <div class="icon-wrapper">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                    >
                         <path d="M5 12h4" />
                         <path d="M15 12h4" />
                         <path d="M9 12c0-4 6-4 6 0s-6 4-6 0Z" />
                     </svg>
                 </div>
                 <span class="node-label">{{ label }}</span>
-                <span class="pill">While</span>
+                <span class="pill" :class="{ fixed: loopMode === 'fixed' }">{{
+                    modeLabel
+                }}</span>
             </div>
             <div class="meta">
-                <span class="meta-item"><strong>Max:</strong> {{ maxIterations }}</span>
+                <span class="meta-item"
+                    ><strong>Max:</strong> {{ maxIterations }}</span
+                >
                 <span class="meta-item"
                     ><strong>Iter:</strong> {{ iteration ?? '—' }}</span
                 >
+                <span
+                    v-if="outputMode === 'accumulate'"
+                    class="meta-item accumulate-badge"
+                    title="Collects all outputs"
+                >
+                    📦
+                </span>
             </div>
+        </div>
+
+        <!-- Port labels -->
+        <div class="port-labels">
+            <span class="port-label body-label">↻ Loop</span>
+            <span class="port-label done-label">✓ Exit</span>
         </div>
 
         <Handle
@@ -112,16 +137,53 @@ const iteration = computed(() =>
     letter-spacing: 0.5px;
 }
 
+.pill.fixed {
+    background: rgba(168, 85, 247, 0.15);
+    border-color: #a855f7;
+    color: #a855f7;
+}
+
 .meta {
     display: flex;
     gap: var(--or3-spacing-xs, 4px);
     font-size: 11px;
     color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
+    align-items: center;
 }
 
 .meta-item strong {
     color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.7));
     font-weight: 600;
+}
+
+.accumulate-badge {
+    font-size: 12px;
+    margin-left: auto;
+}
+
+.port-labels {
+    display: flex;
+    justify-content: space-between;
+    padding: 0 8px;
+    margin-top: 4px;
+}
+
+.port-label {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    letter-spacing: 0.3px;
+}
+
+.body-label {
+    color: var(--or3-color-warning, #f59e0b);
+    background: rgba(245, 158, 11, 0.15);
+}
+
+.done-label {
+    color: var(--or3-color-success, #22c55e);
+    background: rgba(34, 197, 94, 0.15);
 }
 
 .handle {

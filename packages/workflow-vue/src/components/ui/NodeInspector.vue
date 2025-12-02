@@ -527,6 +527,31 @@ const updateCustomEvaluator = (event: Event) => {
     );
 };
 
+// Loop mode handlers
+const updateLoopMode = (event: Event) => {
+    debouncedUpdate('loopMode', (event.target as HTMLSelectElement).value);
+};
+
+const toggleIncludePreviousOutputs = () => {
+    if (!selectedNode.value) return;
+    const current = whileData.value.includePreviousOutputs !== false; // default true
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        includePreviousOutputs: !current,
+    });
+};
+
+const toggleIncludeIterationContext = () => {
+    if (!selectedNode.value) return;
+    const current = whileData.value.includeIterationContext !== false; // default true
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        includeIterationContext: !current,
+    });
+};
+
+const updateOutputMode = (event: Event) => {
+    debouncedUpdate('outputMode', (event.target as HTMLSelectElement).value);
+};
+
 // HITL update handlers
 const updateHITL = (partial: Partial<HITLConfig>) => {
     if (!selectedNode.value) return;
@@ -1044,16 +1069,67 @@ const handleDelete = () => {
                 class="prompt-tab"
             >
                 <template v-if="isWhileNode">
-                    <label class="field-label">Condition Prompt</label>
-                    <textarea
-                        :value="whileData.conditionPrompt || ''"
-                        class="prompt-textarea"
-                        placeholder='Describe when to continue. Example: "If quality is low, respond continue; otherwise respond done."'
-                        @input="updatePrompt"
-                    ></textarea>
-                    <div class="grid">
+                    <!-- Loop Mode Selection -->
+                    <div class="field-group">
+                        <label class="field-label">Loop Strategy</label>
+                        <div class="mode-buttons">
+                            <button
+                                class="mode-button"
+                                :class="{
+                                    active: whileData.loopMode !== 'fixed',
+                                }"
+                                @click="
+                                    updateLoopMode({
+                                        target: { value: 'while' },
+                                    } as any)
+                                "
+                            >
+                                Smart Loop (AI)
+                            </button>
+                            <button
+                                class="mode-button"
+                                :class="{
+                                    active: whileData.loopMode === 'fixed',
+                                }"
+                                @click="
+                                    updateLoopMode({
+                                        target: { value: 'fixed' },
+                                    } as any)
+                                "
+                            >
+                                Fixed Count
+                            </button>
+                        </div>
+                        <p class="field-hint">
+                            {{
+                                whileData.loopMode === 'fixed'
+                                    ? 'Runs exactly N times. Good for batch processing.'
+                                    : 'AI evaluates results to decide when to stop.'
+                            }}
+                        </p>
+                    </div>
+
+                    <!-- Condition Prompt (only for while mode) -->
+                    <template v-if="whileData.loopMode !== 'fixed'">
                         <div class="field-group">
-                            <label class="field-label">Max iterations</label>
+                            <label class="field-label">Stop Condition</label>
+                            <textarea
+                                :value="whileData.conditionPrompt || ''"
+                                class="prompt-textarea condition-prompt"
+                                placeholder='Example: "If the summary is concise and covers all points, respond DONE. Otherwise respond CONTINUE."'
+                                @input="updatePrompt"
+                                rows="4"
+                            ></textarea>
+                        </div>
+                    </template>
+
+                    <div class="grid loop-grid">
+                        <div class="field-group">
+                            <label class="field-label">{{
+                                whileData.loopMode === 'fixed'
+                                    ? 'Run Count'
+                                    : 'Max Limit'
+                            }}</label>
                             <input
                                 type="number"
                                 min="1"
@@ -1063,36 +1139,149 @@ const handleDelete = () => {
                             />
                         </div>
                         <div class="field-group">
-                            <label class="field-label">On max behavior</label>
+                            <label class="field-label">On Limit Reached</label>
                             <select
                                 class="model-select"
                                 :value="whileData.onMaxIterations || 'warning'"
                                 @change="updateOnMaxBehavior"
                             >
                                 <option value="warning">
-                                    Warning then exit
+                                    Warn &amp; Continue
                                 </option>
-                                <option value="continue">Exit silently</option>
-                                <option value="error">Throw error</option>
+                                <option value="continue">
+                                    Silent Continue
+                                </option>
+                                <option value="error">Stop with Error</option>
                             </select>
                         </div>
                     </div>
-                    <div class="field-group">
-                        <label class="field-label"
-                            >Custom evaluator (optional)</label
-                        >
-                        <input
-                            type="text"
-                            class="text-input"
-                            :value="whileData.customEvaluator || ''"
-                            placeholder="Name of custom evaluator"
-                            @input="updateCustomEvaluator"
-                        />
+
+                    <!-- Output Configuration -->
+                    <div
+                        class="field-group"
+                        style="margin-top: var(--or3-spacing-lg)"
+                    >
+                        <label class="field-label">Output Handling</label>
+                        <div class="mode-buttons">
+                            <button
+                                class="mode-button"
+                                :class="{
+                                    active:
+                                        (whileData.outputMode || 'last') ===
+                                        'last',
+                                }"
+                                @click="
+                                    updateOutputMode({
+                                        target: { value: 'last' },
+                                    } as any)
+                                "
+                            >
+                                Last Result Only
+                            </button>
+                            <button
+                                class="mode-button"
+                                :class="{
+                                    active:
+                                        whileData.outputMode === 'accumulate',
+                                }"
+                                @click="
+                                    updateOutputMode({
+                                        target: { value: 'accumulate' },
+                                    } as any)
+                                "
+                            >
+                                Collect All
+                            </button>
+                        </div>
                     </div>
-                    <p class="field-hint">
-                        Loops run at least once. Provide a custom evaluator name
-                        to use an injected function instead of an LLM.
+
+                    <div class="section-divider"></div>
+
+                    <label class="field-label section-title"
+                        >Context Visibility</label
+                    >
+                    <p class="section-subtitle">
+                        Choose what information is available to nodes inside the
+                        loop.
                     </p>
+
+                    <div class="toggle-group">
+                        <label
+                            class="tool-item"
+                            :class="{
+                                enabled:
+                                    whileData.includePreviousOutputs !== false,
+                            }"
+                        >
+                            <input
+                                type="checkbox"
+                                :checked="
+                                    whileData.includePreviousOutputs !== false
+                                "
+                                @change="toggleIncludePreviousOutputs"
+                            />
+                            <div class="tool-info">
+                                <span class="tool-name"
+                                    >Previous Iterations</span
+                                >
+                                <span class="tool-description"
+                                    >Let the AI see results from earlier
+                                    runs</span
+                                >
+                            </div>
+                        </label>
+
+                        <label
+                            class="tool-item"
+                            :class="{
+                                enabled:
+                                    whileData.includeIterationContext !== false,
+                            }"
+                        >
+                            <input
+                                type="checkbox"
+                                :checked="
+                                    whileData.includeIterationContext !== false
+                                "
+                                @change="toggleIncludeIterationContext"
+                            />
+                            <div class="tool-info">
+                                <span class="tool-name">Loop Counter</span>
+                                <span class="tool-description"
+                                    >Show current iteration number (1/10)</span
+                                >
+                            </div>
+                        </label>
+                    </div>
+
+                    <!-- Advanced (Custom Evaluator) -->
+                    <template v-if="whileData.loopMode !== 'fixed'">
+                        <div class="section-divider"></div>
+                        <details class="advanced-section">
+                            <summary class="advanced-toggle">
+                                Advanced: Custom Evaluator
+                            </summary>
+                            <div class="advanced-content">
+                                <div class="field-group">
+                                    <label class="field-label"
+                                        >Function Name</label
+                                    >
+                                    <input
+                                        type="text"
+                                        class="text-input"
+                                        :value="whileData.customEvaluator || ''"
+                                        placeholder="e.g. checkQualityScore"
+                                        @input="updateCustomEvaluator"
+                                    />
+                                    <p class="field-hint">
+                                        Bypass AI evaluation and use a
+                                        registered function to decide when to
+                                        stop.
+                                    </p>
+                                </div>
+                            </div>
+                        </details>
+                    </template>
                 </template>
                 <template v-else>
                     <label class="field-label">
@@ -1359,20 +1548,37 @@ const handleDelete = () => {
                                 ></textarea>
                             </div>
                             <div class="branch-field">
-                                <label class="field-label-sm">Tools (optional)</label>
+                                <label class="field-label-sm"
+                                    >Tools (optional)</label
+                                >
                                 <div class="branch-tools">
                                     <label
                                         v-for="tool in availableTools"
                                         :key="tool.id"
                                         class="branch-tool-item"
-                                        :class="{ enabled: (branch.tools || []).includes(tool.id) }"
+                                        :class="{
+                                            enabled: (
+                                                branch.tools || []
+                                            ).includes(tool.id),
+                                        }"
                                     >
                                         <input
                                             type="checkbox"
-                                            :checked="(branch.tools || []).includes(tool.id)"
-                                            @change="toggleBranchTool(branch.id, tool.id)"
+                                            :checked="
+                                                (branch.tools || []).includes(
+                                                    tool.id
+                                                )
+                                            "
+                                            @change="
+                                                toggleBranchTool(
+                                                    branch.id,
+                                                    tool.id
+                                                )
+                                            "
                                         />
-                                        <span class="tool-name-sm">{{ tool.name }}</span>
+                                        <span class="tool-name-sm">{{
+                                            tool.name
+                                        }}</span>
                                     </label>
                                 </div>
                             </div>
@@ -3124,6 +3330,104 @@ const handleDelete = () => {
     display: flex;
     flex-direction: column;
     gap: var(--or3-spacing-xs, 6px);
+    margin-top: var(--or3-spacing-md, 12px);
+}
+
+/* Loop Settings */
+.loop-intro {
+    margin-bottom: var(--or3-spacing-md, 16px);
+    padding: var(--or3-spacing-md, 14px);
+    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.03));
+    border-radius: var(--or3-radius-md, 10px);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+}
+
+.intro-text {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.7));
+    margin: 0;
+}
+
+.condition-prompt {
+    min-height: 120px;
+}
+
+.loop-grid {
+    margin-top: var(--or3-spacing-md, 16px);
+}
+
+.section-divider {
+    height: 1px;
+    background: var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    margin: var(--or3-spacing-lg, 20px) 0 var(--or3-spacing-md, 16px);
+}
+
+.section-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
+    margin-bottom: var(--or3-spacing-xs, 4px);
+}
+
+.section-subtitle {
+    font-size: 12px;
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+    margin: 0 0 var(--or3-spacing-md, 14px);
+    line-height: 1.4;
+}
+
+.toggle-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-sm, 8px);
+}
+
+.toggle-row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-xs, 4px);
+}
+
+.toggle-row .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: var(--or3-spacing-sm, 8px);
+    cursor: pointer;
+}
+
+.toggle-row .toggle-label input[type='checkbox'] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--or3-color-info, #3b82f6);
+}
+
+.toggle-row .toggle-label .toggle-text {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
+}
+
+/* Advanced section */
+.advanced-section {
+    margin-top: var(--or3-spacing-sm, 8px);
+}
+
+.advanced-toggle {
+    font-size: 12px;
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
+    cursor: pointer;
+    padding: var(--or3-spacing-xs, 6px) 0;
+    user-select: none;
+}
+
+.advanced-toggle:hover {
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.7));
+}
+
+.advanced-content {
     margin-top: var(--or3-spacing-md, 12px);
 }
 </style>

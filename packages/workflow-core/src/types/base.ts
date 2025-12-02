@@ -367,6 +367,31 @@ export interface WhileLoopNodeData extends BaseNodeData {
     maxIterations: number;
     onMaxIterations: 'error' | 'warning' | 'continue';
     customEvaluator?: string;
+
+    // Loop mode settings
+    /**
+     * Loop mode: 'condition' uses LLM to evaluate, 'fixed' runs exactly maxIterations times
+     * @default 'condition'
+     */
+    loopMode?: 'condition' | 'fixed';
+
+    /**
+     * Whether to include previous outputs in body agent context (always enabled by default)
+     * @default true
+     */
+    includePreviousOutputs?: boolean;
+
+    /**
+     * Whether to include iteration info (current/max) in body agent context
+     * @default false
+     */
+    includeIterationContext?: boolean;
+
+    /**
+     * Output mode: 'last' returns only final output, 'accumulate' returns all outputs as JSON array
+     * @default 'last'
+     */
+    outputMode?: 'last' | 'accumulate';
 }
 
 export interface LoopState {
