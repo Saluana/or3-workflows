@@ -731,9 +731,13 @@ const clearSchema = () => {
 
 const handleDelete = () => {
     if (!selectedNode.value || !canDelete.value) return;
-    if (confirm(`Delete "${nodeData.value.label}"?`)) {
-        props.editor.commands.deleteNode(selectedNode.value.id);
-        emit('delete', selectedNode.value.id);
+    const nodeId = selectedNode.value.id;
+    const nodeLabel = nodeData.value.label;
+    if (confirm(`Delete "${nodeLabel}"?`)) {
+        // Clear selection first to prevent accessing deleted node
+        selectedNode.value = null;
+        props.editor.commands.deleteNode(nodeId);
+        emit('delete', nodeId);
     }
 };
 </script>
