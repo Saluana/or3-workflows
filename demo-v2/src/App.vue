@@ -5,6 +5,7 @@ import type { Node, Edge } from '@vue-flow/core';
 // Import from our v2 packages
 import {
     type WorkflowData,
+    type NodeData,
     type TokenUsageDetails,
     validateWorkflow,
 } from '@or3/workflow-core';
@@ -96,6 +97,9 @@ const nodeOutputs = ref<Record<string, { nodeId: string; output: string }>>({});
 const branchStreams = ref<Record<string, BranchStream>>({});
 // Track parallel execution instances to generate unique keys per loop iteration
 const parallelExecutionCounter = ref<Record<string, number>>({});
+
+// Constant for merge branch identifier
+const MERGE_BRANCH_ID = '__merge__';
 
 // Thinking/reasoning state (for main output)
 const isThinking = ref(false);
@@ -511,9 +515,10 @@ async function handleSendMessage() {
         setNodeStatus(n.id, 'idle');
         // Clear iteration data from loop nodes
         if (n.type === 'whileLoop' && editor.value) {
-            editor.value.commands.updateNodeData(n.id, {
-                iteration: null,
-            });
+            editor.value.commands.updateNodeData(
+                n.id,
+                { iteration: null } as unknown as Partial<NodeData>
+            );
         }
     });
 
@@ -618,10 +623,13 @@ async function handleSendMessage() {
                 onLoopIteration: (nodeId, iteration, maxIterations) => {
                     // Update the node data so the WhileLoopNode component can display it
                     if (editor.value) {
-                        editor.value.commands.updateNodeData(nodeId, {
-                            iteration,
-                            maxIterations,
-                        });
+                        editor.value.commands.updateNodeData(
+                            nodeId,
+                            {
+                                iteration,
+                                maxIterations,
+                            } as unknown as Partial<NodeData>
+                        );
                     }
                 },
                 // Branch streaming callbacks
@@ -638,11 +646,19 @@ async function handleSendMessage() {
                     if (!parallelExecutionCounter.value[nodeId]) {
                         parallelExecutionCounter.value[nodeId] = 0;
                     }
+                    
                     // Check if this is a new execution (first branch of a new batch)
+                    // Exclude merge branches from this check
                     const existingBranches = Object.keys(
                         branchStreams.value
-                    ).filter((k) => branchStreams.value[k].nodeId === nodeId);
-                    if (existingBranches.length === 0) {
+                    ).filter(
+                        (k) =>
+                            branchStreams.value[k].nodeId === nodeId &&
+                            branchStreams.value[k].branchId !== MERGE_BRANCH_ID
+                    );
+                    
+                    // Only increment counter for non-merge branches starting a new execution
+                    if (branchId !== MERGE_BRANCH_ID && existingBranches.length === 0) {
                         // No active branches for this node, this is a new execution
                         parallelExecutionCounter.value[nodeId]++;
                     }
@@ -650,7 +666,7 @@ async function handleSendMessage() {
                     const execInstance = parallelExecutionCounter.value[nodeId];
                     const key = `${nodeId}-${execInstance}-${branchId}`;
                     console.log(
-                        `[BranchStart] AFTER - key=${key}, execInstance=${execInstance}`
+                        `[BranchStart] AFTER - key=${key}, execInstance=${execInstance}, isMergeBranch=${branchId === MERGE_BRANCH_ID}`
                     );
                     branchStreams.value = {
                         ...branchStreams.value,
@@ -705,7 +721,7 @@ async function handleSendMessage() {
                             branchStreams.value[k].branchId === branchId
                     );
                     console.log(
-                        `[BranchComplete] nodeId=${nodeId}, branchId=${branchId}, key=${key}, hasContent=${!!output}`
+                        `[BranchComplete] nodeId=${nodeId}, branchId=${branchId}, key=${key}, hasContent=${!!output}, isMergeBranch=${branchId === MERGE_BRANCH_ID}`
                     );
                     if (key && branchStreams.value[key]) {
                         branchStreams.value[key].content = output;
@@ -718,10 +734,28 @@ async function handleSendMessage() {
                         );
                     }
 
-                    // Check if all branches for this node are completed
+                    // Handle merge branch completion separately
+                    if (branchId === MERGE_BRANCH_ID) {
+                        // Merge branch completes after regular branches
+                        // Just clear the merge branch from streams
+                        console.log(
+                            `[BranchComplete] Clearing merge branch for nodeId=${nodeId}`
+                        );
+                        branchStreams.value = Object.fromEntries(
+                            Object.entries(branchStreams.value).filter(
+                                ([, v]) => !(v.nodeId === nodeId && v.branchId === MERGE_BRANCH_ID)
+                            )
+                        );
+                        return; // Don't proceed with regular branch completion logic
+                    }
+
+                    // Check if all NON-MERGE branches for this node are completed
+                    // Merge branches are a separate phase and shouldn't affect this check
                     const nodeBranches = Object.values(
                         branchStreams.value
-                    ).filter((b) => b.nodeId === nodeId);
+                    ).filter(
+                        (b) => b.nodeId === nodeId && b.branchId !== MERGE_BRANCH_ID
+                    );
                     const allCompleted =
                         nodeBranches.length > 0 &&
                         nodeBranches.every(
@@ -732,6 +766,7 @@ async function handleSendMessage() {
                         `[BranchComplete] nodeBranches=${nodeBranches.length}, allCompleted=${allCompleted}`
                     );
 
+                    // Only create a message when all regular branches complete
                     if (allCompleted) {
                         // Add a message with embedded branches to the chat
                         const branchesMessage: ChatMessage = {
@@ -753,29 +788,27 @@ async function handleSendMessage() {
                             branchesMessage
                         );
 
-                        // Clear streaming branches for this node by creating a new object
-                        // This ensures Vue reactivity properly tracks the change
-                        const keysToDelete = Object.keys(
-                            branchStreams.value
-                        ).filter(
-                            (k) => branchStreams.value[k].nodeId === nodeId
+                        // Clear only the regular branches, not merge branches
+                        // Merge branches will be cleared when they complete
+                        const keysToDeleteSet = new Set(
+                            Object.keys(branchStreams.value).filter(
+                                (k) =>
+                                    branchStreams.value[k].nodeId === nodeId &&
+                                    branchStreams.value[k].branchId !== MERGE_BRANCH_ID
+                            )
                         );
                         console.log(
-                            `[Branches] Deleting keys: ${keysToDelete.join(
+                            `[Branches] Deleting regular branch keys: ${Array.from(keysToDeleteSet).join(
                                 ', '
                             )}`
                         );
-                        const remaining: Record<string, BranchStream> = {};
-                        for (const [k, v] of Object.entries(
-                            branchStreams.value
-                        )) {
-                            if (!keysToDelete.includes(k)) {
-                                remaining[k] = v;
-                            }
-                        }
-                        branchStreams.value = remaining;
+                        branchStreams.value = Object.fromEntries(
+                            Object.entries(branchStreams.value).filter(
+                                ([k]) => !keysToDeleteSet.has(k)
+                            )
+                        );
                         console.log(
-                            `[Branches] Remaining keys: ${
+                            `[Branches] Remaining keys after regular branch cleanup: ${
                                 Object.keys(branchStreams.value).join(', ') ||
                                 'none'
                             }`
@@ -927,10 +960,19 @@ function syncMetaToEditor() {
                 :is-mobile="isMobile"
                 @update:active-panel="activePanel = $event"
                 @update:collapsed="showLeftSidebar = !$event"
+                @quick-add="showLeftSidebar = false"
             />
+
+            <!-- Mobile sidebar backdrop -->
+            <div
+                v-if="isMobile && showLeftSidebar"
+                class="mobile-sidebar-backdrop"
+                @click="showLeftSidebar = false"
+            ></div>
 
             <!-- Canvas -->
             <CanvasArea
+                v-if="!isMobile || mobileView === 'editor'"
                 :editor="editor"
                 :node-statuses="nodeStatuses"
                 :show-left-sidebar="showLeftSidebar"
@@ -948,7 +990,7 @@ function syncMetaToEditor() {
 
             <!-- Right sidebar - Chat -->
             <ChatPanel
-                v-if="showChatPanel"
+                v-if="showChatPanel || (isMobile && mobileView === 'chat')"
                 v-model:chat-input="chatInput"
                 :messages="messages"
                 :node-statuses="nodeStatuses"
@@ -1042,6 +1084,7 @@ function syncMetaToEditor() {
     width: 100vw;
     overflow: hidden;
     background: var(--or3-color-bg-primary, #09090c);
+    padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
 /* Main */
@@ -1050,6 +1093,7 @@ function syncMetaToEditor() {
     flex: 1;
     overflow: hidden;
     position: relative;
+    min-height: 0;
 }
 
 /* Chat */
@@ -1506,9 +1550,34 @@ function syncMetaToEditor() {
 
 /* Responsive */
 
+/* Mobile sidebar backdrop */
+.mobile-sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(2px);
+    z-index: 140;
+    animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@media (max-width: 1024px) {
+    .main {
+        gap: var(--or3-spacing-sm, 8px);
+    }
+}
+
 @media (max-width: 768px) {
     .main {
-        padding-bottom: 60px;
+        padding-bottom: calc(72px + env(safe-area-inset-bottom, 0));
     }
 }
 

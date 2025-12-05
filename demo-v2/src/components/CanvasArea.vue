@@ -32,23 +32,28 @@ const emit = defineEmits<{
 
 <template>
     <div class="canvas-container">
-        <button
-            v-if="!showLeftSidebar && !isMobile"
-            class="sidebar-expand-btn"
-            @click="emit('expand-sidebar')"
-            title="Expand sidebar"
+        <div
+            v-if="!showLeftSidebar"
+            class="canvas-actions"
+            :class="{ 'is-mobile': isMobile }"
         >
-            <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                class="icon"
+            <button
+                class="sidebar-expand-btn"
+                @click="emit('expand-sidebar')"
+                title="Expand sidebar"
             >
-                <polyline points="13 17 18 12 13 7"></polyline>
-                <polyline points="6 17 11 12 6 7"></polyline>
-            </svg>
-        </button>
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    class="icon"
+                >
+                    <polyline points="13 17 18 12 13 7"></polyline>
+                    <polyline points="6 17 11 12 6 7"></polyline>
+                </svg>
+            </button>
+        </div>
         <WorkflowCanvas
             v-if="editor"
             :editor="editor"
@@ -88,30 +93,42 @@ const emit = defineEmits<{
     z-index: 10;
 }
 
-.sidebar-expand-btn {
+.canvas-actions {
     position: absolute;
     top: 12px;
     left: 12px;
-    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 12;
+}
+
+.canvas-actions.is-mobile {
+    top: 16px;
+    left: 16px;
+}
+
+.sidebar-expand-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: 34px;
+    height: 34px;
     padding: 0;
-    background: var(--or3-color-bg-secondary, #111115);
-    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
-    border-radius: var(--or3-radius-sm, 6px);
-    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
+    background: var(--or3-color-surface-card, #f5f5f7);
+    border: 1px solid var(--or3-color-border, rgba(17, 24, 39, 0.1));
+    border-radius: var(--or3-radius-sm, 8px);
+    color: var(--or3-color-text-primary, #0f172a);
     cursor: pointer;
     transition: all var(--or3-transition-fast, 120ms);
-    box-shadow: var(--or3-shadow-sm, 0 2px 4px rgba(0, 0, 0, 0.25));
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
 }
 
 .sidebar-expand-btn:hover {
-    background: var(--or3-color-bg-tertiary, #18181d);
-    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.72));
+    background: var(--or3-color-bg-elevated, #ffffff);
+    color: var(--or3-color-accent, #8b5cf6);
     border-color: var(--or3-color-accent, #8b5cf6);
+    box-shadow: 0 10px 30px rgba(139, 92, 246, 0.25);
 }
 
 .sidebar-expand-btn .icon {
@@ -122,10 +139,11 @@ const emit = defineEmits<{
 @media (max-width: 768px) {
     .canvas-container {
         position: fixed;
-        top: 48px;
+        top: 56px;
         left: 0;
         right: 0;
-        bottom: 60px;
+        bottom: calc(72px + env(safe-area-inset-bottom, 0));
+        padding-bottom: env(safe-area-inset-bottom, 0);
     }
 }
 </style>

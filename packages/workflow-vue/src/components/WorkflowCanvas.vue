@@ -27,6 +27,8 @@ const props = defineProps<{
     nodeStatuses?: Record<string, 'idle' | 'active' | 'completed' | 'error'>;
 }>();
 
+type CreateNodeData = Parameters<WorkflowEditor['commands']['createNode']>[1];
+
 const emit = defineEmits<{
     (e: 'nodeClick', node: Node): void;
     (e: 'edgeClick', edge: Edge): void;
@@ -296,6 +298,36 @@ const onDragOver = (event: DragEvent) => {
     }
 };
 
+// Handle mobile touch drop
+const onMobileNodeDrop = (event: Event) => {
+    const customEvent = event as CustomEvent<{
+        nodeType: string;
+        defaultData: CreateNodeData;
+        x: number;
+        y: number;
+    }>;
+
+    const { nodeType, defaultData, x, y } = customEvent.detail;
+    
+    const position = screenToFlowCoordinate({ x, y });
+    props.editor.commands.createNode(nodeType, defaultData, position);
+};
+
+// Setup mobile drop listener
+onMounted(() => {
+    const canvas = document.querySelector('.vue-flow') as HTMLElement;
+    if (canvas) {
+        canvas.addEventListener('mobileNodeDrop', onMobileNodeDrop as EventListener);
+    }
+});
+
+onUnmounted(() => {
+    const canvas = document.querySelector('.vue-flow') as HTMLElement;
+    if (canvas) {
+        canvas.removeEventListener('mobileNodeDrop', onMobileNodeDrop as EventListener);
+    }
+});
+
 // Handle keyboard shortcuts
 const onKeyDown = (event: KeyboardEvent) => {
     // Ignore if in input
@@ -532,6 +564,22 @@ defineExpose({
         rgba(34, 34, 46, 0.9)
     ) !important;
     color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95)) !important;
+}
+
+/* Active state for lock button */
+.vue-flow__controls-button:active,
+.vue-flow__controls-button.active {
+    background: var(--or3-color-accent-muted, rgba(139, 92, 246, 0.15)) !important;
+    color: var(--or3-color-accent, #8b5cf6) !important;
+}
+
+/* Make controls more touch-friendly on mobile */
+@media (max-width: 768px) {
+    .vue-flow__controls-button {
+        min-width: 32px !important;
+        min-height: 32px !important;
+        font-size: 16px !important;
+    }
 }
 
 .vue-flow__controls-button svg {

@@ -1,9 +1,29 @@
 <script setup lang="ts">
-import { WorkflowEditor } from '@or3/workflow-core';
+import { onMounted, onUnmounted, ref } from 'vue';
+import { NodeData, WorkflowEditor } from '@or3/workflow-core';
 
 defineProps<{
     editor?: WorkflowEditor;
 }>();
+
+const emit = defineEmits<{
+    (e: 'quick-add'): void;
+}>();
+
+const isMobile = ref(false);
+
+const syncIsMobile = () => {
+    isMobile.value = window.innerWidth <= 768;
+};
+
+onMounted(() => {
+    syncIsMobile();
+    window.addEventListener('resize', syncIsMobile);
+});
+
+onUnmounted(() => {
+    window.removeEventListener('resize', syncIsMobile);
+});
 
 const nodeTypes = [
     {
@@ -110,7 +130,7 @@ const nodeTypes = [
 const onDragStart = (
     event: DragEvent,
     nodeType: string,
-    defaultData: Record<string, unknown>
+    defaultData: NodeData
 ) => {
     if (event.dataTransfer) {
         event.dataTransfer.setData('application/vueflow', nodeType);
@@ -120,6 +140,95 @@ const onDragStart = (
         );
         event.dataTransfer.effectAllowed = 'move';
     }
+};
+
+// Touch event handling for mobile devices
+let touchData: {
+    nodeType: string;
+    defaultData: NodeData;
+} | null = null;
+let dropFiredFromTouch = false;
+
+const onTouchStart = (
+    event: TouchEvent,
+    nodeType: string,
+    defaultData: NodeData
+) => {
+    touchData = { nodeType, defaultData };
+    const target = event.currentTarget as HTMLElement;
+    target.classList.add('dragging-touch');
+};
+
+const onTouchEnd = (event: TouchEvent) => {
+    const target = event.currentTarget as HTMLElement;
+    target.classList.remove('dragging-touch');
+    
+    if (!touchData) return;
+    
+    const touch = event.changedTouches[0];
+    const dropTarget = document.elementFromPoint(touch.clientX, touch.clientY);
+    
+    // Check if dropped on the canvas
+    const canvas = document.querySelector('.vue-flow') as HTMLElement;
+    if (canvas && (canvas === dropTarget || canvas.contains(dropTarget))) {
+        // Create a custom event to pass to the canvas
+        const customEvent = new CustomEvent('mobileNodeDrop', {
+            detail: {
+                nodeType: touchData.nodeType,
+                defaultData: touchData.defaultData,
+                x: touch.clientX,
+                y: touch.clientY,
+            },
+        });
+        canvas.dispatchEvent(customEvent);
+
+        dropFiredFromTouch = true;
+        // Prevent the synthetic click after touchend from double-adding
+        setTimeout(() => {
+            dropFiredFromTouch = false;
+        }, 0);
+    }
+    
+    touchData = null;
+};
+
+const dropNodeOnCanvas = (
+    nodeType: string,
+    defaultData: NodeData
+) => {
+    const canvas = document.querySelector('.vue-flow') as HTMLElement | null;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    const customEvent = new CustomEvent('mobileNodeDrop', {
+        detail: {
+            nodeType,
+            defaultData,
+            x: centerX,
+            y: centerY,
+        },
+    });
+
+    canvas.dispatchEvent(customEvent);
+};
+
+const handleNodeTap = (
+    event: MouseEvent,
+    nodeType: string,
+    defaultData: NodeData
+) => {
+    if (dropFiredFromTouch) {
+        dropFiredFromTouch = false;
+        return;
+    }
+
+    if (!isMobile.value) return;
+    event.preventDefault();
+    dropNodeOnCanvas(nodeType, defaultData);
+    emit('quick-add');
 };
 </script>
 
@@ -146,6 +255,9 @@ const onDragStart = (
                 class="palette-node"
                 draggable="true"
                 @dragstart="onDragStart($event, node.type, node.defaultData)"
+                @touchstart="onTouchStart($event, node.type, node.defaultData)"
+                @touchend="onTouchEnd($event)"
+                @click="handleNodeTap($event, node.type, node.defaultData)"
             >
                 <div
                     class="node-icon"
@@ -342,6 +454,41 @@ const onDragStart = (
 .palette-node:active {
     cursor: grabbing;
     transform: scale(0.98);
+}
+
+/* Touch dragging state for mobile */
+.palette-node.dragging-touch {
+    opacity: 0.7;
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4);
+    border-color: var(--or3-color-accent, #8b5cf6);
+}
+
+/* Mobile-specific touch improvements */
+@media (max-width: 768px) {
+    .palette-nodes {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: var(--or3-spacing-sm, 8px);
+    }
+
+    .palette-node {
+        padding: var(--or3-spacing-md, 12px);
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        min-height: 64px;
+    }
+    
+    .node-icon {
+        width: 40px;
+        height: 40px;
+    }
+    
+    .node-icon svg {
+        width: 20px;
+        height: 20px;
+    }
 }
 
 .node-icon {

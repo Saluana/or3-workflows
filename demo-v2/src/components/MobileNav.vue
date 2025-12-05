@@ -254,10 +254,12 @@ const emit = defineEmits<{
     background: var(--or3-color-bg-secondary, #111115);
     border-top: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
     padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 12px);
+    padding-bottom: calc(var(--or3-spacing-sm, 8px) + env(safe-area-inset-bottom, 0));
     z-index: 200;
     justify-content: space-around;
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.35);
 }
 
 .mobile-nav-btn {
@@ -318,8 +320,9 @@ const emit = defineEmits<{
     background: var(--or3-color-bg-secondary, #111115);
     border-radius: var(--or3-radius-xl, 20px) var(--or3-radius-xl, 20px) 0 0;
     padding: var(--or3-spacing-xl, 24px);
+    padding-bottom: calc(var(--or3-spacing-2xl, 32px) + env(safe-area-inset-bottom, 0));
     z-index: 301;
-    max-height: 70vh;
+    max-height: 78vh;
     overflow-y: auto;
     animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.4);
@@ -365,6 +368,7 @@ const emit = defineEmits<{
     text-align: left;
     font-size: var(--or3-text-sm, 13px);
     font-weight: var(--or3-font-medium, 500);
+    min-height: 48px;
 }
 
 .mobile-menu-item:hover {

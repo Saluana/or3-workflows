@@ -89,7 +89,7 @@ const ParallelNodeDataSchema = BaseNodeDataSchema.extend({
 
 const ToolNodeDataSchema = BaseNodeDataSchema.extend({
     toolId: z.string().min(1, 'Tool node requires a toolId'),
-    config: z.record(z.unknown()).optional(),
+    config: z.record(z.string(), z.unknown()).optional(),
     errorHandling: NodeErrorConfigSchema,
     hitl: HITLConfigSchema,
 });
@@ -98,8 +98,8 @@ const MemoryNodeDataSchema = BaseNodeDataSchema.extend({
     operation: z.enum(['query', 'store']),
     text: z.string().optional(),
     limit: z.number().int().positive().optional(),
-    filter: z.record(z.unknown()).optional(),
-    metadata: z.record(z.unknown()).optional(),
+    filter: z.record(z.string(), z.unknown()).optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
     fallback: z.string().optional(),
 });
 
@@ -123,7 +123,7 @@ const WhileLoopNodeDataSchema = BaseNodeDataSchema.extend({
 
 const SubflowNodeDataSchema = BaseNodeDataSchema.extend({
     subflowId: z.string().min(1, 'Subflow node requires a subflowId'),
-    inputMappings: z.record(z.string()).optional(),
+    inputMappings: z.record(z.string(), z.string()).optional(),
     preserveContext: z.boolean().optional(),
 });
 
@@ -178,7 +178,7 @@ export function getNodeDataSchema(nodeType: string): z.ZodType<unknown> {
         case 'output':
             return OutputNodeDataSchema;
         default:
-            return z.record(z.unknown()); // Unknown node types get loose validation
+            return z.record(z.string(), z.unknown()); // Unknown node types get loose validation
     }
 }
 
@@ -186,10 +186,7 @@ export function getNodeDataSchema(nodeType: string): z.ZodType<unknown> {
  * Validate node data against its type-specific schema.
  * Returns Zod parse result.
  */
-export function validateNodeData(
-    nodeType: string,
-    data: unknown
-): z.SafeParseReturnType<unknown, unknown> {
+export function validateNodeData(nodeType: string, data: unknown) {
     const schema = getNodeDataSchema(nodeType);
     return schema.safeParse(data);
 }
@@ -199,7 +196,7 @@ export const WorkflowNodeSchema = z.object({
     id: z.string(),
     type: z.string(),
     position: z.object({ x: z.number(), y: z.number() }),
-    data: z.record(z.any()),
+    data: z.record(z.string(), z.any()),
     selected: z.boolean().optional(),
 });
 
@@ -234,7 +231,7 @@ export const WorkflowEdgeSchema = z.object({
     sourceHandle: z.string().optional(),
     targetHandle: z.string().optional(),
     label: z.string().optional(),
-    data: z.record(z.any()).optional(),
+    data: z.record(z.string(), z.any()).optional(),
 });
 
 export const WorkflowDataSchema = z.object({

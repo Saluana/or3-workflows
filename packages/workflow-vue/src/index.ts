@@ -70,4 +70,7 @@ export {
     isOutputNodeData,
 } from '@or3/workflow-core';
 
+// Re-export vue-flow types for convenience
+export type { Edge, Node, Connection } from '@vue-flow/core';
+
 // CSS - import in your app: import '@or3/workflow-vue/style.css'

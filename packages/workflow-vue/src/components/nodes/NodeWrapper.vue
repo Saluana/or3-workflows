@@ -99,6 +99,18 @@ const classes = computed(() => [
 /* Selected state */
 .selected {
     border-color: var(--or3-color-accent, #8b5cf6);
+    border-width: 2px;
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.25),
+        var(--or3-shadow-md, 0 4px 12px rgba(0, 0, 0, 0.4));
+}
+
+/* Mobile: Make selected state even more visible */
+@media (max-width: 768px) {
+    .selected {
+        border-width: 3px;
+        box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.3),
+            var(--or3-shadow-glow, 0 0 20px rgba(139, 92, 246, 0.4));
+    }
 }
 
 /* Hover effect */
@@ -144,7 +156,8 @@ const classes = computed(() => [
     transition: opacity 0.2s ease;
 }
 
-.node-wrapper:hover .node-id {
+.node-wrapper:hover .node-id,
+.node-wrapper.selected .node-id {
     opacity: 1;
 }
 </style>

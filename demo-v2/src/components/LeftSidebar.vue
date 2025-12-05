@@ -15,14 +15,15 @@ defineProps<Props>();
 const emit = defineEmits<{
     (e: 'update:activePanel', value: 'palette' | 'inspector'): void;
     (e: 'update:collapsed', value: boolean): void;
+    (e: 'quick-add'): void;
 }>();
 </script>
 
 <template>
     <aside
-        v-if="!collapsed || !isMobile"
+        v-if="!collapsed"
         class="sidebar left-sidebar"
-        :class="{ collapsed }"
+        :class="{ collapsed, 'mobile-overlay': isMobile }"
     >
         <div class="sidebar-header">
             <button
@@ -73,7 +74,7 @@ const emit = defineEmits<{
 
         <div v-if="!collapsed" class="sidebar-content">
             <div v-if="activePanel === 'palette'" class="palette-container">
-                <NodePalette />
+                <NodePalette @quick-add="emit('quick-add')" />
             </div>
             <NodeInspector
                 v-else-if="activePanel === 'inspector' && editor"
@@ -92,6 +93,8 @@ const emit = defineEmits<{
     position: relative;
     transition: width var(--or3-transition-normal, 200ms),
         transform var(--or3-transition-normal, 200ms);
+    height: 100%;
+    min-height: 100%;
 }
 
 .sidebar-header {
@@ -100,6 +103,10 @@ const emit = defineEmits<{
     justify-content: flex-end;
     padding: var(--or3-spacing-sm, 8px);
     border-bottom: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--or3-color-bg-secondary, #111115);
 }
 
 .sidebar-collapse-btn {
@@ -169,6 +176,7 @@ const emit = defineEmits<{
 
 .sidebar-content {
     flex: 1;
+    min-height: 0;
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -188,19 +196,42 @@ const emit = defineEmits<{
 }
 
 @media (max-width: 768px) {
-    .left-sidebar {
+    .left-sidebar.mobile-overlay {
         position: fixed;
         left: 0;
-        top: 48px;
-        bottom: 60px;
-        z-index: 100;
-        transform: translateX(-100%);
-        transition: transform 0.3s ease;
-        width: 280px;
+        top: 52px;
+        bottom: calc(72px + env(safe-area-inset-bottom, 0));
+        z-index: 150;
+        width: 92vw;
+        max-width: 480px;
+        box-shadow: 4px 0 24px rgba(0, 0, 0, 0.6);
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        border-radius: 0 var(--or3-radius-lg, 14px) var(--or3-radius-lg, 14px) 0;
+        overflow: hidden;
     }
-
-    .left-sidebar:not(.collapsed) {
-        transform: translateX(0);
+    
+    /* Improve scrolling on mobile */
+    .palette-container {
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: calc(var(--or3-spacing-lg, 16px) + env(safe-area-inset-bottom, 0));
+    }
+    
+    /* Make tabs more touch-friendly */
+    .sidebar-tab {
+        padding: var(--or3-spacing-lg, 16px);
+        font-size: var(--or3-text-sm, 13px);
+    }
+    
+    /* Make close button larger on mobile */
+    .sidebar-collapse-btn {
+        width: 36px;
+        height: 36px;
+    }
+    
+    .sidebar-collapse-btn .icon {
+        width: 16px;
+        height: 16px;
     }
 }
 </style>
