@@ -984,6 +984,11 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
  * from the workflow, so your callbacks receive this information directly rather than
  * requiring manual lookups.
  * 
+ * Note: This function creates a nodeMap for backward compatibility lookups, but in practice
+ * the nodeMap is rarely used since NodeInfo is now passed automatically by the execution adapter.
+ * For performance-critical scenarios with many executions of the same workflow, you can reuse
+ * the same callbacks object rather than recreating it.
+ * 
  * @param workflow - The workflow data containing nodes
  * @param handlers - Simplified callback handlers that receive pre-resolved node info
  * @returns Standard ExecutionCallbacks that can be passed to adapter.execute()
