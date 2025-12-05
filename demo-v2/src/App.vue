@@ -1084,6 +1084,7 @@ function syncMetaToEditor() {
     width: 100vw;
     overflow: hidden;
     background: var(--or3-color-bg-primary, #09090c);
+    padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
 /* Main */
@@ -1092,6 +1093,7 @@ function syncMetaToEditor() {
     flex: 1;
     overflow: hidden;
     position: relative;
+    min-height: 0;
 }
 
 /* Chat */
@@ -1567,9 +1569,15 @@ function syncMetaToEditor() {
     }
 }
 
+@media (max-width: 1024px) {
+    .main {
+        gap: var(--or3-spacing-sm, 8px);
+    }
+}
+
 @media (max-width: 768px) {
     .main {
-        padding-bottom: 60px;
+        padding-bottom: calc(72px + env(safe-area-inset-bottom, 0));
     }
 }
 

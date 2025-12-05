@@ -378,11 +378,13 @@ function getThemeIcon(): 'sun' | 'moon' | 'system' {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    height: 52px;
+    min-height: 52px;
     padding: 0 var(--or3-spacing-lg, 16px);
     background: var(--or3-color-bg-secondary, #111115);
     border-bottom: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
-    gap: var(--or3-spacing-lg, 16px);
+    gap: var(--or3-spacing-md, 12px);
+    flex-wrap: nowrap;
+    min-width: 0;
 }
 
 /* Brand Section */
@@ -390,7 +392,8 @@ function getThemeIcon(): 'sun' | 'moon' | 'system' {
     display: flex;
     align-items: center;
     gap: var(--or3-spacing-xl, 24px);
-    flex-shrink: 0;
+    flex: 1 1 0;
+    min-width: 0;
 }
 
 .logo-group {
@@ -426,6 +429,9 @@ function getThemeIcon(): 'sun' | 'moon' | 'system' {
     display: flex;
     align-items: center;
     gap: var(--or3-spacing-sm, 8px);
+    flex-wrap: wrap;
+    row-gap: var(--or3-spacing-xs, 6px);
+    min-width: 0;
 }
 
 .workflow-name-input,
@@ -439,13 +445,14 @@ function getThemeIcon(): 'sun' | 'moon' | 'system' {
     transition: all var(--or3-transition-fast, 120ms);
 }
 
+
 .workflow-name-input {
-    width: 140px;
+    width: clamp(140px, 24vw, 200px);
     font-weight: var(--or3-font-medium, 500);
 }
 
 .workflow-desc-input {
-    width: 180px;
+    width: clamp(180px, 28vw, 260px);
     color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.72));
 }
 
@@ -467,6 +474,11 @@ function getThemeIcon(): 'sun' | 'moon' | 'system' {
     display: flex;
     align-items: center;
     gap: var(--or3-spacing-xs, 4px);
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    min-width: 0;
+    overflow-x: auto;
+    padding: 6px 0;
 }
 
 .toolbar-group {
@@ -492,6 +504,11 @@ function getThemeIcon(): 'sun' | 'moon' | 'system' {
     color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.72));
     transition: all var(--or3-transition-fast, 120ms);
     cursor: pointer;
+}
+
+.toolbar-btn:focus-visible {
+    box-shadow: 0 0 0 3px
+        var(--or3-color-accent-subtle, rgba(139, 92, 246, 0.08));
 }
 
 .toolbar-btn:hover:not(:disabled) {
@@ -527,6 +544,58 @@ function getThemeIcon(): 'sun' | 'moon' | 'system' {
     border: 1px solid var(--or3-color-success-muted, rgba(16, 185, 129, 0.15));
     transition: all var(--or3-transition-fast, 120ms);
     cursor: pointer;
+}
+
+@media (max-width: 1100px) {
+    .header {
+        align-items: center;
+        padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 12px);
+    }
+
+    .header-brand {
+        flex: 1 1 auto;
+        justify-content: flex-start;
+    }
+
+    .header-toolbar {
+        flex: 1 1 auto;
+        justify-content: flex-end;
+        gap: var(--or3-spacing-xs, 4px);
+        padding-bottom: var(--or3-spacing-2xs, 4px);
+    }
+
+    .toolbar-divider {
+        display: none;
+    }
+}
+
+@media (max-width: 768px) {
+    .header {
+        gap: var(--or3-spacing-sm, 8px);
+    }
+
+    .meta-section {
+        gap: var(--or3-spacing-xs, 6px);
+    }
+
+    .workflow-name-input,
+    .workflow-desc-input {
+        width: 100%;
+    }
+
+    .header-toolbar {
+        justify-content: flex-start;
+    }
+
+    .toolbar-btn {
+        width: 36px;
+        height: 36px;
+    }
+
+    .validate-btn {
+        padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 12px);
+        white-space: nowrap;
+    }
 }
 
 .validate-btn:hover {
@@ -650,6 +719,10 @@ function getThemeIcon(): 'sun' | 'moon' | 'system' {
 @media (max-width: 1024px) {
     .meta-section {
         display: none;
+    }
+
+    .header-toolbar {
+        justify-content: flex-end;
     }
 }
 

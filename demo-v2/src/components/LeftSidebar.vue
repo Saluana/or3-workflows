@@ -93,6 +93,8 @@ const emit = defineEmits<{
     position: relative;
     transition: width var(--or3-transition-normal, 200ms),
         transform var(--or3-transition-normal, 200ms);
+    height: 100%;
+    min-height: 100%;
 }
 
 .sidebar-header {
@@ -101,6 +103,10 @@ const emit = defineEmits<{
     justify-content: flex-end;
     padding: var(--or3-spacing-sm, 8px);
     border-bottom: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--or3-color-bg-secondary, #111115);
 }
 
 .sidebar-collapse-btn {
@@ -170,6 +176,7 @@ const emit = defineEmits<{
 
 .sidebar-content {
     flex: 1;
+    min-height: 0;
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -192,19 +199,22 @@ const emit = defineEmits<{
     .left-sidebar.mobile-overlay {
         position: fixed;
         left: 0;
-        top: 0;
-        bottom: 0;
+        top: 52px;
+        bottom: calc(72px + env(safe-area-inset-bottom, 0));
         z-index: 150;
-        width: 100vw;
-        max-width: none;
+        width: 92vw;
+        max-width: 480px;
         box-shadow: 4px 0 24px rgba(0, 0, 0, 0.6);
         transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        border-radius: 0 var(--or3-radius-lg, 14px) var(--or3-radius-lg, 14px) 0;
+        overflow: hidden;
     }
     
     /* Improve scrolling on mobile */
     .palette-container {
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
+        padding-bottom: calc(var(--or3-spacing-lg, 16px) + env(safe-area-inset-bottom, 0));
     }
     
     /* Make tabs more touch-friendly */

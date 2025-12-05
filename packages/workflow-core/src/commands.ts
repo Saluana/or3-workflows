@@ -13,7 +13,7 @@ import { validateWorkflow } from './validation';
 // Validation schemas for command inputs
 const EdgeUpdateSchema = z.object({
     label: z.string().max(100).optional(),
-    data: z.record(z.unknown()).optional(),
+    data: z.record(z.string(), z.unknown()).optional(),
 });
 
 const NodeDataUpdateSchema = z
@@ -413,7 +413,10 @@ export class CommandManager {
         );
 
         if (introduced.length > 0) {
-            console.warn('Command rejected due to validation errors:', introduced);
+            console.warn(
+                'Command rejected due to validation errors:',
+                introduced
+            );
             return false;
         }
 

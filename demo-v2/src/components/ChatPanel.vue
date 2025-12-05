@@ -826,6 +826,7 @@ const formatNumber = (value?: number) =>
     display: flex;
     flex-direction: column;
     gap: var(--or3-spacing-lg, 16px);
+    padding-bottom: var(--or3-spacing-xl, 24px);
 }
 
 /* Empty State */
@@ -1287,6 +1288,13 @@ const formatNumber = (value?: number) =>
     padding: var(--or3-spacing-md, 12px) var(--or3-spacing-lg, 16px);
     border-top: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
     flex-shrink: 0;
+    position: sticky;
+    bottom: 0;
+    background: linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--or3-color-bg-secondary, #111115) 92%, transparent),
+        var(--or3-color-bg-secondary, #111115)
+    );
 }
 
 .input-wrapper {
@@ -1387,15 +1395,58 @@ const formatNumber = (value?: number) =>
     border-radius: var(--or3-radius-xs, 4px);
 }
 
+@media (max-width: 900px) {
+    .status-bar {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--or3-spacing-sm, 8px);
+    }
+
+    .status-content,
+    .token-usage-card {
+        width: 100%;
+    }
+
+    .node-chips {
+        max-height: 120px;
+        overflow-y: auto;
+    }
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .chat-panel {
         width: 100%;
         max-width: none;
+        min-height: 0;
+    }
+
+    .messages-area {
+        padding: var(--or3-spacing-md, 12px);
+        padding-bottom: calc(var(--or3-spacing-2xl, 24px) + env(safe-area-inset-bottom, 0));
+    }
+
+    .input-area {
+        padding: var(--or3-spacing-md, 12px) var(--or3-spacing-md, 12px);
+        padding-bottom: calc(var(--or3-spacing-md, 12px) + env(safe-area-inset-bottom, 0));
+    }
+
+    .input-wrapper textarea {
+        max-height: 180px;
     }
 
     .input-hint {
         display: none;
+    }
+}
+
+@media (max-width: 480px) {
+    .messages-area {
+        gap: var(--or3-spacing-md, 12px);
+    }
+
+    .input-wrapper textarea {
+        font-size: var(--or3-text-sm, 12px);
     }
 }
 </style>

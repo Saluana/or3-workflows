@@ -70,8 +70,8 @@ importers:
         specifier: ^0.0.1
         version: 0.0.1
       zod:
-        specifier: ^3.22.4
-        version: 3.25.76
+        specifier: ^4.0.0
+        version: 4.1.13
     devDependencies:
       typescript:
         specifier: ^5.0.0
@@ -1181,6 +1181,9 @@ packages:
   zod@3.25.76:
     resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
+  zod@4.1.13:
+    resolution: {integrity: sha512-AvvthqfqrAhNH9dnfmrfKzX5upOdjUVJYFqNSlkmGf64gRaTzlPwz99IHYnVs28qYAybvAlBV+H7pn0saFY4Ig==}
+
 snapshots:
 
   '@babel/helper-string-parser@7.27.1': {}
@@ -1308,7 +1311,7 @@ snapshots:
 
   '@openrouter/sdk@0.0.1':
     dependencies:
-      zod: 3.25.76
+      zod: 4.1.13
 
   '@openrouter/sdk@0.1.27':
     dependencies:
@@ -2179,3 +2182,5 @@ snapshots:
       commander: 9.5.0
 
   zod@3.25.76: {}
+
+  zod@4.1.13: {}

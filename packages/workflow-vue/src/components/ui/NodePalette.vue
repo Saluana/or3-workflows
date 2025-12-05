@@ -466,11 +466,18 @@ const handleNodeTap = (
 
 /* Mobile-specific touch improvements */
 @media (max-width: 768px) {
+    .palette-nodes {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: var(--or3-spacing-sm, 8px);
+    }
+
     .palette-node {
         padding: var(--or3-spacing-md, 12px);
         touch-action: none;
         user-select: none;
         -webkit-user-select: none;
+        min-height: 64px;
     }
     
     .node-icon {
