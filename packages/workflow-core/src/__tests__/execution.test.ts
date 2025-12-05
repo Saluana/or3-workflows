@@ -153,8 +153,8 @@ describe('OpenRouterExecutionAdapter', () => {
 
       expect(result.success).toBe(true);
       expect(result.output).toBe('Hello back!');
-      expect(callbacks.onNodeStart).toHaveBeenCalledWith('start-1');
-      expect(callbacks.onNodeStart).toHaveBeenCalledWith('agent-1');
+      expect(callbacks.onNodeStart).toHaveBeenCalledWith('start-1', expect.objectContaining({ label: 'Start', type: 'start' }));
+      expect(callbacks.onNodeStart).toHaveBeenCalledWith('agent-1', expect.objectContaining({ label: 'Test Agent', type: 'agent' }));
       expect(callbacks.onNodeFinish).toHaveBeenCalledWith('start-1', 'Hello, world!');
       expect(callbacks.onNodeFinish).toHaveBeenCalledWith('agent-1', 'Hello back!');
       expect(callbacks.onToken).toHaveBeenCalledWith('agent-1', 'Hello');
@@ -298,8 +298,11 @@ describe('OpenRouterExecutionAdapter - Router Node', () => {
 
     expect(result.success).toBe(true);
     expect(result.output).toBe('Technical response');
-    expect(callbacks.onNodeStart).toHaveBeenCalledWith('agent-tech');
-    expect(callbacks.onNodeStart).not.toHaveBeenCalledWith('agent-general');
+    expect(callbacks.onNodeStart).toHaveBeenCalledWith('agent-tech', expect.objectContaining({ label: 'Tech Agent', type: 'agent' }));
+    // Verify agent-general was not called at all
+    const calls = (callbacks.onNodeStart as any).mock.calls;
+    const generalCall = calls.find((call: any) => call[0] === 'agent-general');
+    expect(generalCall).toBeUndefined();
   });
 
   describe('NodeInfo in callbacks', () => {
@@ -353,7 +356,7 @@ describe('OpenRouterExecutionAdapter - Router Node', () => {
       );
 
       // Old-style callback that only accepts nodeId
-      const oldCallback = vi.fn((nodeId: string) => {
+      const oldCallback = vi.fn((_nodeId: string) => {
         // Should work fine even though nodeInfo is passed as second arg
       });
 

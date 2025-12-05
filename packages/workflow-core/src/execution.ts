@@ -481,7 +481,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     const childEdges = graph.children[nodeId] || [];
 
     // Pass node info to callback
-    const nodeData = node.data as Record<string, unknown>;
+    const nodeData = node.data as unknown as Record<string, unknown>;
     callbacks.onNodeStart(nodeId, {
       label: typeof nodeData.label === 'string' ? nodeData.label : node.id,
       type: node.type,
