@@ -21,6 +21,8 @@ export {
   type PortDefinition,
   type StorageAdapter,
   type WorkflowSummary,
+  type NodeInfo,
+  type StreamAccumulatorCallbacks,
   // Type guards
   isAgentNodeData,
   isRouterNodeData,
@@ -39,7 +41,7 @@ export { validateWorkflow, type ValidationResult, type ValidationError, type Val
 
 // Execution adapters
 export { type ExecutionAdapter } from './types';
-export { OpenRouterExecutionAdapter } from './execution';
+export { OpenRouterExecutionAdapter, createAccumulatorCallbacks } from './execution';
 
 // Storage adapters
 export { LocalStorageAdapter, IndexedDBAdapter } from './storage';

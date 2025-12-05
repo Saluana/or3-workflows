@@ -19,6 +19,7 @@ import type {
   RouteDefinition,
   BranchDefinition,
   ToolNodeData,
+  StreamAccumulatorCallbacks,
 } from './types';
 import { toolRegistry } from './extensions/ToolNodeExtension';
 
@@ -479,7 +480,12 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
     const childEdges = graph.children[nodeId] || [];
 
-    callbacks.onNodeStart(nodeId);
+    // Pass node info to callback
+    const nodeData = node.data as unknown as Record<string, unknown>;
+    callbacks.onNodeStart(nodeId, {
+      label: typeof nodeData.label === 'string' ? nodeData.label : node.id,
+      type: node.type,
+    });
 
     try {
       let output = '';
@@ -965,4 +971,83 @@ Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do n
 
     throw lastError;
   }
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Creates ExecutionCallbacks from StreamAccumulatorCallbacks by wiring node lookups.
+ * 
+ * This helper eliminates boilerplate by automatically resolving node labels and types
+ * from the workflow, so your callbacks receive this information directly rather than
+ * requiring manual lookups.
+ * 
+ * Note: This function creates a nodeMap for backward compatibility lookups, but in practice
+ * the nodeMap is rarely used since NodeInfo is now passed automatically by the execution adapter.
+ * For performance-critical scenarios with many executions of the same workflow, you can reuse
+ * the same callbacks object rather than recreating it.
+ * 
+ * @param workflow - The workflow data containing nodes
+ * @param handlers - Simplified callback handlers that receive pre-resolved node info
+ * @returns Standard ExecutionCallbacks that can be passed to adapter.execute()
+ * 
+ * @example
+ * ```typescript
+ * const callbacks = createAccumulatorCallbacks(workflow, {
+ *   onNodeStart: (nodeId, label, type) => console.log(`${label} (${type}) started`),
+ *   onNodeToken: (nodeId, token) => process.stdout.write(token),
+ *   onNodeReasoning: (nodeId, token) => console.log(`[reasoning] ${token}`),
+ *   onNodeFinish: (nodeId, output) => console.log(`Finished: ${output}`),
+ *   onNodeError: (nodeId, error) => console.error(`Error:`, error),
+ *   onBranchStart: (nodeId, branchId, label) => console.log(`Branch ${label} started`),
+ *   onBranchToken: (nodeId, branchId, label, token) => process.stdout.write(token),
+ *   onBranchComplete: (nodeId, branchId, label, output) => console.log(`Branch ${label} done`),
+ * });
+ * 
+ * const result = await adapter.execute(workflow, input, callbacks);
+ * ```
+ */
+export function createAccumulatorCallbacks(
+  workflow: WorkflowData,
+  handlers: StreamAccumulatorCallbacks
+): ExecutionCallbacks {
+  // Create a map for fast node lookups
+  const nodeMap = new Map(workflow.nodes.map(n => [n.id, n]));
+  
+  return {
+    onNodeStart: (nodeId, nodeInfo) => {
+      // If nodeInfo is provided (new signature), use it
+      // Otherwise fall back to manual lookup (backward compatibility)
+      if (nodeInfo) {
+        handlers.onNodeStart(nodeId, nodeInfo.label, nodeInfo.type);
+      } else {
+        const node = nodeMap.get(nodeId);
+        const data = node?.data as Record<string, unknown> | undefined;
+        handlers.onNodeStart(
+          nodeId,
+          typeof data?.label === 'string' ? data.label : nodeId,
+          node?.type || 'unknown'
+        );
+      }
+    },
+    
+    onNodeFinish: handlers.onNodeFinish,
+    
+    onNodeError: handlers.onNodeError,
+    
+    onToken: handlers.onNodeToken,
+    
+    onReasoning: handlers.onNodeReasoning,
+    
+    onBranchStart: (nodeId, branchId, label) => 
+      handlers.onBranchStart(nodeId, branchId, label),
+    
+    onBranchToken: (nodeId, branchId, label, token) => 
+      handlers.onBranchToken(nodeId, branchId, label, token),
+    
+    onBranchComplete: (nodeId, branchId, label, output) => 
+      handlers.onBranchComplete(nodeId, branchId, label, output),
+  };
 }

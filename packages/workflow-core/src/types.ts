@@ -394,6 +394,17 @@ export const WorkflowDataSchema = z.object({
 // ============================================================================
 
 /**
+ * Metadata about a workflow node.
+ * Provides label and type information for easier callback handling.
+ */
+export interface NodeInfo {
+  /** Display label for the node */
+  label: string;
+  /** Type of the node (e.g., 'agent', 'router', 'parallel') */
+  type: string;
+}
+
+/**
  * Callbacks for workflow execution events.
  * 
  * Implement these callbacks to receive real-time updates during workflow execution,
@@ -415,8 +426,9 @@ export interface ExecutionCallbacks {
    * Called when a node begins execution.
    * Use this to update UI state (e.g., show loading indicator).
    * @param nodeId - The ID of the node that started.
+   * @param nodeInfo - Optional metadata about the node (label and type).
    */
-  onNodeStart: (nodeId: string) => void;
+  onNodeStart: (nodeId: string, nodeInfo?: NodeInfo) => void;
   
   /**
    * Called when a node successfully completes execution.
@@ -448,6 +460,84 @@ export interface ExecutionCallbacks {
    * @param routeId - The ID of the selected route.
    */
   onRouteSelected?: (nodeId: string, routeId: string) => void;
+  
+  /**
+   * Called for reasoning tokens from the LLM (if supported).
+   * Optional - use this to display chain-of-thought reasoning.
+   * @param nodeId - The ID of the node generating reasoning.
+   * @param token - The reasoning token/chunk received.
+   */
+  onReasoning?: (nodeId: string, token: string) => void;
+  
+  /**
+   * Called when a parallel branch starts execution.
+   * Optional - use this to track parallel execution progress.
+   * 
+   * Note: The merge step uses branchId='__merge__' and branchLabel='Merge'.
+   * UI implementations may want to handle this specially.
+   * 
+   * @param nodeId - The ID of the parallel node.
+   * @param branchId - The ID of the branch.
+   * @param branchLabel - The label/name of the branch.
+   */
+  onBranchStart?: (nodeId: string, branchId: string, branchLabel: string) => void;
+  
+  /**
+   * Called for each streaming token from a parallel branch.
+   * Optional - use this to display real-time branch output.
+   * @param nodeId - The ID of the parallel node.
+   * @param branchId - The ID of the branch.
+   * @param branchLabel - The label/name of the branch.
+   * @param token - The token/chunk of text received.
+   */
+  onBranchToken?: (nodeId: string, branchId: string, branchLabel: string, token: string) => void;
+  
+  /**
+   * Called when a parallel branch completes execution.
+   * Optional - use this to finalize branch display.
+   * @param nodeId - The ID of the parallel node.
+   * @param branchId - The ID of the branch.
+   * @param branchLabel - The label/name of the branch.
+   * @param output - The final output from the branch.
+   */
+  onBranchComplete?: (nodeId: string, branchId: string, branchLabel: string, output: string) => void;
+}
+
+/**
+ * Simplified callback interface for accumulator-style integrations.
+ * Used with createAccumulatorCallbacks helper to reduce boilerplate.
+ * 
+ * @example
+ * ```typescript
+ * const handlers: StreamAccumulatorCallbacks = {
+ *   onNodeStart: (nodeId, label, type) => accumulator.nodeStart(nodeId, label, type),
+ *   onNodeToken: (nodeId, token) => accumulator.nodeToken(nodeId, token),
+ *   onNodeReasoning: (nodeId, token) => accumulator.nodeReasoning(nodeId, token),
+ *   onNodeFinish: (nodeId, output) => accumulator.nodeFinish(nodeId, output),
+ *   onNodeError: (nodeId, error) => accumulator.nodeError(nodeId, error),
+ *   onBranchStart: (nodeId, branchId, label) => accumulator.branchStart(nodeId, branchId, label),
+ *   onBranchToken: (nodeId, branchId, label, token) => accumulator.branchToken(nodeId, branchId, label, token),
+ *   onBranchComplete: (nodeId, branchId, label, output) => accumulator.branchComplete(nodeId, branchId, output),
+ * };
+ * ```
+ */
+export interface StreamAccumulatorCallbacks {
+  /** Called when a node starts with its label and type already resolved */
+  onNodeStart: (nodeId: string, label: string, type: string) => void;
+  /** Called for each streaming token from a node */
+  onNodeToken: (nodeId: string, token: string) => void;
+  /** Called for reasoning tokens (if supported) */
+  onNodeReasoning: (nodeId: string, token: string) => void;
+  /** Called when a node finishes successfully */
+  onNodeFinish: (nodeId: string, output: string) => void;
+  /** Called when a node encounters an error */
+  onNodeError: (nodeId: string, error: Error) => void;
+  /** Called when a parallel branch starts */
+  onBranchStart: (nodeId: string, branchId: string, label: string) => void;
+  /** Called for each streaming token from a branch */
+  onBranchToken: (nodeId: string, branchId: string, label: string, token: string) => void;
+  /** Called when a parallel branch completes */
+  onBranchComplete: (nodeId: string, branchId: string, label: string, output: string) => void;
 }
 
 /**

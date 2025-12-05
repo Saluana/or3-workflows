@@ -153,8 +153,8 @@ describe('OpenRouterExecutionAdapter', () => {
 
       expect(result.success).toBe(true);
       expect(result.output).toBe('Hello back!');
-      expect(callbacks.onNodeStart).toHaveBeenCalledWith('start-1');
-      expect(callbacks.onNodeStart).toHaveBeenCalledWith('agent-1');
+      expect(callbacks.onNodeStart).toHaveBeenCalledWith('start-1', expect.objectContaining({ label: 'Start', type: 'start' }));
+      expect(callbacks.onNodeStart).toHaveBeenCalledWith('agent-1', expect.objectContaining({ label: 'Test Agent', type: 'agent' }));
       expect(callbacks.onNodeFinish).toHaveBeenCalledWith('start-1', 'Hello, world!');
       expect(callbacks.onNodeFinish).toHaveBeenCalledWith('agent-1', 'Hello back!');
       expect(callbacks.onToken).toHaveBeenCalledWith('agent-1', 'Hello');
@@ -298,7 +298,83 @@ describe('OpenRouterExecutionAdapter - Router Node', () => {
 
     expect(result.success).toBe(true);
     expect(result.output).toBe('Technical response');
-    expect(callbacks.onNodeStart).toHaveBeenCalledWith('agent-tech');
-    expect(callbacks.onNodeStart).not.toHaveBeenCalledWith('agent-general');
+    expect(callbacks.onNodeStart).toHaveBeenCalledWith('agent-tech', expect.objectContaining({ label: 'Tech Agent', type: 'agent' }));
+    // Verify agent-general was not called at all
+    const calls = (callbacks.onNodeStart as any).mock.calls;
+    const generalCall = calls.find((call: any) => call[0] === 'agent-general');
+    expect(generalCall).toBeUndefined();
+  });
+
+  describe('NodeInfo in callbacks', () => {
+    it('should pass NodeInfo to onNodeStart callback', async () => {
+      const workflow = createTestWorkflow();
+      const input: ExecutionInput = { text: 'Hello, world!' };
+      
+      // Mock streaming response
+      mockClient.chat.send.mockResolvedValue(
+        (async function* () {
+          yield { choices: [{ delta: { content: 'Response' } }] };
+        })()
+      );
+
+      const callbackWithNodeInfo: ExecutionCallbacks = {
+        onNodeStart: vi.fn(),
+        onNodeFinish: vi.fn(),
+        onNodeError: vi.fn(),
+        onToken: vi.fn(),
+      };
+
+      await adapter.execute(workflow, input, callbackWithNodeInfo);
+
+      // Verify onNodeStart was called with nodeInfo
+      expect(callbackWithNodeInfo.onNodeStart).toHaveBeenCalledWith(
+        'start-1',
+        expect.objectContaining({
+          label: 'Start',
+          type: 'start',
+        })
+      );
+
+      expect(callbackWithNodeInfo.onNodeStart).toHaveBeenCalledWith(
+        'agent-1',
+        expect.objectContaining({
+          label: 'Test Agent',
+          type: 'agent',
+        })
+      );
+    });
+
+    it('should be backward compatible with old callback signature', async () => {
+      const workflow = createTestWorkflow();
+      const input: ExecutionInput = { text: 'Hello, world!' };
+      
+      // Mock streaming response
+      mockClient.chat.send.mockResolvedValue(
+        (async function* () {
+          yield { choices: [{ delta: { content: 'Response' } }] };
+        })()
+      );
+
+      // Old-style callback that only accepts nodeId
+      const oldCallback = vi.fn((_nodeId: string) => {
+        // Should work fine even though nodeInfo is passed as second arg
+      });
+
+      const callbacksOldStyle: ExecutionCallbacks = {
+        onNodeStart: oldCallback,
+        onNodeFinish: vi.fn(),
+        onNodeError: vi.fn(),
+        onToken: vi.fn(),
+      };
+
+      await adapter.execute(workflow, input, callbacksOldStyle);
+
+      // Should still be called successfully
+      expect(oldCallback).toHaveBeenCalled();
+      expect(oldCallback).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.anything()
+      );
+    });
   });
 });
