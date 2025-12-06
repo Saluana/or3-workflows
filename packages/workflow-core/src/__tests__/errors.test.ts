@@ -245,13 +245,21 @@ describe('extractStatusCode', () => {
 describe('createExecutionError', () => {
     it('should create error from thrown Error', () => {
         const cause = new Error('Original error');
-        const error = createExecutionError(cause, 'node-1', 'agent', 2, 3, [
-            {
-                attempt: 1,
-                error: 'First try',
-                timestamp: '2024-01-01T00:00:00Z',
-            },
-        ]);
+        const error = createExecutionError(
+            cause,
+            'node-1',
+            'agent',
+            'Agent',
+            2,
+            3,
+            [
+                {
+                    attempt: 1,
+                    error: 'First try',
+                    timestamp: '2024-01-01T00:00:00Z',
+                },
+            ]
+        );
 
         expect(error).toBeInstanceOf(ExecutionError);
         expect(error.message).toBe('Original error');
@@ -268,6 +276,7 @@ describe('createExecutionError', () => {
             'String error',
             'node-1',
             'router',
+            'Router',
             1,
             1,
             []
@@ -281,6 +290,7 @@ describe('createExecutionError', () => {
             { message: 'Error', status: 429 },
             'node-1',
             'agent',
+            'Agent',
             1,
             1,
             []
@@ -296,6 +306,7 @@ describe('createExecutionError', () => {
             { message: 'Rate limited', status: 429, headers },
             'node-1',
             'agent',
+            'Agent',
             1,
             1,
             []
@@ -310,6 +321,7 @@ describe('createExecutionError', () => {
             original,
             'node-1',
             'agent',
+            'Agent',
             1,
             1,
             []

@@ -173,15 +173,23 @@ describe('OpenRouterExecutionAdapter', () => {
 
             expect(result.success).toBe(true);
             expect(result.output).toBe('Hello back!');
-            expect(callbacks.onNodeStart).toHaveBeenCalledWith('start-1');
-            expect(callbacks.onNodeStart).toHaveBeenCalledWith('agent-1');
+            expect(callbacks.onNodeStart).toHaveBeenCalledWith(
+                'start-1',
+                expect.objectContaining({ id: 'start-1', label: 'Start' })
+            );
+            expect(callbacks.onNodeStart).toHaveBeenCalledWith(
+                'agent-1',
+                expect.objectContaining({ id: 'agent-1', label: 'Test Agent' })
+            );
             expect(callbacks.onNodeFinish).toHaveBeenCalledWith(
                 'start-1',
-                'Hello, world!'
+                'Hello, world!',
+                expect.objectContaining({ id: 'start-1', label: 'Start' })
             );
             expect(callbacks.onNodeFinish).toHaveBeenCalledWith(
                 'agent-1',
-                'Hello back!'
+                'Hello back!',
+                expect.objectContaining({ id: 'agent-1', label: 'Test Agent' })
             );
             expect(callbacks.onToken).toHaveBeenCalledWith('agent-1', 'Hello');
             expect(callbacks.onToken).toHaveBeenCalledWith('agent-1', ' back!');
@@ -358,8 +366,14 @@ describe('OpenRouterExecutionAdapter - Router Node', () => {
 
         expect(result.success).toBe(true);
         expect(result.output).toBe('Technical response');
-        expect(callbacks.onNodeStart).toHaveBeenCalledWith('agent-tech');
-        expect(callbacks.onNodeStart).not.toHaveBeenCalledWith('agent-general');
+        expect(callbacks.onNodeStart).toHaveBeenCalledWith(
+            'agent-tech',
+            expect.objectContaining({ id: 'agent-tech', label: 'Tech Agent' })
+        );
+        expect(callbacks.onNodeStart).not.toHaveBeenCalledWith(
+            'agent-general',
+            expect.anything()
+        );
     });
 });
 
@@ -547,7 +561,8 @@ describe('OpenRouterExecutionAdapter - Error Handling', () => {
         expect(result.output).toBe('recovered');
         expect(callbacks.onNodeError).toHaveBeenCalledWith(
             'tool-1',
-            expect.objectContaining({ message: 'boom' })
+            expect.objectContaining({ message: 'boom' }),
+            expect.objectContaining({ id: 'tool-1', label: 'Primary' })
         );
     });
 
