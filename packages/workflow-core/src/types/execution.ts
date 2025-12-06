@@ -22,6 +22,16 @@ import type {
 } from './base';
 
 // ============================================================================
+// Execution State
+// ============================================================================
+
+export type WorkflowExecutionState =
+    | 'running'
+    | 'completed'
+    | 'stopped'
+    | 'error';
+
+// ============================================================================
 // Tool Definition Types
 // ============================================================================
 
@@ -268,14 +278,18 @@ export interface ExecutionCallbacks {
      * Use this to update UI state (e.g., show loading indicator).
      * @param nodeId - The ID of the node that started.
      */
-    onNodeStart: (nodeId: string) => void;
+    onNodeStart: (nodeId: string, meta?: NodeExecutionMetadata) => void;
 
     /**
      * Called when a node successfully completes execution.
      * @param nodeId - The ID of the node that finished.
      * @param output - The output produced by the node.
      */
-    onNodeFinish: (nodeId: string, output: string) => void;
+    onNodeFinish: (
+        nodeId: string,
+        output: string,
+        meta?: NodeExecutionMetadata
+    ) => void;
 
     /**
      * Called when a node encounters an error during execution.
@@ -283,7 +297,11 @@ export interface ExecutionCallbacks {
      * @param nodeId - The ID of the node that errored.
      * @param error - The error that occurred.
      */
-    onNodeError: (nodeId: string, error: Error) => void;
+    onNodeError: (
+        nodeId: string,
+        error: ExecutionErrorPayload,
+        meta?: NodeExecutionMetadata
+    ) => void;
 
     /**
      * Called for each streaming token from the LLM.
@@ -292,6 +310,12 @@ export interface ExecutionCallbacks {
      * @param token - The token/chunk of text received.
      */
     onToken: (nodeId: string, token: string) => void;
+
+    /**
+     * Called for workflow-level streaming tokens (intended final output).
+     * Emitted only for terminal/leaf nodes so UIs can stream the final result box directly.
+     */
+    onWorkflowToken?: (token: string, meta: WorkflowTokenMetadata) => void;
 
     /**
      * Called for each reasoning/thinking token from the LLM.
@@ -307,7 +331,11 @@ export interface ExecutionCallbacks {
      * @param nodeId - The ID of the router node.
      * @param routeId - The ID of the selected route.
      */
-    onRouteSelected?: (nodeId: string, routeId: string) => void;
+    onRouteSelected?: (
+        nodeId: string,
+        routeId: string,
+        meta?: NodeExecutionMetadata
+    ) => void;
 
     /**
      * Called when token usage is estimated for an LLM request.
@@ -363,7 +391,8 @@ export interface ExecutionCallbacks {
     onBranchStart?: (
         nodeId: string,
         branchId: string,
-        branchLabel: string
+        branchLabel: string,
+        meta?: NodeExecutionMetadata
     ) => void;
 
     /**
@@ -377,7 +406,8 @@ export interface ExecutionCallbacks {
         nodeId: string,
         branchId: string,
         branchLabel: string,
-        output: string
+        output: string,
+        meta?: NodeExecutionMetadata
     ) => void;
 
     /**
@@ -390,8 +420,14 @@ export interface ExecutionCallbacks {
     onLoopIteration?: (
         nodeId: string,
         iteration: number,
-        maxIterations: number
+        maxIterations: number,
+        meta?: NodeExecutionMetadata
     ) => void;
+
+    /**
+     * Called when the entire workflow completes (success, stopped, or error).
+     */
+    onComplete?: (payload: WorkflowCompletionPayload) => void;
 }
 
 /**
@@ -420,8 +456,20 @@ export interface ExecutionResult {
     /** Final output of the workflow (from the last executed node). */
     output: string;
 
+    /** Alias for clarity. */
+    finalOutput: string;
+
+    /** The node ID that produced the final output. */
+    finalNodeId?: string;
+
     /** Output from each executed node, keyed by node ID. */
     nodeOutputs: Record<string, string>;
+
+    /** Ordered list of nodes as they finished execution. */
+    executionOrder: string[];
+
+    /** Last node that produced output or streamed tokens. */
+    lastActiveNodeId?: string;
 
     /** Error that caused execution to fail (only set if success is false). */
     error?: Error;
@@ -434,6 +482,60 @@ export interface ExecutionResult {
 
     /** Per-request token usage details (estimated). */
     tokenUsageDetails?: Array<TokenUsageDetails & { nodeId: string }>;
+
+    /** Session messages captured during execution (for resume). */
+    sessionMessages?: ChatMessage[];
+}
+
+/**
+ * Metadata emitted alongside node lifecycle events.
+ */
+export interface NodeExecutionMetadata {
+    id: string;
+    label?: string;
+    type?: string;
+    path?: string[];
+    executionOrder?: string[];
+    lastActiveNodeId?: string;
+}
+
+/**
+ * Structured error payload for UI display.
+ */
+export interface ExecutionErrorPayload extends Error {
+    nodeId: string;
+    nodeLabel?: string;
+    nodeType: string;
+    code: string;
+    statusCode?: number;
+    stack?: string;
+}
+
+/**
+ * Workflow-level completion payload.
+ */
+export interface WorkflowCompletionPayload {
+    success: boolean;
+    output: string;
+    finalOutput: string;
+    finalNodeId?: string;
+    nodeOutputs: Record<string, string>;
+    executionOrder: string[];
+    lastActiveNodeId?: string;
+    error?: ExecutionErrorPayload;
+    usage?: TokenUsage;
+    tokenUsageDetails?: Array<TokenUsageDetails & { nodeId: string }>;
+    sessionMessages?: ChatMessage[];
+}
+
+/**
+ * Metadata for workflow-level streaming tokens.
+ */
+export interface WorkflowTokenMetadata {
+    nodeId: string;
+    nodeLabel?: string;
+    nodeType?: string;
+    isFinalNode: boolean;
 }
 
 /** Token usage statistics */
@@ -553,6 +655,9 @@ export interface ExecutionOptions {
      * - 'hitl': Trigger human-in-the-loop for approval to continue
      */
     onMaxToolIterations?: 'warning' | 'error' | 'hitl';
+
+    /** Resume execution from a specific node using prior outputs/session. */
+    resumeFrom?: ResumeFromOptions;
 }
 
 /**
@@ -562,6 +667,24 @@ export interface ExecutionOptions {
 export interface ExecutableToolDefinition extends ToolDefinition {
     /** Handler function to execute when the tool is called */
     handler?: (args: unknown) => Promise<string> | string;
+}
+
+/** Resume metadata to continue from a failed node without re-running parents. */
+export interface ResumeFromOptions {
+    /** Node ID to restart from. */
+    startNodeId: string;
+    /** Per-node outputs collected so far. */
+    nodeOutputs: Record<string, string>;
+    /** Execution order captured up to the failure point. */
+    executionOrder?: string[];
+    /** Last active node before failure. */
+    lastActiveNodeId?: string;
+    /** Session messages accumulated during prior execution. */
+    sessionMessages?: ChatMessage[];
+    /** Suggested current input (usually last output). */
+    resumeInput?: string;
+    /** Final node id if known. */
+    finalNodeId?: string;
 }
 
 /** Context passed to node executors during execution */

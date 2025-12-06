@@ -48,6 +48,7 @@ export interface RetryInfo {
  */
 export class ExecutionError extends Error {
     readonly nodeId: string;
+    readonly nodeLabel?: string;
     readonly nodeType: string;
     readonly code: ErrorCode;
     readonly statusCode?: number;
@@ -59,6 +60,7 @@ export class ExecutionError extends Error {
         message: string,
         options: {
             nodeId: string;
+            nodeLabel?: string;
             nodeType: string;
             code: ErrorCode;
             statusCode?: number;
@@ -70,6 +72,7 @@ export class ExecutionError extends Error {
         super(message);
         this.name = 'ExecutionError';
         this.nodeId = options.nodeId;
+        this.nodeLabel = options.nodeLabel;
         this.nodeType = options.nodeType;
         this.code = options.code;
         this.statusCode = options.statusCode;
@@ -217,6 +220,7 @@ export function createExecutionError(
     error: unknown,
     nodeId: string,
     nodeType: string,
+    nodeLabel: string | undefined,
     attempt: number,
     maxAttempts: number,
     history: RetryHistoryEntry[]
@@ -232,6 +236,7 @@ export function createExecutionError(
 
     return new ExecutionError(cause.message, {
         nodeId,
+        nodeLabel,
         nodeType,
         code,
         statusCode,
@@ -249,13 +254,15 @@ export function wrapError(
     nodeId: string,
     attempt: number,
     maxAttempts: number,
-    history: RetryHistoryEntry[]
+    history: RetryHistoryEntry[],
+    nodeLabel?: string
 ): ExecutionError {
     // Delegate to new factory for backwards compatibility
     return createExecutionError(
         error,
         nodeId,
         '',
+        nodeLabel,
         attempt,
         maxAttempts,
         history

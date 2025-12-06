@@ -18,6 +18,7 @@ import type {
     TokenUsage,
     TokenUsageDetails,
     ValidationContext,
+    NodeExecutionMetadata,
 } from './types';
 import {
     AgentNodeExtension,
@@ -109,6 +110,15 @@ interface InternalExecutionContext {
     readonly session: Session;
     readonly memory: MemoryAdapter;
     readonly workflowName: string;
+}
+
+function getNodeLabel(node: WorkflowNode | undefined): string | undefined {
+    if (!node) return undefined;
+    const maybe = (node.data as { label?: string } | undefined)?.label;
+    if (typeof maybe === 'string' && maybe.trim().length > 0) {
+        return maybe;
+    }
+    return node.id;
 }
 
 // ============================================================================
@@ -259,8 +269,19 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         this.running = true;
         this.tokenUsageEvents = [];
 
+        const resumeFrom = this.options.resumeFrom;
+
         const startTime = Date.now();
-        const nodeOutputs: Record<string, string> = {};
+        const nodeOutputs: Record<string, string> = resumeFrom?.nodeOutputs
+            ? { ...resumeFrom.nodeOutputs }
+            : {};
+        const executionOrder: string[] = resumeFrom?.executionOrder
+            ? [...resumeFrom.executionOrder]
+            : [];
+        let lastActiveNodeId: string | undefined = resumeFrom?.lastActiveNodeId;
+        let finalNodeId: string | undefined = resumeFrom?.finalNodeId;
+        let finalOutput = resumeFrom?.resumeInput || '';
+        let sessionMessages: ChatMessage[] = [];
 
         // Preflight validation (enabled by default)
         if (this.options.preflight !== false) {
@@ -290,6 +311,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     new Error(`Workflow validation failed: ${errorMessages}`),
                     '',
                     '',
+                    undefined,
                     1,
                     1,
                     []
@@ -297,13 +319,20 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
                 callbacks.onNodeError('', validationError);
 
-                return this.buildExecutionResult(
+                const result = this.buildExecutionResult(
                     false,
                     '',
+                    '',
+                    undefined,
+                    [],
+                    undefined,
                     {},
+                    sessionMessages,
                     startTime,
                     validationError
                 );
+                callbacks.onComplete?.(result as any);
+                return result;
             }
         }
 
@@ -318,24 +347,43 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
             // Initialize execution context
             const session = new ExecutionSession(this.options.sessionId);
-            session.addMessage({ role: 'user', content: input.text });
+            if (resumeFrom?.sessionMessages?.length) {
+                session.messages.push(...resumeFrom.sessionMessages);
+            } else {
+                session.addMessage({ role: 'user', content: input.text });
+            }
 
             const context: InternalExecutionContext = {
                 input: input.text,
-                currentInput: input.text,
+                currentInput:
+                    resumeFrom?.resumeInput ||
+                    (resumeFrom?.lastActiveNodeId
+                        ? resumeFrom.nodeOutputs?.[resumeFrom.lastActiveNodeId]
+                        : input.text),
                 originalInput: input.text,
                 attachments: input.attachments || [],
-                outputs: {},
-                nodeChain: [],
+                outputs: { ...(resumeFrom?.nodeOutputs || {}) },
+                nodeChain: resumeFrom?.executionOrder
+                    ? [...resumeFrom.executionOrder]
+                    : [],
                 signal: this.abortController.signal,
                 session,
                 memory: this.memory,
                 workflowName: workflow.meta.name,
             };
 
+            sessionMessages = context.session.messages;
+
             // BFS execution through the graph
-            const queue: string[] = [startNode.id];
-            const executed = new Set<string>();
+            const rootNodeId = resumeFrom?.startNodeId ?? startNode.id;
+            const queue: string[] = [rootNodeId];
+            const executed = new Set<string>(
+                resumeFrom ? Object.keys(resumeFrom.nodeOutputs || {}) : []
+            );
+            // Ensure the resume target is re-run
+            if (resumeFrom) {
+                executed.delete(rootNodeId);
+            }
             const skipped = new Set<string>();
             // Per-node execution counter to prevent infinite loops
             const nodeExecutionCount = new Map<string, number>();
@@ -345,7 +393,6 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 this.options.maxIterations ??
                 workflow.nodes.length * MAX_ITERATIONS_MULTIPLIER;
             let iterations = 0;
-            let finalOutput = '';
 
             // Helper to propagate skip status
             const propagateSkip = (nodeId: string): void => {
@@ -401,7 +448,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                         parentIds.length === 0 ||
                         parentIds.every((p) => executed.has(p));
 
-                    if (allParentsExecuted || nodeId === startNode.id) {
+                    if (allParentsExecuted || nodeId === rootNodeId) {
                         readyNodes.push(nodeId);
                     } else {
                         deferredNodes.push(nodeId);
@@ -464,6 +511,9 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     // Store output
                     nodeOutputs[nodeId] = result.output;
                     finalOutput = result.output;
+                    finalNodeId = nodeId;
+                    executionOrder.push(nodeId);
+                    lastActiveNodeId = nodeId;
 
                     // Handle skipped nodes (children not in nextNodes) - except while loops which manage their own control flow
                     const currentNode = graph.nodeMap.get(nodeId);
@@ -514,22 +564,36 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 }
             }
 
-            return this.buildExecutionResult(
+            const result = this.buildExecutionResult(
                 true,
                 finalOutput,
+                finalOutput,
+                finalNodeId,
+                executionOrder,
+                lastActiveNodeId,
                 nodeOutputs,
+                context.session.messages,
                 startTime
             );
+            callbacks.onComplete?.(result as any);
+            return result;
         } catch (error) {
             const err =
                 error instanceof Error ? error : new Error(String(error));
-            return this.buildExecutionResult(
+            const result = this.buildExecutionResult(
                 false,
                 '',
+                '',
+                finalNodeId,
+                executionOrder,
+                lastActiveNodeId,
                 nodeOutputs,
+                sessionMessages,
                 startTime,
                 err
             );
+            callbacks.onComplete?.(result as any);
+            return result;
         } finally {
             this.running = false;
         }
@@ -541,21 +605,33 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     private buildExecutionResult(
         success: boolean,
         output: string,
+        finalOutput: string,
+        finalNodeId: string | undefined,
+        executionOrder: string[],
+        lastActiveNodeId: string | undefined,
         nodeOutputs: Record<string, string>,
+        sessionMessages: ChatMessage[],
         startTime: number,
         error?: Error
     ): ExecutionResult {
+        const usage = this.getTokenUsageSummary();
+        const tokenUsageDetails = this.tokenUsageEvents.map((entry) => ({
+            nodeId: entry.nodeId,
+            ...entry.usage,
+        }));
         return {
             success,
             output,
+            finalOutput,
+            finalNodeId,
+            executionOrder,
+            lastActiveNodeId,
             nodeOutputs,
+            sessionMessages: [...sessionMessages],
             error,
             duration: Date.now() - startTime,
-            usage: this.getTokenUsageSummary(),
-            tokenUsageDetails: this.tokenUsageEvents.map((entry) => ({
-                nodeId: entry.nodeId,
-                ...entry.usage,
-            })),
+            usage,
+            tokenUsageDetails,
         };
     }
 
@@ -668,8 +744,13 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     ): Promise<{ output: string; nextNodes: string[] }> {
         const node = graph.nodeMap.get(nodeId);
         if (!node) return { output: '', nextNodes: [] };
+        const meta = {
+            id: nodeId,
+            label: getNodeLabel(node),
+            type: node?.type,
+        } satisfies Partial<NodeExecutionMetadata>;
 
-        callbacks.onNodeStart(nodeId);
+        callbacks.onNodeStart(nodeId, meta);
 
         // Look up extension
         const extension = extensionRegistry.get(node.type);
@@ -741,6 +822,15 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
             onToken: (token: string) => {
                 callbacks.onToken(nodeId, token);
+                const isLeaf = (graph.children[nodeId] || []).length === 0;
+                if (isLeaf && callbacks.onWorkflowToken) {
+                    callbacks.onWorkflowToken(token, {
+                        nodeId,
+                        nodeLabel: meta.label,
+                        nodeType: meta.type,
+                        isFinalNode: true,
+                    });
+                }
             },
 
             onReasoning: callbacks.onReasoning
@@ -772,7 +862,12 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 : undefined,
             onBranchStart: callbacks.onBranchStart
                 ? (branchId: string, branchLabel: string) => {
-                      callbacks.onBranchStart!(nodeId, branchId, branchLabel);
+                      callbacks.onBranchStart!(
+                          nodeId,
+                          branchId,
+                          branchLabel,
+                          meta
+                      );
                   }
                 : undefined,
             onBranchComplete: callbacks.onBranchComplete
@@ -781,7 +876,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                           nodeId,
                           branchId,
                           branchLabel,
-                          output
+                          output,
+                          meta
                       );
                   }
                 : undefined,
@@ -790,7 +886,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                       callbacks.onLoopIteration!(
                           nodeId,
                           iteration,
-                          maxIterations
+                          maxIterations,
+                          meta
                       );
                   }
                 : undefined,
@@ -915,7 +1012,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             if (callbacks.onRouteSelected) {
                 callbacks.onRouteSelected(
                     nodeId,
-                    result.metadata.selectedRoute
+                    result.metadata.selectedRoute,
+                    meta
                 );
             }
         }
@@ -940,7 +1038,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             });
         }
 
-        callbacks.onNodeFinish(nodeId, result.output);
+        callbacks.onNodeFinish(nodeId, result.output, meta);
         return { output: result.output, nextNodes: result.nextNodes };
     }
     private getTokenUsageSummary(): TokenUsage | undefined {
@@ -978,6 +1076,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             // Early return for missing node
             return { output: '', nextNodes: [] };
         }
+
+        const nodeLabel = getNodeLabel(node);
 
         const nodeData = node.data as unknown as Record<string, unknown>;
         const errorConfig = nodeData?.errorHandling as
@@ -1036,6 +1136,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     error,
                     nodeId,
                     node.type,
+                    nodeLabel,
                     attempt,
                     maxAttempts,
                     retryHistory
@@ -1066,7 +1167,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 if (mode === 'branch' && errorEdge) {
                     context.outputs[`${nodeId}_error`] =
                         this.serializeError(execError);
-                    callbacks.onNodeError(nodeId, execError);
+                    callbacks.onNodeError(nodeId, execError, {
+                        id: nodeId,
+                        label: nodeLabel,
+                        type: node.type,
+                    });
                     return {
                         output: '',
                         nextNodes: [errorEdge.target],
@@ -1074,14 +1179,22 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 }
 
                 if (mode === 'continue') {
-                    callbacks.onNodeError(nodeId, execError);
+                    callbacks.onNodeError(nodeId, execError, {
+                        id: nodeId,
+                        label: nodeLabel,
+                        type: node.type,
+                    });
                     return {
                         output: '',
                         nextNodes: this.getChildNodes(nodeId, edges),
                     };
                 }
 
-                callbacks.onNodeError(nodeId, execError);
+                callbacks.onNodeError(nodeId, execError, {
+                    id: nodeId,
+                    label: nodeLabel,
+                    type: node.type,
+                });
                 throw execError;
             }
         }
@@ -1110,6 +1223,12 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     ): Promise<{ output: string; nextNodes: string[] }> {
         const nodeData = node.data as unknown as Record<string, unknown>;
         const hitlConfig = nodeData.hitl as HITLConfig | undefined;
+        const nodeLabel = getNodeLabel(node);
+        const meta = {
+            id: node.id,
+            label: nodeLabel,
+            type: node.type,
+        } satisfies Partial<NodeExecutionMetadata>;
 
         // No HITL configured or disabled, or no callback provided
         if (!hitlConfig?.enabled || !this.options.onHITLRequest) {
@@ -1142,7 +1261,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 (e) => e.source === node.id && e.sourceHandle === 'rejected'
             );
             if (rejectEdge) {
-                callbacks.onNodeFinish(node.id, 'HITL: Rejected');
+                callbacks.onNodeFinish(node.id, 'HITL: Rejected', meta);
                 return { output: '', nextNodes: [rejectEdge.target] };
             }
             throw new Error('HITL: Request rejected');
@@ -1150,7 +1269,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
         // Helper to handle skip action - only routes through default output handles
         const handleSkip = (): { output: string; nextNodes: string[] } => {
-            callbacks.onNodeFinish(node.id, 'HITL: Skipped');
+            callbacks.onNodeFinish(node.id, 'HITL: Skipped', meta);
             return {
                 output: context.currentInput,
                 nextNodes: defaultChildNodeIds,

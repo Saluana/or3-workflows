@@ -17,6 +17,7 @@ export {
     type ExecutionResult,
     type ExecutionCallbacks,
     type ExecutionOptions,
+    type ResumeFromOptions,
     type TokenUsageDetails,
     type ChatMessage,
     type NodeStatus,
