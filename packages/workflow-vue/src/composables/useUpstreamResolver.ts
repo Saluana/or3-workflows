@@ -52,9 +52,13 @@ export function useUpstreamResolver(
         }
 
         if (ed) {
-            unsubscribe = ed.on('update', () => {
-                updateTrigger.value++;
-            });
+            const on = (ed as { on?: WorkflowEditor['on'] }).on;
+            if (typeof on === 'function') {
+                const maybeUnsub = on.call(ed, 'update', () => {
+                    updateTrigger.value++;
+                });
+                unsubscribe = typeof maybeUnsub === 'function' ? maybeUnsub : null;
+            }
         }
     };
 
