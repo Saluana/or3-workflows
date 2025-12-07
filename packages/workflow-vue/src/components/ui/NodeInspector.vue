@@ -191,36 +191,35 @@ const whileData = computed(() => {
     return data || {};
 });
 
+const advancedOutputExpanded = ref(false);
+
 const outputData = computed<{
     format: OutputFormat;
     template: string;
     includeMetadata: boolean;
-    schema: Record<string, unknown> | null;
 }>(() => {
     const data = selectedNode.value?.data as any;
     return {
-        format: data?.format ?? 'text',
+        format: data?.format ?? 'markdown',
         template: data?.template ?? '',
         includeMetadata: data?.includeMetadata ?? false,
-        schema: data?.schema ?? null,
     };
 });
 
-// JSON Schema editor state
-const schemaExpanded = ref(false);
-const schemaText = ref('');
-const schemaError = ref<string | null>(null);
-
-// Sync schemaText when node changes
+// Normalize output format to markdown (text) and clear legacy schema
 watch(
-    () => outputData.value.schema,
-    (schema) => {
-        if (schema) {
-            schemaText.value = JSON.stringify(schema, null, 2);
-        } else {
-            schemaText.value = '';
+    () => ({
+        fmt: outputData.value.format,
+        nodeId: selectedNode.value?.id,
+    }),
+    ({ fmt, nodeId }) => {
+        if (!nodeId) return;
+        if (fmt && fmt !== 'markdown') {
+            props.editor.commands.updateNodeData(nodeId, {
+                format: 'markdown',
+                schema: undefined,
+            });
         }
-        schemaError.value = null;
     },
     { immediate: true }
 );
@@ -623,15 +622,6 @@ const removeInputMapping = (inputId: string) => {
     });
 };
 
-// Output node update handlers
-const updateOutputFormat = (event: Event) => {
-    if (!selectedNode.value) return;
-    const value = (event.target as HTMLSelectElement).value as OutputFormat;
-    props.editor.commands.updateNodeData(selectedNode.value.id, {
-        format: value,
-    });
-};
-
 const updateOutputTemplate = (event: Event) => {
     if (!selectedNode.value) return;
     const value = (event.target as HTMLTextAreaElement).value;
@@ -648,78 +638,6 @@ const toggleIncludeMetadata = () => {
     props.editor.commands.updateNodeData(selectedNode.value.id, {
         includeMetadata: !outputData.value.includeMetadata,
     });
-};
-
-const updateSchema = () => {
-    if (!selectedNode.value) return;
-    const text = schemaText.value.trim();
-
-    if (!text) {
-        // Clear schema
-        schemaError.value = null;
-        props.editor.commands.updateNodeData(selectedNode.value.id, {
-            schema: undefined,
-        });
-        return;
-    }
-
-    try {
-        const parsed = JSON.parse(text);
-        if (typeof parsed !== 'object' || parsed === null) {
-            schemaError.value = 'Schema must be a JSON object';
-            return;
-        }
-        schemaError.value = null;
-        props.editor.commands.updateNodeData(selectedNode.value.id, {
-            schema: parsed,
-        });
-    } catch (e) {
-        schemaError.value = `Invalid JSON: ${(e as Error).message}`;
-    }
-};
-
-const formatSchema = () => {
-    try {
-        const parsed = JSON.parse(schemaText.value);
-        schemaText.value = JSON.stringify(parsed, null, 2);
-        schemaError.value = null;
-    } catch (e) {
-        schemaError.value = `Cannot format: ${(e as Error).message}`;
-    }
-};
-
-const applySchemaPreset = (preset: 'object' | 'array' | 'string') => {
-    const presets = {
-        object: {
-            type: 'object',
-            properties: {
-                result: { type: 'string', description: 'The result' },
-            },
-            required: ['result'],
-        },
-        array: {
-            type: 'array',
-            items: { type: 'string' },
-            minItems: 1,
-        },
-        string: {
-            type: 'string',
-            minLength: 1,
-        },
-    };
-    schemaText.value = JSON.stringify(presets[preset], null, 2);
-    schemaError.value = null;
-    updateSchema();
-};
-
-const clearSchema = () => {
-    schemaText.value = '';
-    schemaError.value = null;
-    if (selectedNode.value) {
-        props.editor.commands.updateNodeData(selectedNode.value.id, {
-            schema: undefined,
-        });
-    }
 };
 
 const handleDelete = () => {
@@ -1986,17 +1904,9 @@ Example: "Improve this text, making it clearer and more engaging."'
             >
                 <div class="field-group">
                     <label class="field-label">Output Format</label>
-                    <select
-                        class="select-input"
-                        :value="outputData.format"
-                        @change="updateOutputFormat"
-                    >
-                        <option value="text">Text</option>
-                        <option value="json">JSON</option>
-                        <option value="markdown">Markdown</option>
-                    </select>
+                    <div class="pill-display">Text (Markdown)</div>
                     <p class="field-hint">
-                        The format for the workflow's final output.
+                        Outputs are emitted as markdown by default—great for plain text or rich formatting. No JSON mode to configure.
                     </p>
                 </div>
 
@@ -2016,30 +1926,14 @@ Example: "Improve this text, making it clearer and more engaging."'
                     </p>
                 </div>
 
-                <div class="output-toggle">
-                    <label class="toggle-label">
-                        <input
-                            type="checkbox"
-                            :checked="outputData.includeMetadata"
-                            @change="toggleIncludeMetadata"
-                        />
-                        <span class="toggle-text">Include Metadata</span>
-                    </label>
-                    <p class="field-hint" style="margin-top: 4px">
-                        When enabled, the output includes timing, token usage,
-                        and execution metadata.
-                    </p>
-                </div>
-
-                <!-- JSON Schema Editor (only for JSON format) -->
-                <div v-if="outputData.format === 'json'" class="schema-section">
+                <div class="output-advanced">
                     <button
                         class="schema-toggle"
-                        @click="schemaExpanded = !schemaExpanded"
+                        @click="advancedOutputExpanded = !advancedOutputExpanded"
                     >
                         <svg
                             class="toggle-chevron"
-                            :class="{ expanded: schemaExpanded }"
+                            :class="{ expanded: advancedOutputExpanded }"
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
@@ -2047,82 +1941,26 @@ Example: "Improve this text, making it clearer and more engaging."'
                         >
                             <polyline points="9 18 15 12 9 6"></polyline>
                         </svg>
-                        <span>JSON Schema Validation</span>
-                        <span v-if="outputData.schema" class="schema-badge"
-                            >Active</span
-                        >
+                        <span>Advanced (Metadata)</span>
                     </button>
 
-                    <div v-if="schemaExpanded" class="schema-editor">
-                        <div class="schema-toolbar">
-                            <span class="toolbar-label">Presets:</span>
-                            <button
-                                class="preset-btn"
-                                @click="applySchemaPreset('object')"
-                                title="Object schema"
-                            >
-                                { }
-                            </button>
-                            <button
-                                class="preset-btn"
-                                @click="applySchemaPreset('array')"
-                                title="Array schema"
-                            >
-                                [ ]
-                            </button>
-                            <button
-                                class="preset-btn"
-                                @click="applySchemaPreset('string')"
-                                title="String schema"
-                            >
-                                " "
-                            </button>
-                            <div class="toolbar-spacer"></div>
-                            <button
-                                class="action-btn"
-                                @click="formatSchema"
-                                title="Format JSON"
-                            >
-                                Format
-                            </button>
-                            <button
-                                class="action-btn danger"
-                                @click="clearSchema"
-                                title="Clear schema"
-                            >
-                                Clear
-                            </button>
+                    <div
+                        v-if="advancedOutputExpanded"
+                        class="output-advanced-body"
+                    >
+                        <div class="output-toggle">
+                            <label class="toggle-label">
+                                <input
+                                    type="checkbox"
+                                    :checked="outputData.includeMetadata"
+                                    @change="toggleIncludeMetadata"
+                                />
+                                <span class="toggle-text">Include Metadata</span>
+                            </label>
+                            <p class="field-hint" style="margin-top: 4px">
+                                Adds timing, token usage, and execution metadata to the final output.
+                            </p>
                         </div>
-
-                        <textarea
-                            class="schema-textarea"
-                            :class="{ 'has-error': schemaError }"
-                            v-model="schemaText"
-                            placeholder='{
-  "type": "object",
-  "properties": {
-    "result": { "type": "string" }
-  }
-}'
-                            @blur="updateSchema"
-                            rows="8"
-                        ></textarea>
-
-                        <p v-if="schemaError" class="schema-error">
-                            {{ schemaError }}
-                        </p>
-
-                        <p class="field-hint">
-                            Define a
-                            <a
-                                href="https://json-schema.org/learn/getting-started-step-by-step"
-                                target="_blank"
-                                rel="noopener"
-                                >JSON Schema</a
-                            >
-                            to validate the output structure. The output will be
-                            validated before being returned.
-                        </p>
                     </div>
                 </div>
 
@@ -2872,10 +2710,35 @@ Example: "Improve this text, making it clearer and more engaging."'
     gap: var(--or3-spacing-md, 16px);
 }
 
+.pill-display {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 12px;
+    border-radius: var(--or3-radius-sm, 6px);
+    background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
+    font-weight: 600;
+    color: var(--or3-color-text, rgba(255, 255, 255, 0.95));
+    width: fit-content;
+}
+
 .output-toggle {
     display: flex;
     flex-direction: column;
     gap: var(--or3-spacing-xs, 4px);
+}
+
+.output-advanced {
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.1));
+    border-radius: var(--or3-radius-md, 8px);
+    overflow: hidden;
+}
+
+.output-advanced-body {
+    padding: 12px;
+    border-top: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.1));
+    background: var(--or3-color-bg-primary, rgba(0, 0, 0, 0.08));
 }
 
 /* Schema Editor */
