@@ -1704,10 +1704,7 @@ Example: "Improve this text, making it clearer and more engaging."'
                         </label>
                     </div>
 
-                    <div
-                        v-if="selectedTools.length > 0"
-                        class="selected-tools"
-                    >
+                    <div v-if="selectedTools.length > 0" class="selected-tools">
                         <label class="field-label"
                             >Enabled Tools ({{ selectedTools.length }})</label
                         >
