@@ -46,6 +46,7 @@ function getToolsArray(data: unknown): string[] {
 
 const props = defineProps<{
     editor: WorkflowEditor;
+    availableTools?: ToolOption[];
 }>();
 
 const emit = defineEmits<{
@@ -66,6 +67,11 @@ const activeTab = ref<
     | 'branches'
 >('prompt');
 
+// Prefer host-provided tools; fall back to built-in demo list if none supplied
+const availableTools = computed<ToolOption[]>(() => {
+    return props.availableTools ?? defaultAvailableTools;
+});
+
 // Available models from registry
 // Register defaults if registry is empty
 if (modelRegistry.size === 0) {
@@ -80,8 +86,14 @@ const availableModels = computed(() => {
     }));
 });
 
-// Available tools
-const availableTools = [
+interface ToolOption {
+    id: string;
+    name: string;
+    description?: string;
+}
+
+// Available tools (fallback when host doesn't provide a list)
+const defaultAvailableTools: ToolOption[] = [
     {
         id: 'web_search',
         name: 'Web Search',
@@ -346,10 +358,22 @@ const addBranch = () => {
 
 const removeBranch = (branchId: string) => {
     if (!selectedNode.value) return;
+    const nodeId = selectedNode.value.id;
+
+    // First, delete any edges connected to this branch's output handle
+    const edges = props.editor.getEdges();
+    const edgesToDelete = edges.filter(
+        (edge) => edge.source === nodeId && edge.sourceHandle === branchId
+    );
+    for (const edge of edgesToDelete) {
+        props.editor.commands.deleteEdge(edge.id);
+    }
+
+    // Then update the branches array
     const branches = parallelData.value.branches.filter(
         (b: BranchConfig) => b.id !== branchId
     );
-    props.editor.commands.updateNodeData(selectedNode.value.id, { branches });
+    props.editor.commands.updateNodeData(nodeId, { branches });
 };
 
 const updateBranchLabel = (branchId: string, label: string) => {
@@ -422,8 +446,20 @@ const addRoute = () => {
 
 const removeRoute = (routeId: string) => {
     if (!selectedNode.value) return;
+    const nodeId = selectedNode.value.id;
+
+    // First, delete any edges connected to this route's output handle
+    const edges = props.editor.getEdges();
+    const edgesToDelete = edges.filter(
+        (edge) => edge.source === nodeId && edge.sourceHandle === routeId
+    );
+    for (const edge of edgesToDelete) {
+        props.editor.commands.deleteEdge(edge.id);
+    }
+
+    // Then update the routes array
     const routes = routerData.value.routes.filter((r: any) => r.id !== routeId);
-    props.editor.commands.updateNodeData(selectedNode.value.id, { routes });
+    props.editor.commands.updateNodeData(nodeId, { routes });
 };
 
 const updateRouteLabel = (routeId: string, label: string) => {
@@ -1543,7 +1579,10 @@ Example: "Improve this text, making it clearer and more engaging."'
                                     rows="3"
                                 ></textarea>
                             </div>
-                            <div class="branch-field">
+                            <div
+                                v-if="availableTools.length > 0"
+                                class="branch-field"
+                            >
                                 <label class="field-label-sm"
                                     >Tools (optional)</label
                                 >
@@ -1636,62 +1675,86 @@ Example: "Improve this text, making it clearer and more engaging."'
 
             <!-- Tools Tab -->
             <div v-if="activeTab === 'tools' && isAgentNode" class="tools-tab">
-                <label class="field-label">Available Tools</label>
-                <p class="field-hint">
-                    Select which tools this agent can use during execution.
-                </p>
+                <template v-if="availableTools.length > 0">
+                    <label class="field-label">Available Tools</label>
+                    <p class="field-hint">
+                        Select which tools this agent can use during execution.
+                    </p>
 
-                <div class="tools-list">
-                    <label
-                        v-for="tool in availableTools"
-                        :key="tool.id"
-                        class="tool-item"
-                        :class="{ enabled: selectedTools.includes(tool.id) }"
-                    >
-                        <input
-                            type="checkbox"
-                            :checked="selectedTools.includes(tool.id)"
-                            @change="toggleTool(tool.id)"
-                        />
-                        <div class="tool-info">
-                            <span class="tool-name">{{ tool.name }}</span>
-                            <span class="tool-description">{{
-                                tool.description
-                            }}</span>
-                        </div>
-                    </label>
-                </div>
-
-                <div v-if="selectedTools.length > 0" class="selected-tools">
-                    <label class="field-label"
-                        >Enabled Tools ({{ selectedTools.length }})</label
-                    >
-                    <div class="tool-chips">
-                        <span
-                            v-for="toolId in selectedTools"
-                            :key="toolId"
-                            class="tool-chip"
+                    <div class="tools-list">
+                        <label
+                            v-for="tool in availableTools"
+                            :key="tool.id"
+                            class="tool-item"
+                            :class="{
+                                enabled: selectedTools.includes(tool.id),
+                            }"
                         >
-                            {{
-                                availableTools.find((t) => t.id === toolId)
-                                    ?.name
-                            }}
-                            <button
-                                class="chip-remove"
-                                @click="toggleTool(toolId)"
-                            >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                >
-                                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                                </svg>
-                            </button>
-                        </span>
+                            <input
+                                type="checkbox"
+                                :checked="selectedTools.includes(tool.id)"
+                                @change="toggleTool(tool.id)"
+                            />
+                            <div class="tool-info">
+                                <span class="tool-name">{{ tool.name }}</span>
+                                <span class="tool-description">{{
+                                    tool.description
+                                }}</span>
+                            </div>
+                        </label>
                     </div>
+
+                    <div
+                        v-if="selectedTools.length > 0"
+                        class="selected-tools"
+                    >
+                        <label class="field-label"
+                            >Enabled Tools ({{ selectedTools.length }})</label
+                        >
+                        <div class="tool-chips">
+                            <span
+                                v-for="toolId in selectedTools"
+                                :key="toolId"
+                                class="tool-chip"
+                            >
+                                {{
+                                    availableTools.find((t) => t.id === toolId)
+                                        ?.name
+                                }}
+                                <button
+                                    class="chip-remove"
+                                    @click="toggleTool(toolId)"
+                                >
+                                    <svg
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                    >
+                                        <line
+                                            x1="18"
+                                            y1="6"
+                                            x2="6"
+                                            y2="18"
+                                        ></line>
+                                        <line
+                                            x1="6"
+                                            y1="6"
+                                            x2="18"
+                                            y2="18"
+                                        ></line>
+                                    </svg>
+                                </button>
+                            </span>
+                        </div>
+                    </div>
+                </template>
+                <div v-else class="tools-empty">
+                    <label class="field-label">Available Tools</label>
+                    <p class="field-hint">
+                        No tools are registered. Add tools in or3-chat to enable
+                        selections here.
+                    </p>
                 </div>
             </div>
 
