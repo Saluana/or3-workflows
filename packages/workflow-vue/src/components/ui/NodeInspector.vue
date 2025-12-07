@@ -8,10 +8,16 @@ import {
     type ErrorCode,
     type HITLConfig,
     type HITLMode,
-    type OutputFormat,
     modelRegistry,
     registerDefaultModels,
+    migrateOutputNodeData,
+    type OutputNodeData,
 } from '@or3/workflow-core';
+import OutputModeSelector from './output/OutputModeSelector.vue';
+import OutputSourcePicker from './output/OutputSourcePicker.vue';
+import OutputPreview from './output/OutputPreview.vue';
+import { useOutputPreview } from '../../composables/useOutputPreview';
+import { useUpstreamResolver } from '../../composables/useUpstreamResolver';
 
 // Type guard for configurable node data
 interface ConfigurableNodeData {
@@ -177,9 +183,7 @@ const isConfigurable = computed(
 const hasErrorHandling = computed(
     () => isAgentNode.value || isRouterNode.value
 );
-const hasHITL = computed(
-    () => isAgentNode.value || isRouterNode.value
-);
+const hasHITL = computed(() => isAgentNode.value || isRouterNode.value);
 
 const nodeData = computed<ConfigurableNodeData>(() => {
     const data = selectedNode.value?.data;
@@ -193,18 +197,92 @@ const whileData = computed(() => {
 
 const advancedOutputExpanded = ref(false);
 
-const outputData = computed<{
-    format: OutputFormat;
-    template: string;
-    includeMetadata: boolean;
-}>(() => {
-    const data = selectedNode.value?.data as any;
-    return {
-        format: data?.format ?? 'markdown',
-        template: data?.template ?? '',
-        includeMetadata: data?.includeMetadata ?? false,
-    };
+const outputData = computed<OutputNodeData>(() => {
+    const data = selectedNode.value?.data;
+    if (!data) return {} as OutputNodeData;
+    return migrateOutputNodeData(data);
 });
+
+// Reactive node ID for upstream resolver
+const selectedNodeId = computed(() => selectedNode.value?.id || '');
+
+// Upstream resolver - now reactive to editor updates and node selection changes
+const upstreamGroups = useUpstreamResolver(
+    computed(() => props.editor),
+    selectedNodeId
+);
+
+// Preview
+const previewData = useOutputPreview(
+    computed(() => props.editor),
+    outputData,
+    selectedNodeId
+);
+
+// Update handlers
+const updateOutputMode = (mode: 'combine' | 'synthesis') => {
+    if (!selectedNode.value) return;
+    props.editor.commands.updateNodeData(selectedNode.value.id, { mode });
+};
+
+const updateOutputSources = (sources: string[]) => {
+    if (!selectedNode.value) return;
+    props.editor.commands.updateNodeData(selectedNode.value.id, { sources });
+};
+
+const updateIntroText = (e: Event) => {
+    if (!selectedNode.value) return;
+    const value = (e.target as HTMLTextAreaElement).value;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        introText: value,
+    });
+};
+
+const updateOutroText = (e: Event) => {
+    if (!selectedNode.value) return;
+    const value = (e.target as HTMLTextAreaElement).value;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        outroText: value,
+    });
+};
+
+const updateSynthesisPrompt = (e: Event) => {
+    if (!selectedNode.value) return;
+    const value = (e.target as HTMLTextAreaElement).value;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        synthesis: { ...outputData.value.synthesis, prompt: value },
+    });
+};
+
+const updateSynthesisModel = (e: Event) => {
+    if (!selectedNode.value) return;
+    const value = (e.target as HTMLSelectElement).value;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        synthesis: { ...outputData.value.synthesis, model: value },
+    });
+};
+
+const toggleRawTemplate = () => {
+    if (!selectedNode.value) return;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        useRawTemplate: !outputData.value.useRawTemplate,
+    });
+};
+
+const toggleIncludeMetadata = () => {
+    if (!selectedNode.value) return;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        includeMetadata: !outputData.value.includeMetadata,
+    });
+};
+
+const updateOutputTemplate = (e: Event) => {
+    if (!selectedNode.value) return;
+    const value = (e.target as HTMLTextAreaElement).value;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        template: value,
+    });
+};
 
 // Normalize output format to markdown (text) and clear legacy schema
 watch(
@@ -540,10 +618,6 @@ const toggleIncludeIterationContext = () => {
     });
 };
 
-const updateOutputMode = (event: Event) => {
-    debouncedUpdate('outputMode', (event.target as HTMLSelectElement).value);
-};
-
 const updateLoopPrompt = (event: Event) => {
     debouncedUpdate('loopPrompt', (event.target as HTMLTextAreaElement).value);
 };
@@ -619,24 +693,6 @@ const removeInputMapping = (inputId: string) => {
     delete current[inputId];
     props.editor.commands.updateNodeData(selectedNode.value.id, {
         inputMappings: current,
-    });
-};
-
-const updateOutputTemplate = (event: Event) => {
-    if (!selectedNode.value) return;
-    const value = (event.target as HTMLTextAreaElement).value;
-    if (debounceTimeout) clearTimeout(debounceTimeout);
-    debounceTimeout = setTimeout(() => {
-        props.editor.commands.updateNodeData(selectedNode.value!.id, {
-            template: value,
-        });
-    }, 200);
-};
-
-const toggleIncludeMetadata = () => {
-    if (!selectedNode.value) return;
-    props.editor.commands.updateNodeData(selectedNode.value.id, {
-        includeMetadata: !outputData.value.includeMetadata,
     });
 };
 
@@ -1902,80 +1958,159 @@ Example: "Improve this text, making it clearer and more engaging."'
                 v-if="activeTab === 'output' && isOutputNode"
                 class="output-tab"
             >
-                <div class="field-group">
-                    <label class="field-label">Output Format</label>
-                    <div class="pill-display">Text (Markdown)</div>
-                    <p class="field-hint">
-                        Outputs are emitted as markdown by default—great for plain text or rich formatting. No JSON mode to configure.
-                    </p>
+                <!-- Mode Selection -->
+                <OutputModeSelector
+                    :modelValue="outputData.mode || 'combine'"
+                    @update:modelValue="updateOutputMode"
+                />
+
+                <!-- Source Selection -->
+                <OutputSourcePicker
+                    :modelValue="outputData.sources || []"
+                    :availableGroups="upstreamGroups"
+                    @update:modelValue="updateOutputSources"
+                />
+
+                <!-- Synthesis Configuration -->
+                <div
+                    v-if="outputData.mode === 'synthesis'"
+                    class="synthesis-config"
+                >
+                    <div class="field-group">
+                        <label class="field-label">Synthesis Model</label>
+                        <select
+                            class="model-select"
+                            :value="
+                                outputData.synthesis?.model ||
+                                'z-ai/glm-4.6:exacto'
+                            "
+                            @change="updateSynthesisModel"
+                        >
+                            <option
+                                v-for="m in availableModels"
+                                :key="m.id"
+                                :value="m.id"
+                            >
+                                {{ m.name }} ({{ m.provider }})
+                            </option>
+                        </select>
+                    </div>
+
+                    <div class="field-group">
+                        <label class="field-label">Synthesis Prompt</label>
+                        <textarea
+                            class="prompt-textarea"
+                            :value="outputData.synthesis?.prompt || ''"
+                            placeholder="Instructions for synthesizing the final output..."
+                            rows="4"
+                            @input="updateSynthesisPrompt"
+                        ></textarea>
+                    </div>
                 </div>
 
+                <!-- Intro/Outro -->
                 <div class="field-group">
-                    <label class="field-label">Output Template</label>
+                    <label class="field-label">Introduction</label>
                     <textarea
-                        class="textarea-input"
-                        :value="outputData.template"
-                        :placeholder="'e.g., Final result: {{outputs.nodeId}}'"
-                        @input="updateOutputTemplate"
-                        rows="4"
+                        class="text-input"
+                        :value="outputData.introText || ''"
+                        placeholder="Optional text to prepend..."
+                        rows="2"
+                        @input="updateIntroText"
                     ></textarea>
-                    <p class="field-hint">
-                        Use <code v-pre>{{ outputs.nodeId }}</code> to reference
-                        output from specific nodes. Leave empty to use the last
-                        node's output.
-                    </p>
                 </div>
 
-                <div class="output-advanced">
+                <div class="field-group">
+                    <label class="field-label">Conclusion</label>
+                    <textarea
+                        class="text-input"
+                        :value="outputData.outroText || ''"
+                        placeholder="Optional text to append..."
+                        rows="2"
+                        @input="updateOutroText"
+                    ></textarea>
+                </div>
+
+                <!-- Preview -->
+                <OutputPreview :previewData="previewData" />
+
+                <!-- Advanced Settings -->
+                <div class="advanced-settings">
                     <button
-                        class="schema-toggle"
-                        @click="advancedOutputExpanded = !advancedOutputExpanded"
+                        class="advanced-toggle"
+                        @click="
+                            advancedOutputExpanded = !advancedOutputExpanded
+                        "
                     >
                         <svg
-                            class="toggle-chevron"
-                            :class="{ expanded: advancedOutputExpanded }"
+                            class="expand-icon"
+                            :class="{ rotated: advancedOutputExpanded }"
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
                             stroke-width="2"
                         >
-                            <polyline points="9 18 15 12 9 6"></polyline>
+                            <polyline points="6 9 12 15 18 9"></polyline>
                         </svg>
-                        <span>Advanced (Metadata)</span>
+                        Advanced Settings
                     </button>
 
-                    <div
-                        v-if="advancedOutputExpanded"
-                        class="output-advanced-body"
-                    >
-                        <div class="output-toggle">
-                            <label class="toggle-label">
+                    <div v-if="advancedOutputExpanded" class="advanced-content">
+                        <div class="toggle-group">
+                            <label class="tool-item">
+                                <input
+                                    type="checkbox"
+                                    :checked="outputData.useRawTemplate"
+                                    @change="toggleRawTemplate"
+                                />
+                                <div class="tool-info">
+                                    <span class="tool-name"
+                                        >Use Raw Template</span
+                                    >
+                                    <span class="tool-description"
+                                        >Override all settings with a custom
+                                        template</span
+                                    >
+                                </div>
+                            </label>
+
+                            <label class="tool-item">
                                 <input
                                     type="checkbox"
                                     :checked="outputData.includeMetadata"
                                     @change="toggleIncludeMetadata"
                                 />
-                                <span class="toggle-text">Include Metadata</span>
+                                <div class="tool-info">
+                                    <span class="tool-name"
+                                        >Include Metadata</span
+                                    >
+                                    <span class="tool-description"
+                                        >Add execution stats to output</span
+                                    >
+                                </div>
                             </label>
-                            <p class="field-hint" style="margin-top: 4px">
-                                Adds timing, token usage, and execution metadata to the final output.
-                            </p>
+                        </div>
+
+                        <div
+                            v-if="outputData.useRawTemplate"
+                            class="field-group"
+                        >
+                            <label class="field-label">Raw Template</label>
+                            <textarea
+                                class="textarea-input"
+                                :value="outputData.template"
+                                :placeholder="'e.g., Final result: {{outputs.nodeId}}'"
+                                @input="updateOutputTemplate"
+                                rows="4"
+                            ></textarea>
                         </div>
                     </div>
-                </div>
-
-                <div class="info-box">
-                    <p><strong>Output Node</strong></p>
-                    <p style="margin-top: 8px; color: var(--text-secondary)">
-                        This is a terminal node that formats the final workflow
-                        output. It has no outgoing connections.
-                    </p>
                 </div>
             </div>
         </div>
 
         <!-- Start node (minimal) -->
-        <div v-else-if="isStartNode" class="inspector-content">
+        <div v-if="isStartNode" class="inspector-content">
             <div class="info-box">
                 The Start node is the entry point for workflow execution.
                 Connect it to other nodes to define your workflow.
@@ -3318,5 +3453,52 @@ Example: "Improve this text, making it clearer and more engaging."'
 
 .advanced-content {
     margin-top: var(--or3-spacing-md, 12px);
+}
+
+/* Output Tab */
+.output-tab {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-lg, 20px);
+}
+
+.synthesis-config {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-md, 16px);
+    padding: var(--or3-spacing-md, 16px);
+    background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--or3-radius-md, 8px);
+}
+
+.advanced-settings {
+    border-top: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    padding-top: var(--or3-spacing-md, 16px);
+}
+
+.advanced-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: none;
+    border: none;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 0;
+    transition: color 0.15s;
+}
+
+.advanced-toggle:hover {
+    color: var(--or3-color-text, rgba(255, 255, 255, 0.95));
+}
+
+.advanced-content {
+    margin-top: var(--or3-spacing-md, 16px);
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-md, 16px);
 }
 </style>

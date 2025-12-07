@@ -3,6 +3,7 @@ import {
     OutputNodeExtension,
     isOutputNodeData,
     interpolateTemplate,
+    migrateOutputNodeData,
 } from '../extensions/OutputNodeExtension';
 import type { WorkflowNode, WorkflowEdge } from '../types';
 
@@ -54,6 +55,7 @@ describe('OutputNodeExtension', () => {
                 label: 'Output',
                 format: 'text',
                 includeMetadata: false,
+                mode: 'combine',
             });
         });
     });
@@ -184,5 +186,38 @@ describe('interpolateTemplate', () => {
             node: 'value',
         });
         expect(result).toBe('Static text only');
+    });
+});
+
+describe('migrateOutputNodeData', () => {
+    it('should migrate legacy template to raw mode', () => {
+        const legacy = {
+            template: '{{foo}}',
+            format: 'text',
+        };
+        const migrated = migrateOutputNodeData(legacy);
+        expect(migrated).toMatchObject({
+            mode: 'combine',
+            useRawTemplate: true,
+            template: '{{foo}}',
+        });
+    });
+
+    it('should preserve existing mode', () => {
+        const modern = {
+            mode: 'synthesis',
+            format: 'text',
+        };
+        const migrated = migrateOutputNodeData(modern);
+        expect(migrated.mode).toBe('synthesis');
+        expect(migrated.useRawTemplate).toBeUndefined();
+    });
+
+    it('should default to combine mode if missing', () => {
+        const empty = {
+            format: 'text',
+        };
+        const migrated = migrateOutputNodeData(empty);
+        expect(migrated.mode).toBe('combine');
     });
 });

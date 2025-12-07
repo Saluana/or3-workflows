@@ -1,4 +1,5 @@
 import { ref } from 'vue';
+import { useExecutionCache } from './useExecutionCache';
 import type {
     ExecutionAdapter,
     WorkflowData,
@@ -51,6 +52,7 @@ export interface UseWorkflowExecutionReturn {
  * ```
  */
 export function useWorkflowExecution(): UseWorkflowExecutionReturn {
+    const { setOutput, clear } = useExecutionCache();
     const isRunning = ref(false);
     const currentNodeId = ref<string | null>(null);
     const nodeStatuses = ref<Record<string, NodeStatus>>({});
@@ -65,6 +67,7 @@ export function useWorkflowExecution(): UseWorkflowExecutionReturn {
         nodeOutputs.value = {};
         error.value = null;
         result.value = null;
+        clear();
     };
 
     const execute = async (
@@ -85,6 +88,7 @@ export function useWorkflowExecution(): UseWorkflowExecutionReturn {
             onNodeFinish: (nodeId, output) => {
                 nodeStatuses.value[nodeId] = 'completed';
                 nodeOutputs.value[nodeId] = output;
+                setOutput(nodeId, output);
                 if (currentNodeId.value === nodeId) {
                     currentNodeId.value = null;
                 }
@@ -141,6 +145,9 @@ export function useWorkflowExecution(): UseWorkflowExecutionReturn {
                     branchLabel,
                     output
                 );
+
+                // Cache per-branch outputs using composite key for previews
+                setOutput(`${nodeId}:${branchId}`, output);
             },
         };
 

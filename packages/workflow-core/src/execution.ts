@@ -195,10 +195,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         'router',
         'whileLoop',
     ]);
-    private static readonly HITL_SUPPORTED_TYPES = new Set([
-        'agent',
-        'router',
-    ]);
+    private static readonly HITL_SUPPORTED_TYPES = new Set(['agent', 'router']);
 
     /**
      * Create a new OpenRouterExecutionAdapter.
@@ -717,7 +714,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 nodeId: edge.target,
                 handleId: edge.sourceHandle || undefined,
             });
-            parents[edge.target].push(edge.source);
+            // Only add parent if not already present (handles multiple edges from same source)
+            if (!parents[edge.target].includes(edge.source)) {
+                parents[edge.target].push(edge.source);
+            }
         }
 
         return { nodeMap, children, parents };
@@ -1010,6 +1010,20 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     result.metadata.selectedRoute,
                     meta
                 );
+            }
+        }
+
+        // Store branch outputs with composite keys for Parallel Split nodes
+        // This allows Output nodes to reference individual branches via "parallelNodeId:branchId"
+        if (result.metadata?.branchOutputs) {
+            const branchOutputs = result.metadata.branchOutputs as Record<
+                string,
+                string
+            >;
+            for (const [branchId, branchOutput] of Object.entries(
+                branchOutputs
+            )) {
+                context.outputs[`${nodeId}:${branchId}`] = branchOutput;
             }
         }
 

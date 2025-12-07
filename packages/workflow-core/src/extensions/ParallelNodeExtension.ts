@@ -473,13 +473,16 @@ export const ParallelNodeExtension: NodeExtension = {
             nextNodes = mergeEdges.map((e) => e.target);
         } else {
             // If merge disabled, route to branch handles (Splitter Mode)
-            // We use the same handles as the branch starts
+            // Collect all targets, but deduplicate since multiple branches
+            // may connect to the same node
+            const targetSet = new Set<string>();
             branches.forEach((branch) => {
                 const branchEdges = outgoingEdges.filter(
                     (e) => e.sourceHandle === branch.id
                 );
-                nextNodes.push(...branchEdges.map((e) => e.target));
+                branchEdges.forEach((e) => targetSet.add(e.target));
             });
+            nextNodes = [...targetSet];
         }
 
         return {
@@ -591,4 +594,3 @@ export const ParallelNodeExtension: NodeExtension = {
         }));
     },
 };
-

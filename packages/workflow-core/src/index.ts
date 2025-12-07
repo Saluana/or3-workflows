@@ -157,6 +157,7 @@ export {
     interpolateTemplate,
     formatOutput,
     extractTemplatePlaceholders,
+    migrateOutputNodeData,
     // Extension configuration utilities
     createConfigurableExtension,
     makeConfigurable,
