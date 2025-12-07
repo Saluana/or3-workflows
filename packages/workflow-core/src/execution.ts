@@ -24,8 +24,6 @@ import {
     AgentNodeExtension,
     RouterNodeExtension,
     ParallelNodeExtension,
-    ToolNodeExtension,
-    MemoryNodeExtension,
     WhileLoopExtension,
     SubflowExtension,
     OutputNodeExtension,
@@ -133,8 +131,6 @@ export const extensionRegistry = new Map<string, NodeExtension>([
     ['agent', AgentNodeExtension],
     ['router', RouterNodeExtension],
     ['parallel', ParallelNodeExtension],
-    ['tool', ToolNodeExtension],
-    ['memory', MemoryNodeExtension],
     ['whileLoop', WhileLoopExtension],
     ['subflow', SubflowExtension],
     ['output', OutputNodeExtension],
@@ -202,7 +198,6 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     private static readonly HITL_SUPPORTED_TYPES = new Set([
         'agent',
         'router',
-        'tool',
     ]);
 
     /**

@@ -4,7 +4,6 @@ import {
     AgentNodeExtension,
     RouterNodeExtension,
     ParallelNodeExtension,
-    ToolNodeExtension,
     WhileLoopExtension,
 } from '../extensions/index.js';
 import type { WorkflowNode, WorkflowEdge, NodeExtension } from '../types';
@@ -399,85 +398,6 @@ describe('ParallelNodeExtension', () => {
             expect(outputs[1]).toEqual({ id: 'branch-b', label: 'Analysis' });
         });
     });
-});
-
-describe('ToolNodeExtension', () => {
-    it('should have correct name and type', () => {
-        expect(ToolNodeExtension.name).toBe('tool');
-        expect(ToolNodeExtension.type).toBe('node');
-    });
-
-    it('should have default data', () => {
-        expect(ToolNodeExtension.defaultData).toMatchObject({
-            label: 'Tool',
-            toolId: '',
-        });
-    });
-
-    describe('validate', () => {
-        it('should error if tool has no toolId', () => {
-            const node = createNode('tool', 'tool-1', {
-                label: 'Tool',
-                toolId: '',
-            });
-            const edges = [createEdge('start-1', 'tool-1')];
-
-            const errors = ToolNodeExtension.validate!(node, edges);
-
-            expect(errors).toContainEqual(
-                expect.objectContaining({ code: 'MISSING_REQUIRED_PORT' })
-            );
-        });
-
-        it('should error if tool has no incoming edges', () => {
-            const node = createNode('tool', 'tool-1', {
-                label: 'Tool',
-                toolId: 'my-tool',
-            });
-            const edges: WorkflowEdge[] = [];
-
-            const errors = ToolNodeExtension.validate!(node, edges);
-
-            expect(errors).toContainEqual(
-                expect.objectContaining({ code: 'DISCONNECTED_NODE' })
-            );
-        });
-    });
-
-    describe('execute', () => {
-        it('should throw error if no toolId', async () => {
-            const node = createNode('tool', 'tool-1', {
-                label: 'Tool',
-                toolId: '',
-            });
-            const context = {
-                input: 'test',
-                attachments: [],
-                history: [],
-                outputs: {},
-                nodeChain: [],
-                signal: new AbortController().signal,
-                getNode: (id: string) => (id === 'tool-1' ? node : undefined),
-                getOutgoingEdges: () => [],
-                memory: {
-                    store: async () => {},
-                    query: async () => [],
-                    delete: async () => {},
-                    clear: async () => {},
-                },
-            };
-
-            await expect(
-                ToolNodeExtension.execute!(context as any, node)
-            ).rejects.toThrow('No tool configured');
-        });
-    });
-});
-
-// ============================================================================
-// TipTap-style Extension Architecture Tests
-// ============================================================================
-
 import {
     createConfigurableExtension,
     makeConfigurable,
@@ -651,16 +571,14 @@ describe('StarterKit', () => {
         it('should return all extensions with default options', () => {
             const extensions = StarterKit.configure();
 
-            expect(extensions.length).toBe(9);
+            expect(extensions.length).toBe(7);
 
             const names = extensions.map((ext) => ext.name);
             expect(names).toContain('start');
             expect(names).toContain('agent');
             expect(names).toContain('router');
             expect(names).toContain('parallel');
-            expect(names).toContain('tool');
             expect(names).toContain('whileLoop');
-            expect(names).toContain('memory');
             expect(names).toContain('subflow');
             expect(names).toContain('output');
         });
@@ -671,9 +589,7 @@ describe('StarterKit', () => {
                 agent: false,
                 router: false,
                 parallel: false,
-                tool: false,
                 whileLoop: false,
-                memory: false,
                 subflow: false,
                 output: false,
             });
@@ -686,13 +602,11 @@ describe('StarterKit', () => {
         it('should exclude disabled extensions', () => {
             const extensions = StarterKit.configure({
                 whileLoop: false,
-                memory: false,
             });
 
             const names = extensions.map((ext) => ext.name);
             expect(names).not.toContain('whileLoop');
-            expect(names).not.toContain('memory');
-            expect(extensions.length).toBe(7);
+            expect(extensions.length).toBe(6);
         });
 
         it('should configure agent with custom model', () => {
@@ -741,7 +655,7 @@ describe('StarterKit', () => {
 
         it('should work with empty options', () => {
             const extensions = StarterKit.configure({});
-            expect(extensions.length).toBe(9);
+            expect(extensions.length).toBe(7);
         });
     });
 
@@ -754,9 +668,7 @@ describe('StarterKit', () => {
                 'agent',
                 'router',
                 'parallel',
-                'tool',
                 'whileLoop',
-                'memory',
                 'subflow',
                 'output',
             ]);
@@ -772,9 +684,7 @@ describe('StarterKit', () => {
                 agent: true,
                 router: true,
                 parallel: true,
-                tool: true,
                 whileLoop: true,
-                memory: true,
                 subflow: true,
                 output: true,
             });
@@ -813,13 +723,12 @@ describe('Extension Architecture Integration', () => {
         });
 
         const allExtensions = [
-            ...StarterKit.configure({ memory: false }),
+            ...StarterKit.configure({}),
             CustomExtension.configure({ customOption: false }),
         ];
 
         const names = allExtensions.map((ext) => ext.name);
         expect(names).toContain('custom');
-        expect(names).not.toContain('memory');
-        expect(allExtensions.length).toBe(9); // 8 from StarterKit + 1 custom
+        expect(allExtensions.length).toBe(8); // 7 from StarterKit + 1 custom
     });
 });

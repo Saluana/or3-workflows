@@ -16,8 +16,6 @@ import StartNode from './nodes/StartNode.vue';
 import AgentNode from './nodes/AgentNode.vue';
 import RouterNode from './nodes/RouterNode.vue';
 import ParallelNode from './nodes/ParallelNode.vue';
-import ToolNode from './nodes/ToolNode.vue';
-import MemoryNode from './nodes/MemoryNode.vue';
 import WhileLoopNode from './nodes/WhileLoopNode.vue';
 import SubflowNode from './nodes/SubflowNode.vue';
 import OutputNode from './nodes/OutputNode.vue';
@@ -427,22 +425,6 @@ defineExpose({
 
             <template #node-parallel="nodeProps">
                 <ParallelNode
-                    :id="nodeProps.id"
-                    :data="nodeProps.data"
-                    :selected="nodeProps.selected"
-                />
-            </template>
-
-            <template #node-tool="nodeProps">
-                <ToolNode
-                    :id="nodeProps.id"
-                    :data="nodeProps.data"
-                    :selected="nodeProps.selected"
-                />
-            </template>
-
-            <template #node-memory="nodeProps">
-                <MemoryNode
                     :id="nodeProps.id"
                     :data="nodeProps.data"
                     :selected="nodeProps.selected"

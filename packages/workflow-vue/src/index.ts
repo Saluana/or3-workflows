@@ -49,7 +49,6 @@ export {
     type AgentNodeData,
     type RouterNodeData,
     type ParallelNodeData,
-    type ToolNodeData,
     type StartNodeData,
     type OutputNodeData,
     type NodeStatus,
@@ -65,7 +64,6 @@ export {
     isAgentNodeData,
     isRouterNodeData,
     isParallelNodeData,
-    isToolNodeData,
     isStartNodeData,
     isOutputNodeData,
 } from '@or3/workflow-core';

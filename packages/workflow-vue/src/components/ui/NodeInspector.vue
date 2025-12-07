@@ -123,13 +123,7 @@ const updateSelection = () => {
 
             // Only reset tab if selection changed
             if (previousId !== node.id) {
-                if (node.type === 'tool') {
-                    activeTab.value = hasErrorHandling.value
-                        ? 'errors'
-                        : 'prompt';
-                } else {
-                    activeTab.value = 'prompt';
-                }
+                activeTab.value = 'prompt';
             }
         }
     } else {
@@ -165,7 +159,6 @@ const isAgentNode = computed(() => selectedNode.value?.type === 'agent');
 const isRouterNode = computed(() => selectedNode.value?.type === 'router');
 const isParallelNode = computed(() => selectedNode.value?.type === 'parallel');
 const isWhileNode = computed(() => selectedNode.value?.type === 'whileLoop');
-const isToolNode = computed(() => selectedNode.value?.type === 'tool');
 const isStartNode = computed(() => selectedNode.value?.type === 'start');
 const isSubflowNode = computed(() => selectedNode.value?.type === 'subflow');
 const isOutputNode = computed(() => selectedNode.value?.type === 'output');
@@ -182,10 +175,10 @@ const isConfigurable = computed(
         isOutputNode.value
 );
 const hasErrorHandling = computed(
-    () => isAgentNode.value || isRouterNode.value || isToolNode.value
+    () => isAgentNode.value || isRouterNode.value
 );
 const hasHITL = computed(
-    () => isAgentNode.value || isRouterNode.value || isToolNode.value
+    () => isAgentNode.value || isRouterNode.value
 );
 
 const nodeData = computed<ConfigurableNodeData>(() => {

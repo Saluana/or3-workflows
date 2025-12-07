@@ -87,22 +87,6 @@ const ParallelNodeDataSchema = BaseNodeDataSchema.extend({
     mergeEnabled: z.boolean().optional(),
 });
 
-const ToolNodeDataSchema = BaseNodeDataSchema.extend({
-    toolId: z.string().min(1, 'Tool node requires a toolId'),
-    config: z.record(z.string(), z.unknown()).optional(),
-    errorHandling: NodeErrorConfigSchema,
-    hitl: HITLConfigSchema,
-});
-
-const MemoryNodeDataSchema = BaseNodeDataSchema.extend({
-    operation: z.enum(['query', 'store']),
-    text: z.string().optional(),
-    limit: z.number().int().positive().optional(),
-    filter: z.record(z.string(), z.unknown()).optional(),
-    metadata: z.record(z.string(), z.unknown()).optional(),
-    fallback: z.string().optional(),
-});
-
 const WhileLoopNodeDataSchema = BaseNodeDataSchema.extend({
     conditionPrompt: z
         .string()
@@ -144,8 +128,6 @@ export const StrictNodeDataSchema = z.discriminatedUnion('_nodeType', [
     z
         .object({ _nodeType: z.literal('parallel') })
         .merge(ParallelNodeDataSchema),
-    z.object({ _nodeType: z.literal('tool') }).merge(ToolNodeDataSchema),
-    z.object({ _nodeType: z.literal('memory') }).merge(MemoryNodeDataSchema),
     z
         .object({ _nodeType: z.literal('whileLoop') })
         .merge(WhileLoopNodeDataSchema),
@@ -167,10 +149,6 @@ export function getNodeDataSchema(nodeType: string): z.ZodType<unknown> {
             return RouterNodeDataSchema;
         case 'parallel':
             return ParallelNodeDataSchema;
-        case 'tool':
-            return ToolNodeDataSchema;
-        case 'memory':
-            return MemoryNodeDataSchema;
         case 'whileLoop':
             return WhileLoopNodeDataSchema;
         case 'subflow':

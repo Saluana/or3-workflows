@@ -28,7 +28,6 @@
  *     },
  *
  *     // Include optional nodes
- *     memory: true,
  *     output: true,
  *   }),
  * });
@@ -44,11 +43,9 @@ import { StartNodeExtension } from './StartNodeExtension';
 import { AgentNodeExtension } from './AgentNodeExtension';
 import { RouterNodeExtension } from './RouterNodeExtension';
 import { ParallelNodeExtension } from './ParallelNodeExtension';
-import { ToolNodeExtension } from './ToolNodeExtension';
 
 // Optional node extensions
 import { WhileLoopExtension } from './WhileLoopExtension';
-import { MemoryNodeExtension } from './MemoryNodeExtension';
 import { SubflowExtension } from './SubflowExtension';
 import { OutputNodeExtension } from './OutputNodeExtension';
 
@@ -113,12 +110,6 @@ export interface StarterKitOptions {
      */
     parallel?: boolean;
 
-    /**
-     * Tool node - external tool/function execution.
-     * @default true
-     */
-    tool?: boolean;
-
     // ========================================================================
     // Optional Nodes
     // ========================================================================
@@ -128,12 +119,6 @@ export interface StarterKitOptions {
      * @default true
      */
     whileLoop?: boolean | WhileLoopOptions;
-
-    /**
-     * Memory node - vector memory storage/retrieval.
-     * @default true
-     */
-    memory?: boolean;
 
     /**
      * Subflow node - reusable workflow components.
@@ -157,9 +142,7 @@ const DEFAULT_STARTER_KIT_OPTIONS: Required<StarterKitOptions> = {
     agent: true,
     router: true,
     parallel: true,
-    tool: true,
     whileLoop: true,
-    memory: true,
     subflow: true,
     output: true,
 };
@@ -241,11 +224,6 @@ export const StarterKit = {
             extensions.push(ParallelNodeExtension);
         }
 
-        // Tool node
-        if (opts.tool !== false) {
-            extensions.push(ToolNodeExtension);
-        }
-
         // ====================================================================
         // Optional Nodes
         // ====================================================================
@@ -269,11 +247,6 @@ export const StarterKit = {
             } else {
                 extensions.push(WhileLoopExtension);
             }
-        }
-
-        // Memory node
-        if (opts.memory !== false) {
-            extensions.push(MemoryNodeExtension);
         }
 
         // Subflow node
@@ -304,9 +277,7 @@ export const StarterKit = {
             'agent',
             'router',
             'parallel',
-            'tool',
             'whileLoop',
-            'memory',
             'subflow',
             'output',
         ];

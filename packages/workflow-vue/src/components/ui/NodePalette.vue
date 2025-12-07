@@ -63,29 +63,6 @@ const nodeTypes = [
         },
     },
     {
-        type: 'tool',
-        label: 'Tool',
-        description: 'Call external APIs or functions',
-        colorVar: '--or3-color-secondary',
-        defaultData: {
-            label: 'Tool',
-            toolId: '',
-        },
-    },
-    {
-        type: 'memory',
-        label: 'Memory',
-        description:
-            'Store and retrieve long-term context',
-        colorVar: '--or3-color-info',
-        defaultData: {
-            label: 'Memory',
-            operation: 'query',
-            limit: 5,
-            fallback: 'No memories found.',
-        },
-    },
-    {
         type: 'whileLoop',
         label: 'Loop',
         description: 'Repeat a sequence until a condition is met',
@@ -298,27 +275,6 @@ const handleNodeTap = (
                         <circle cx="18" cy="18" r="3"></circle>
                         <circle cx="6" cy="6" r="3"></circle>
                         <path d="M6 21V9a9 9 0 0 0 9 9"></path>
-                    </svg>
-                    <svg
-                        v-else-if="node.type === 'tool'"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                    >
-                        <path
-                            d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
-                        ></path>
-                    </svg>
-                    <svg
-                        v-else-if="node.type === 'memory'"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                    >
-                        <rect x="4" y="4" width="16" height="16" rx="3"></rect>
-                        <path d="M8 9h8M8 12h8M8 15h6"></path>
                     </svg>
                     <svg
                         v-else-if="node.type === 'whileLoop'"

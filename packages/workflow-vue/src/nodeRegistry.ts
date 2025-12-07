@@ -147,12 +147,6 @@ export function registerBuiltInNodes(registry: NodeComponentRegistry): void {
     import('./components/nodes/ParallelNode.vue').then((m) =>
         registry.register('parallel', m.default)
     );
-    import('./components/nodes/ToolNode.vue').then((m) =>
-        registry.register('tool', m.default)
-    );
-    import('./components/nodes/MemoryNode.vue').then((m) =>
-        registry.register('memory', m.default)
-    );
     import('./components/nodes/WhileLoopNode.vue').then((m) =>
         registry.register('whileLoop', m.default)
     );

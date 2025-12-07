@@ -140,8 +140,6 @@ export type NodeData =
     | AgentNodeData
     | RouterNodeData
     | ParallelNodeData
-    | ToolNodeData
-    | MemoryNodeData
     | WhileLoopNodeData
     | SubflowNodeData
     | OutputNodeData;
@@ -179,20 +177,6 @@ export function isParallelNodeData(data: NodeData): data is ParallelNodeData {
 }
 
 /**
- * Type guard to check if node data is ToolNodeData.
- */
-export function isToolNodeData(data: NodeData): data is ToolNodeData {
-    return 'toolId' in data;
-}
-
-/**
- * Type guard to check if node data is MemoryNodeData.
- */
-export function isMemoryNodeData(data: NodeData): data is MemoryNodeData {
-    return 'operation' in data && 'fallback' in data;
-}
-
-/**
  * Type guard to check if node data is WhileLoopNodeData.
  */
 export function isWhileLoopNodeData(data: NodeData): data is WhileLoopNodeData {
@@ -208,8 +192,6 @@ export function isStartNodeData(data: NodeData): data is StartNodeData {
         !isAgentNodeData(data) &&
         !isRouterNodeData(data) &&
         !isParallelNodeData(data) &&
-        !isToolNodeData(data) &&
-        !isMemoryNodeData(data) &&
         !isWhileLoopNodeData(data)
     );
 }
@@ -331,31 +313,6 @@ export interface BranchDefinition {
     model?: string;
     prompt?: string;
     tools?: string[];
-}
-
-/**
- * Data for a Tool node.
- * Configures a specific tool execution.
- */
-export interface ToolNodeData extends BaseNodeData {
-    toolId: string;
-    config?: Record<string, any>;
-    errorHandling?: NodeErrorConfig;
-    /** Human-in-the-loop configuration for this node */
-    hitl?: HITLConfig;
-}
-
-/**
- * Data for a Memory node.
- * Supports querying or storing long-term memories via configured adapters.
- */
-export interface MemoryNodeData extends BaseNodeData {
-    operation: 'query' | 'store';
-    text?: string;
-    limit?: number;
-    filter?: Record<string, unknown>;
-    metadata?: Record<string, unknown>;
-    fallback?: string;
 }
 
 /**
