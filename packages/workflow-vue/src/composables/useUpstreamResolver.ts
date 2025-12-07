@@ -57,7 +57,8 @@ export function useUpstreamResolver(
                 const maybeUnsub = on.call(ed, 'update', () => {
                     updateTrigger.value++;
                 });
-                unsubscribe = typeof maybeUnsub === 'function' ? maybeUnsub : null;
+                unsubscribe =
+                    typeof maybeUnsub === 'function' ? maybeUnsub : null;
             }
         }
     };
