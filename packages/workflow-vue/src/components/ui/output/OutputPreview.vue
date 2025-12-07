@@ -18,20 +18,10 @@ const style = computed(() => ({
 </script>
 
 <template>
-    <div
-        class="border border-gray-200 dark:border-gray-700 rounded-md overflow-hidden bg-white dark:bg-gray-900"
-    >
-        <div
-            class="bg-gray-50 dark:bg-gray-800 px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center"
-        >
-            <span
-                class="text-xs font-medium text-gray-500 uppercase tracking-wider"
-                >Preview</span
-            >
-            <span
-                v-if="!previewData.isComplete"
-                class="text-xs text-amber-500 flex items-center gap-1"
-            >
+    <div class="preview-card">
+        <div class="preview-header">
+            <span class="preview-label">Preview</span>
+            <span v-if="!previewData.isComplete" class="preview-status">
                 <svg
                     xmlns="http://www.w3.org/2000/svg"
                     width="12"
@@ -51,22 +41,14 @@ const style = computed(() => ({
             </span>
         </div>
 
-        <div
-            class="p-3 overflow-y-auto text-sm font-mono whitespace-pre-wrap text-gray-800 dark:text-gray-200"
-            :style="style"
-        >
+        <div class="preview-body" :style="style">
             <template v-if="previewData.assembledPreview">
                 {{ previewData.assembledPreview }}
             </template>
-            <div v-else class="text-gray-400 italic text-center py-4">
-                (Empty output)
-            </div>
+            <div v-else class="preview-empty">(Empty output)</div>
         </div>
 
-        <div
-            v-if="previewData.modeHint"
-            class="bg-blue-50 dark:bg-blue-900/20 px-3 py-2 text-xs text-blue-600 dark:text-blue-400 border-t border-blue-100 dark:border-blue-900/30 flex items-center gap-2"
-        >
+        <div v-if="previewData.modeHint" class="preview-footer">
             <svg
                 xmlns="http://www.w3.org/2000/svg"
                 width="12"
@@ -86,3 +68,107 @@ const style = computed(() => ({
         </div>
     </div>
 </template>
+
+<style scoped>
+.preview-card {
+    border: 1px solid var(--or3-color-border, rgba(15, 23, 42, 0.12));
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--or3-color-surface, #ffffff);
+    color: var(--or3-color-text-primary, #0f172a);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+    .preview-card {
+        border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.14));
+        background: var(--or3-color-surface, #0b1220);
+        color: var(--or3-color-text-primary, #e2e8f0);
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+    }
+}
+
+.preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: var(--or3-color-surface-hover, rgba(15, 23, 42, 0.04));
+    border-bottom: 1px solid
+        var(--or3-color-border, rgba(15, 23, 42, 0.12));
+}
+
+@media (prefers-color-scheme: dark) {
+    .preview-header {
+        background: var(--or3-color-surface-hover, rgba(255, 255, 255, 0.06));
+        border-bottom: 1px solid
+            var(--or3-color-border, rgba(255, 255, 255, 0.12));
+    }
+}
+
+.preview-label {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--or3-color-text-secondary, #475569);
+}
+
+@media (prefers-color-scheme: dark) {
+    .preview-label {
+        color: var(--or3-color-text-secondary, #cbd5e1);
+    }
+}
+
+.preview-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #f59e0b;
+}
+
+.preview-body {
+    padding: 12px;
+    overflow-y: auto;
+    font-size: 13px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+        'Liberation Mono', 'Courier New', monospace;
+    line-height: 1.5;
+    background: var(--or3-color-surface, #ffffff);
+    color: var(--or3-color-text-primary, #0f172a);
+}
+
+@media (prefers-color-scheme: dark) {
+    .preview-body {
+        background: var(--or3-color-surface, #0b1220);
+        color: var(--or3-color-text-primary, #e2e8f0);
+    }
+}
+
+.preview-empty {
+    color: var(--or3-color-text-muted, #94a3b8);
+    text-align: center;
+    font-style: italic;
+    padding: 8px 0;
+}
+
+.preview-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    font-size: 12px;
+    background: rgba(37, 99, 235, 0.08);
+    color: #2563eb;
+    border-top: 1px solid rgba(37, 99, 235, 0.18);
+}
+
+@media (prefers-color-scheme: dark) {
+    .preview-footer {
+        background: rgba(59, 130, 246, 0.18);
+        color: #cfe1ff;
+        border-top: 1px solid rgba(59, 130, 246, 0.35);
+    }
+}
+</style>

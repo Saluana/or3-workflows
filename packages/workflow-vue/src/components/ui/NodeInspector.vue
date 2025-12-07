@@ -129,7 +129,7 @@ const updateSelection = () => {
 
             // Only reset tab if selection changed
             if (previousId !== node.id) {
-                activeTab.value = 'prompt';
+                activeTab.value = node.type === 'output' ? 'output' : 'prompt';
             }
         }
     } else {
@@ -835,7 +835,7 @@ const handleDelete = () => {
                 class="tab"
                 :class="{ active: activeTab === 'prompt' }"
                 @click="activeTab = 'prompt'"
-                v-if="isConfigurable"
+                v-if="isConfigurable && !isOutputNode"
             >
                 <svg
                     viewBox="0 0 24 24"
@@ -859,7 +859,7 @@ const handleDelete = () => {
                 class="tab"
                 :class="{ active: activeTab === 'model' }"
                 @click="activeTab = 'model'"
-                v-if="isConfigurable"
+                v-if="isConfigurable && !isOutputNode"
             >
                 <svg
                     viewBox="0 0 24 24"
@@ -1040,7 +1040,7 @@ const handleDelete = () => {
         >
             <!-- Prompt Tab -->
             <div
-                v-if="activeTab === 'prompt' && isConfigurable"
+                v-if="activeTab === 'prompt' && isConfigurable && !isOutputNode"
                 class="prompt-tab"
             >
                 <template v-if="isWhileNode">
@@ -2325,7 +2325,7 @@ Example: "Improve this text, making it clearer and more engaging."'
     padding: var(--or3-spacing-xs, 4px) var(--or3-spacing-sm, 8px);
     font-size: 12px;
     font-weight: 500;
-    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+    color: var(--or3-color-text-muted, #64748b);
     border-radius: var(--or3-radius-sm, 6px);
     transition: all 0.15s ease;
 }
@@ -2336,13 +2336,14 @@ Example: "Improve this text, making it clearer and more engaging."'
 }
 
 .tab:hover {
-    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
-    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.03));
+    color: var(--or3-color-text-primary, #0f172a);
+    background: var(--or3-color-surface-hover, rgba(15, 23, 42, 0.06));
 }
 
 .tab.active {
-    color: var(--or3-color-accent, #8b5cf6);
-    background: var(--or3-color-accent-muted, rgba(139, 92, 246, 0.2));
+    color: var(--or3-color-text-primary, #0f172a);
+    background: var(--or3-color-accent-muted, rgba(37, 99, 235, 0.14));
+    box-shadow: inset 0 0 0 1px var(--or3-color-accent, #2563eb);
 }
 
 .tool-count {

@@ -44,9 +44,13 @@ const modes = [
     display: flex;
     gap: 4px;
     padding: 4px;
-    background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
+    background: var(
+        --or3-color-bg-secondary,
+        rgba(15, 23, 42, 0.04)
+    );
     border-radius: var(--or3-radius-md, 8px);
-    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border: 1px solid
+        var(--or3-color-border, rgba(15, 23, 42, 0.08));
 }
 
 .mode-btn {
@@ -59,7 +63,7 @@ const modes = [
     border: none;
     border-radius: var(--or3-radius-sm, 6px);
     background: transparent;
-    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+    color: var(--or3-color-text-secondary, #475569);
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
@@ -67,14 +71,14 @@ const modes = [
 }
 
 .mode-btn:hover {
-    color: var(--or3-color-text, rgba(255, 255, 255, 0.95));
-    background: var(--or3-color-bg-tertiary, rgba(255, 255, 255, 0.1));
+    color: var(--or3-color-text-primary, #0f172a);
+    background: var(--or3-color-surface-hover, rgba(15, 23, 42, 0.06));
 }
 
 .mode-btn.active {
-    background: var(--or3-color-bg-primary, #0a0a0f);
-    color: var(--or3-color-text, rgba(255, 255, 255, 0.95));
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    background: var(--or3-color-accent-muted, rgba(37, 99, 235, 0.12));
+    color: var(--or3-color-text-primary, #0f172a);
+    box-shadow: inset 0 0 0 1px var(--or3-color-accent, #2563eb);
 }
 
 .mode-icon {

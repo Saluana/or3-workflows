@@ -15,7 +15,8 @@ const emit = defineEmits<{
     (e: 'update:modelValue', value: string[]): void;
 }>();
 
-// Flatten available sources for easier lookup
+// --- Data Preparation ---
+
 const allSources = computed(() => {
     return props.availableGroups.flatMap((g) => g.sources);
 });
@@ -37,6 +38,8 @@ const availableToAdd = computed(() => {
         .filter((group) => group.sources.length > 0);
 });
 
+// --- Dropdown Logic ---
+
 const isDropdownOpen = ref(false);
 
 function addSource(sourceId: string) {
@@ -51,51 +54,140 @@ function removeSource(sourceId: string) {
     );
 }
 
-// Simple drag and drop implementation
+// --- Drag and Drop Logic ---
+
 const draggedIndex = ref<number | null>(null);
+const dropTarget = ref<{ index: number; position: 'before' | 'after' } | null>(
+    null
+);
 
 function onDragStart(event: DragEvent, index: number) {
     draggedIndex.value = index;
     if (event.dataTransfer) {
         event.dataTransfer.effectAllowed = 'move';
         event.dataTransfer.dropEffect = 'move';
+        // Optional: Set a custom drag image or clean up the default one
+        // event.dataTransfer.setDragImage(event.target as Element, 0, 0);
     }
 }
 
-function onDragOver(event: DragEvent) {
-    event.preventDefault(); // Necessary to allow dropping
-}
-
-function onDrop(event: DragEvent, dropIndex: number) {
-    event.preventDefault();
+function onDragOver(event: DragEvent, index: number) {
+    event.preventDefault(); // Allow dropping
     if (draggedIndex.value === null) return;
 
-    const fromIndex = draggedIndex.value;
-    const toIndex = dropIndex;
+    // Don't allow dropping on itself (optional, but cleaner UI)
+    if (draggedIndex.value === index) {
+        dropTarget.value = null;
+        return;
+    }
 
-    if (fromIndex === toIndex) return;
+    const target = event.currentTarget as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    const position = event.clientY < midY ? 'before' : 'after';
 
-    const newSources = [...props.modelValue];
-    const [movedItem] = newSources.splice(fromIndex, 1);
-    newSources.splice(toIndex, 0, movedItem);
+    // Only update if changed to prevent reactivity thrashing
+    if (
+        dropTarget.value?.index !== index ||
+        dropTarget.value?.position !== position
+    ) {
+        dropTarget.value = { index, position };
+    }
+}
 
-    emit('update:modelValue', newSources);
+function onDragLeave(event: DragEvent) {
+    // Only clear if we are actually leaving the list item, not entering a child
+    const relatedTarget = event.relatedTarget as HTMLElement | null;
+    const currentTarget = event.currentTarget as HTMLElement;
+
+    if (!currentTarget.contains(relatedTarget)) {
+        // We left the item entirely.
+        // However, we might be entering another item.
+        // We rely on the next item's dragOver to set the new target.
+        // If we leave the list entirely, we might want to clear.
+        // For now, let's not aggressively clear to prevent flickering.
+        // The dropTarget will be updated by the next item's dragOver.
+    }
+}
+
+function onListDragLeave(event: DragEvent) {
+    // Clear drop target if we leave the entire list container
+    const relatedTarget = event.relatedTarget as HTMLElement | null;
+    const currentTarget = event.currentTarget as HTMLElement;
+    if (!currentTarget.contains(relatedTarget)) {
+        dropTarget.value = null;
+    }
+}
+
+function onDrop(event: DragEvent) {
+    event.preventDefault();
+    if (draggedIndex.value === null || !dropTarget.value) {
+        resetDrag();
+        return;
+    }
+
+    const sourceItem = selectedSources.value[draggedIndex.value];
+    const targetItem = selectedSources.value[dropTarget.value.index];
+
+    if (!sourceItem || !targetItem || sourceItem.id === targetItem.id) {
+        resetDrag();
+        return;
+    }
+
+    const currentModelValue = [...props.modelValue];
+    const fromIndex = currentModelValue.indexOf(sourceItem.id);
+
+    // Safety check if item isn't found
+    if (fromIndex === -1) {
+        resetDrag();
+        return;
+    }
+
+    // Remove from old position first
+    const [movedId] = currentModelValue.splice(fromIndex, 1);
+
+    // Find where the target is now (indices shift after removal)
+    let newToIndex = currentModelValue.indexOf(targetItem.id);
+
+    if (newToIndex === -1) {
+        // Should not happen if targetItem is valid, but safety fallback
+        // If target is gone, maybe put it back where it was?
+        // For now, just aborting would lose the item from the list if we don't be careful.
+        // But we are operating on a copy 'currentModelValue', so aborting is safe (no emit).
+        resetDrag();
+        return;
+    }
+
+    // If dropping after, increment index
+    if (dropTarget.value.position === 'after') {
+        newToIndex++;
+    }
+
+    currentModelValue.splice(newToIndex, 0, movedId);
+    emit('update:modelValue', currentModelValue);
+    resetDrag();
+}
+
+function onDragEnd() {
+    resetDrag();
+}
+
+function resetDrag() {
     draggedIndex.value = null;
+    dropTarget.value = null;
 }
 </script>
 
 <template>
-    <div class="space-y-3">
+    <div class="space-y-3 source-picker">
         <div class="flex items-center justify-between">
-            <label class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                >Sources</label
-            >
+            <label class="sources-label">Sources</label>
 
             <div class="relative">
                 <button
                     @click="isDropdownOpen = !isDropdownOpen"
                     :disabled="disabled || availableToAdd.length === 0"
-                    class="text-xs flex items-center gap-1 px-2 py-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    class="add-source-btn"
                 >
                     <svg
                         xmlns="http://www.w3.org/2000/svg"
@@ -163,19 +255,43 @@ function onDrop(event: DragEvent, dropIndex: number) {
         </div>
 
         <!-- Selected Sources List -->
-        <div v-if="selectedSources.length > 0" class="space-y-2">
+        <div
+            v-if="selectedSources.length > 0"
+            class="space-y-2 relative"
+            @dragleave="onListDragLeave"
+        >
             <div
                 v-for="(source, index) in selectedSources"
                 :key="source.id"
                 draggable="true"
                 @dragstart="onDragStart($event, index)"
-                @dragover="onDragOver"
-                @drop="onDrop($event, index)"
-                class="flex items-center gap-2 p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md group cursor-move hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
-                :class="{ 'opacity-50': draggedIndex === index }"
+                @dragover="onDragOver($event, index)"
+                @dragleave="onDragLeave"
+                @drop="onDrop"
+                @dragend="onDragEnd"
+                class="source-card group"
+                :class="{
+                    'is-dragging': draggedIndex === index,
+                }"
             >
+                <!-- Drop Indicators -->
+                <div
+                    v-if="
+                        dropTarget?.index === index &&
+                        dropTarget.position === 'before'
+                    "
+                    class="drop-indicator before"
+                ></div>
+                <div
+                    v-if="
+                        dropTarget?.index === index &&
+                        dropTarget.position === 'after'
+                    "
+                    class="drop-indicator after"
+                ></div>
+
                 <!-- Drag Handle -->
-                <div class="text-gray-400 cursor-move">
+                <div class="drag-handle" title="Drag to reorder">
                     <svg
                         xmlns="http://www.w3.org/2000/svg"
                         width="14"
@@ -196,13 +312,13 @@ function onDrop(event: DragEvent, dropIndex: number) {
                     </svg>
                 </div>
 
-                <div class="flex-1 min-w-0">
-                    <div class="text-sm font-medium truncate">
+                <div class="flex-1 min-w-0 pointer-events-none">
+                    <div class="text-sm font-semibold truncate">
                         {{ source.branchLabel || source.label }}
                     </div>
                     <div
                         v-if="source.parallelParentId"
-                        class="text-xs text-gray-500 truncate"
+                        class="text-xs source-subtext truncate"
                     >
                         from {{ source.label }}
                     </div>
@@ -210,7 +326,7 @@ function onDrop(event: DragEvent, dropIndex: number) {
 
                 <button
                     @click="removeSource(source.id)"
-                    class="text-gray-400 hover:text-red-500 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                    class="remove-btn"
                     title="Remove source"
                 >
                     <svg
@@ -231,13 +347,182 @@ function onDrop(event: DragEvent, dropIndex: number) {
             </div>
         </div>
 
-        <div
-            v-else
-            class="p-4 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg text-center text-sm text-gray-500"
-        >
+        <div v-else class="empty-state">
             No sources selected.
             <br />
             <span class="text-xs">Output will be empty.</span>
         </div>
     </div>
 </template>
+
+<style scoped>
+.source-picker {
+    --sp-accent: var(--or3-color-accent, #2563eb);
+    --sp-surface: var(--or3-color-surface, #ffffff);
+    --sp-surface-hover: var(--or3-color-surface-hover, rgba(15, 23, 42, 0.06));
+    --sp-border: var(--or3-color-border, rgba(15, 23, 42, 0.12));
+    --sp-text: var(--or3-color-text-primary, #0f172a);
+    --sp-text-strong: var(--or3-color-text-primary, #0f172a);
+    --sp-text-muted: var(--or3-color-text-secondary, #475569);
+    --sp-button-bg: rgba(37, 99, 235, 0.15);
+    --sp-button-border: rgba(37, 99, 235, 0.4);
+    --sp-button-text: #1e40af;
+}
+
+@media (prefers-color-scheme: dark) {
+    .source-picker {
+        --sp-surface: var(--or3-color-surface, #0b1220);
+        --sp-surface-hover: var(
+            --or3-color-surface-hover,
+            rgba(255, 255, 255, 0.08)
+        );
+        --sp-border: var(--or3-color-border, rgba(255, 255, 255, 0.16));
+        --sp-text: var(--or3-color-text-primary, #e2e8f0);
+        --sp-text-strong: var(--or3-color-text-primary, #f8fafc);
+        --sp-text-muted: var(--or3-color-text-secondary, #cbd5e1);
+        --sp-button-bg: rgba(59, 130, 246, 0.25);
+        --sp-button-border: rgba(59, 130, 246, 0.6);
+        --sp-button-text: #dbeafe;
+    }
+}
+
+.add-source-btn {
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--sp-button-bg);
+    color: var(--sp-button-text);
+    border: 1px solid var(--sp-button-border);
+    transition: all 0.15s ease;
+}
+
+.add-source-btn:hover:not(:disabled) {
+    background: rgba(37, 99, 235, 0.18);
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.2);
+}
+
+.add-source-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.source-card {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--sp-surface);
+    border: 1px solid var(--sp-border);
+    border-radius: 10px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease,
+        opacity 0.15s ease;
+    color: var(--sp-text);
+    user-select: none;
+}
+
+.source-card:hover {
+    border-color: rgba(37, 99, 235, 0.45);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.source-card.is-dragging {
+    opacity: 0.3;
+    border-style: dashed;
+    background: transparent;
+}
+
+/* Drop Indicator */
+.drop-indicator {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--sp-accent);
+    border-radius: 2px;
+    pointer-events: none;
+    z-index: 10;
+    box-shadow: 0 0 8px rgba(37, 99, 235, 0.5);
+}
+
+.drop-indicator.before {
+    top: -5px;
+}
+
+.drop-indicator.after {
+    bottom: -5px;
+}
+
+/* Add little circles to the ends of the indicator for extra polish */
+.drop-indicator::before,
+.drop-indicator::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    width: 5px;
+    height: 5px;
+    background: var(--sp-accent);
+    border-radius: 50%;
+    transform: translateY(-50%);
+}
+
+.drop-indicator::before {
+    left: -2px;
+}
+
+.drop-indicator::after {
+    right: -2px;
+}
+
+.drag-handle {
+    color: var(--sp-text-muted);
+    cursor: grab;
+    padding: 6px;
+    border-radius: 6px;
+    transition: all 0.15s ease;
+}
+
+.drag-handle:hover {
+    color: var(--sp-accent);
+    background: var(--sp-surface-hover);
+}
+
+.drag-handle:active {
+    cursor: grabbing;
+}
+
+.source-subtext {
+    color: var(--sp-text-muted);
+}
+
+.remove-btn {
+    color: var(--sp-text-muted);
+    padding: 6px;
+    border-radius: 6px;
+    transition: all 0.15s ease;
+}
+
+.remove-btn:hover {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.12);
+}
+
+.empty-state {
+    padding: 16px;
+    border: 2px dashed var(--sp-border);
+    border-radius: 10px;
+    text-align: center;
+    font-size: 14px;
+    color: var(--sp-text-muted);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.sources-label {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--sp-text-strong);
+}
+</style>
