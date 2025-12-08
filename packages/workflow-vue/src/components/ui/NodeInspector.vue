@@ -141,7 +141,12 @@ const updateSelection = () => {
 
             // Only reset tab if selection changed
             if (previousId !== node.id) {
-                activeTab.value = node.type === 'output' ? 'output' : 'prompt';
+                activeTab.value =
+                    node.type === 'output'
+                        ? 'output'
+                        : node.type === 'parallel'
+                        ? 'branches'
+                        : 'prompt';
             }
         }
     } else {
@@ -871,7 +876,7 @@ const handleDelete = () => {
                 class="tab"
                 :class="{ active: activeTab === 'prompt' }"
                 @click="activeTab = 'prompt'"
-                v-if="isConfigurable && !isOutputNode"
+                v-if="isConfigurable && !isOutputNode && !isParallelNode"
             >
                 <svg
                     viewBox="0 0 24 24"
@@ -895,7 +900,7 @@ const handleDelete = () => {
                 class="tab"
                 :class="{ active: activeTab === 'model' }"
                 @click="activeTab = 'model'"
-                v-if="isConfigurable && !isOutputNode"
+                v-if="isConfigurable && !isOutputNode && !isParallelNode"
             >
                 <svg
                     viewBox="0 0 24 24"
@@ -1076,7 +1081,12 @@ const handleDelete = () => {
         >
             <!-- Prompt Tab -->
             <div
-                v-if="activeTab === 'prompt' && isConfigurable && !isOutputNode"
+                v-if="
+                    activeTab === 'prompt' &&
+                    isConfigurable &&
+                    !isOutputNode &&
+                    !isParallelNode
+                "
                 class="prompt-tab"
             >
                 <template v-if="isWhileNode">
@@ -1350,7 +1360,10 @@ Example: "Improve this text, making it clearer and more engaging."'
             </div>
 
             <!-- Model Tab -->
-            <div v-if="activeTab === 'model'" class="model-tab">
+            <div
+                v-if="activeTab === 'model' && !isParallelNode"
+                class="model-tab"
+            >
                 <label class="field-label">
                     {{ isWhileNode ? 'Condition Model' : 'Select Model' }}
                 </label>
