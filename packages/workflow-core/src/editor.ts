@@ -224,6 +224,7 @@ export class WorkflowEditor {
         if (state) {
             this.nodes = state.nodes;
             this.edges = state.edges;
+            this.refreshVersions();
             this.emit('update');
         }
     }
@@ -234,6 +235,7 @@ export class WorkflowEditor {
         if (state) {
             this.nodes = state.nodes;
             this.edges = state.edges;
+            this.refreshVersions();
             this.emit('update');
         }
     }
@@ -537,6 +539,22 @@ export class WorkflowEditor {
      */
     public removeEdgeVersion(edgeId: string): void {
         this._edgeVersions.delete(edgeId);
+        this._globalVersion++;
+    }
+
+    private refreshVersions(): void {
+        const nextNodeVersions = new Map<string, number>();
+        for (const node of this.nodes) {
+            const previous = this._nodeVersions.get(node.id) ?? 0;
+            nextNodeVersions.set(node.id, previous + 1);
+        }
+        const nextEdgeVersions = new Map<string, number>();
+        for (const edge of this.edges) {
+            const previous = this._edgeVersions.get(edge.id) ?? 0;
+            nextEdgeVersions.set(edge.id, previous + 1);
+        }
+        this._nodeVersions = nextNodeVersions;
+        this._edgeVersions = nextEdgeVersions;
         this._globalVersion++;
     }
 }

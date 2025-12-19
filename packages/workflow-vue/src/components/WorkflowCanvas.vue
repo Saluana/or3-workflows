@@ -8,7 +8,9 @@ import {
     Connection,
     NodeMouseEvent,
     EdgeMouseEvent,
+    type SelectionMode,
 } from '@vue-flow/core';
+import type { KeyFilter } from '@vueuse/core';
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
 import { WorkflowEditor } from '@or3/workflow-core';
@@ -23,6 +25,9 @@ import OutputNode from './nodes/OutputNode.vue';
 const props = defineProps<{
     editor: WorkflowEditor;
     nodeStatuses?: Record<string, 'idle' | 'active' | 'completed' | 'error'>;
+    panOnDrag?: boolean | number[];
+    selectionKeyCode?: KeyFilter | boolean | null;
+    selectionMode?: SelectionMode;
 }>();
 
 type CreateNodeData = Parameters<WorkflowEditor['commands']['createNode']>[1];
@@ -34,8 +39,43 @@ const emit = defineEmits<{
     (e: 'drop', event: DragEvent): void;
 }>();
 
-const { onConnect, onNodeDragStop, screenToFlowCoordinate, fitView } =
-    useVueFlow();
+const {
+    onConnect,
+    onNodeDragStop,
+    screenToFlowCoordinate,
+    fitView,
+    panOnDrag: panOnDragState,
+    selectionKeyCode: selectionKeyCodeState,
+    selectionMode: selectionModeState,
+} = useVueFlow();
+
+const initialPanOnDrag = panOnDragState.value;
+const initialSelectionKeyCode = selectionKeyCodeState.value;
+const initialSelectionMode = selectionModeState.value;
+
+watch(
+    () => props.panOnDrag,
+    (value) => {
+        panOnDragState.value = value ?? initialPanOnDrag;
+    },
+    { immediate: true }
+);
+
+watch(
+    () => props.selectionKeyCode,
+    (value) => {
+        selectionKeyCodeState.value = value ?? initialSelectionKeyCode;
+    },
+    { immediate: true }
+);
+
+watch(
+    () => props.selectionMode,
+    (value) => {
+        selectionModeState.value = value ?? initialSelectionMode;
+    },
+    { immediate: true }
+);
 
 const nodes = ref<Node[]>([]);
 const edges = ref<Edge[]>([]);
@@ -388,6 +428,9 @@ defineExpose({
             :min-zoom="0.5"
             :max-zoom="2"
             fit-view-on-init
+            :pan-on-drag="panOnDrag"
+            :selection-key-code="selectionKeyCode"
+            :selection-mode="selectionMode"
             @node-click="onNodeClick"
             @edge-click="onEdgeClick"
             @pane-click="onPaneClick"
