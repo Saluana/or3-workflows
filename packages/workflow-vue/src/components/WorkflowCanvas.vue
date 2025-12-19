@@ -337,6 +337,10 @@ const onDragOver = (event: DragEvent) => {
     }
 };
 
+const onCanvasPointerDown = (event: MouseEvent) => {
+    (event.currentTarget as HTMLElement | null)?.focus();
+};
+
 // Handle mobile touch drop
 const onMobileNodeDrop = (event: Event) => {
     const customEvent = event as CustomEvent<{
@@ -434,6 +438,7 @@ defineExpose({
         @drop="onDrop"
         @dragover="onDragOver"
         @keydown="onKeyDown"
+        @mousedown="onCanvasPointerDown"
         tabindex="0"
     >
         <VueFlow
