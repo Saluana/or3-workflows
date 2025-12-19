@@ -2,8 +2,9 @@
 import { onMounted, onUnmounted, ref } from 'vue';
 import { NodeData, WorkflowEditor } from '@or3/workflow-core';
 
-defineProps<{
+const props = defineProps<{
     editor?: WorkflowEditor;
+    canvasId?: string;
 }>();
 
 const emit = defineEmits<{
@@ -101,6 +102,13 @@ const nodeTypes = [
     },
 ];
 
+const getCanvasElement = () => {
+    const selector = props.canvasId
+        ? `[data-workflow-canvas="${props.canvasId}"] .vue-flow`
+        : '.vue-flow';
+    return document.querySelector(selector) as HTMLElement | null;
+};
+
 // Note: Start node is intentionally omitted as it should be added programmatically
 // when creating a new workflow. Only one start node should exist per workflow.
 
@@ -146,7 +154,7 @@ const onTouchEnd = (event: TouchEvent) => {
     const dropTarget = document.elementFromPoint(touch.clientX, touch.clientY);
     
     // Check if dropped on the canvas
-    const canvas = document.querySelector('.vue-flow') as HTMLElement;
+    const canvas = getCanvasElement();
     if (canvas && (canvas === dropTarget || canvas.contains(dropTarget))) {
         // Create a custom event to pass to the canvas
         const customEvent = new CustomEvent('mobileNodeDrop', {
@@ -173,7 +181,7 @@ const dropNodeOnCanvas = (
     nodeType: string,
     defaultData: NodeData
 ) => {
-    const canvas = document.querySelector('.vue-flow') as HTMLElement | null;
+    const canvas = getCanvasElement();
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();

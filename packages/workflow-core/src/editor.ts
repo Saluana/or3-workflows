@@ -203,6 +203,7 @@ export class WorkflowEditor {
             this.setMeta(parsed.meta, { touchUpdatedAt: false });
             this.history.clear();
             this.history.push({ nodes: this.nodes, edges: this.edges });
+            this.refreshVersions();
             this.emit('update');
         } catch (error) {
             console.error('Failed to load workflow:', error);

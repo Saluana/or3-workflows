@@ -28,6 +28,7 @@ const props = defineProps<{
     panOnDrag?: boolean | number[];
     selectionKeyCode?: KeyFilter | boolean | null;
     selectionMode?: SelectionMode;
+    canvasId?: string;
 }>();
 
 type CreateNodeData = Parameters<WorkflowEditor['commands']['createNode']>[1];
@@ -351,18 +352,31 @@ const onMobileNodeDrop = (event: Event) => {
     props.editor.commands.createNode(nodeType, defaultData, position);
 };
 
+const getCanvasElement = () => {
+    const selector = props.canvasId
+        ? `[data-workflow-canvas="${props.canvasId}"] .vue-flow`
+        : '.vue-flow';
+    return document.querySelector(selector) as HTMLElement | null;
+};
+
 // Setup mobile drop listener
 onMounted(() => {
-    const canvas = document.querySelector('.vue-flow') as HTMLElement;
+    const canvas = getCanvasElement();
     if (canvas) {
-        canvas.addEventListener('mobileNodeDrop', onMobileNodeDrop as EventListener);
+        canvas.addEventListener(
+            'mobileNodeDrop',
+            onMobileNodeDrop as EventListener
+        );
     }
 });
 
 onUnmounted(() => {
-    const canvas = document.querySelector('.vue-flow') as HTMLElement;
+    const canvas = getCanvasElement();
     if (canvas) {
-        canvas.removeEventListener('mobileNodeDrop', onMobileNodeDrop as EventListener);
+        canvas.removeEventListener(
+            'mobileNodeDrop',
+            onMobileNodeDrop as EventListener
+        );
     }
 });
 
@@ -416,6 +430,7 @@ defineExpose({
 <template>
     <div
         class="workflow-canvas"
+        :data-workflow-canvas="canvasId || undefined"
         @drop="onDrop"
         @dragover="onDragOver"
         @keydown="onKeyDown"
