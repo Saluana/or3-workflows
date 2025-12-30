@@ -433,7 +433,10 @@ defineExpose({
 
 <template>
     <div
-        class="workflow-canvas"
+        :class="[
+            'workflow-canvas',
+            { 'workflow-canvas-select': selectionKeyCode === true },
+        ]"
         :data-workflow-canvas="canvasId || undefined"
         @drop="onDrop"
         @dragover="onDragOver"
@@ -548,6 +551,10 @@ defineExpose({
 /* Global styles for Vue Flow */
 .vue-flow {
     background: var(--or3-color-bg-primary, #0a0a0f) !important;
+}
+
+.workflow-canvas-select .vue-flow__pane {
+    touch-action: none;
 }
 
 .vue-flow__edge-path {
