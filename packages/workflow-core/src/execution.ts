@@ -903,6 +903,16 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             },
 
             onToolCall: this.options.onToolCall,
+            onToolCallEvent: this.options.onToolCallEvent
+                ? (event) => {
+                      this.options.onToolCallEvent?.({
+                          ...event,
+                          nodeId,
+                          nodeLabel: meta.label,
+                          nodeType: meta.type,
+                      });
+                  }
+                : undefined,
 
             executeSubgraph: async (
                 startNodeId: string,

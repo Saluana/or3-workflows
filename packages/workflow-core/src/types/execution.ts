@@ -103,6 +103,23 @@ export interface ToolDefinition {
     function: ToolFunctionDefinition;
 }
 
+export type ToolCallStatus = 'active' | 'completed' | 'error';
+
+export interface ToolCallEvent {
+    id: string;
+    name: string;
+    status: ToolCallStatus;
+    branchId?: string;
+    branchLabel?: string;
+    error?: string;
+}
+
+export interface ToolCallEventWithNode extends ToolCallEvent {
+    nodeId: string;
+    nodeLabel?: string;
+    nodeType?: string;
+}
+
 /**
  * Result of a tool call made by the LLM.
  */
@@ -579,6 +596,8 @@ export interface ExecutionOptions {
     maxNodeExecutions?: number;
     /** Global tool call handler */
     onToolCall?: (name: string, args: any) => Promise<string>;
+    /** Tool call lifecycle handler with node metadata */
+    onToolCallEvent?: (event: ToolCallEventWithNode) => void;
     /** Pluggable long-term memory adapter */
     memory?: MemoryAdapter;
     /** Provide an existing session ID to reuse */
@@ -713,6 +732,8 @@ export interface ExecutionContext {
     getOutgoingEdges: (nodeId: string, sourceHandle?: string) => WorkflowEdge[];
     /** Global tool call handler */
     onToolCall?: (name: string, args: any) => Promise<string>;
+    /** Tool call lifecycle handler */
+    onToolCallEvent?: (event: ToolCallEvent) => void;
     /** Session ID for the current execution */
     sessionId?: string;
     /** Execute a subgraph (e.g., for loops) */

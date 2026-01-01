@@ -116,8 +116,13 @@ async function runToolLoop(
 
         // Execute each tool call
         for (const toolCall of result.toolCalls) {
-            const toolName = toolCall.function?.name;
+            const toolName = toolCall.function?.name || 'unknown_tool';
             const toolArgs = toolCall.function?.arguments;
+            const toolCallId =
+                toolCall.id ||
+                `${toolName}-${Date.now()}-${Math.random()
+                    .toString(36)
+                    .slice(2, 8)}`;
 
             let parsedArgs: unknown;
             try {
@@ -129,7 +134,14 @@ async function runToolLoop(
                 parsedArgs = toolArgs;
             }
 
+            context.onToolCallEvent?.({
+                id: toolCallId,
+                name: toolName,
+                status: 'active',
+            });
+
             let toolResult: string;
+            let toolError: string | undefined;
 
             // Try to find and execute the tool handler
             const handler = toolHandlers.get(toolName);
@@ -137,27 +149,35 @@ async function runToolLoop(
                 try {
                     toolResult = await handler(parsedArgs);
                 } catch (err) {
-                    toolResult = `Error executing tool ${toolName}: ${
-                        err instanceof Error ? err.message : String(err)
-                    }`;
+                    toolError =
+                        err instanceof Error ? err.message : String(err);
+                    toolResult = `Error executing tool ${toolName}: ${toolError}`;
                 }
             } else if (context.onToolCall) {
                 // Fallback to global onToolCall handler
                 try {
                     toolResult = await context.onToolCall(toolName, parsedArgs);
                 } catch (err) {
-                    toolResult = `Error executing tool ${toolName}: ${
-                        err instanceof Error ? err.message : String(err)
-                    }`;
+                    toolError =
+                        err instanceof Error ? err.message : String(err);
+                    toolResult = `Error executing tool ${toolName}: ${toolError}`;
                 }
             } else {
-                toolResult = `Tool ${toolName} not found or no handler registered`;
+                toolError = `Tool ${toolName} not found or no handler registered`;
+                toolResult = toolError;
             }
 
             // Add tool result to conversation
             currentMessages.push({
                 role: 'system' as const,
                 content: `[Tool Result: ${toolName}]\n${toolResult}`,
+            });
+
+            context.onToolCallEvent?.({
+                id: toolCallId,
+                name: toolName,
+                status: toolError ? 'error' : 'completed',
+                error: toolError,
             });
         }
 
