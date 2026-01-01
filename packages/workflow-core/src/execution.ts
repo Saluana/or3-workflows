@@ -428,6 +428,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 // Find all ready nodes (nodes whose parents are all executed)
                 const readyNodes: string[] = [];
                 const deferredNodes: string[] = [];
+                const readySet = new Set<string>();
+                const deferredSet = new Set<string>();
 
                 for (const nodeId of queue) {
                     // Skip if already executed
@@ -441,8 +443,12 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                         parentIds.every((p) => executed.has(p));
 
                     if (allParentsExecuted || nodeId === rootNodeId) {
-                        readyNodes.push(nodeId);
-                    } else {
+                        if (!readySet.has(nodeId)) {
+                            readySet.add(nodeId);
+                            readyNodes.push(nodeId);
+                        }
+                    } else if (!deferredSet.has(nodeId)) {
+                        deferredSet.add(nodeId);
                         deferredNodes.push(nodeId);
                     }
                 }
