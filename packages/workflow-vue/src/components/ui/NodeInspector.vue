@@ -47,6 +47,9 @@ function getToolsArray(data: unknown): string[] {
 const props = defineProps<{
     editor: WorkflowEditor;
     availableTools?: ToolOption[];
+    availableSubflows?: SubflowOption[];
+    subflowListLoading?: boolean;
+    subflowListError?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -72,6 +75,10 @@ const availableTools = computed<ToolOption[]>(() => {
     return props.availableTools ?? defaultAvailableTools;
 });
 
+const availableSubflows = computed<SubflowOption[]>(() => {
+    return props.availableSubflows ?? [];
+});
+
 // Available models from registry
 // Register defaults if registry is empty
 if (modelRegistry.size === 0) {
@@ -87,6 +94,12 @@ const availableModels = computed(() => {
 });
 
 interface ToolOption {
+    id: string;
+    name: string;
+    description?: string;
+}
+
+interface SubflowOption {
     id: string;
     name: string;
     description?: string;
@@ -168,6 +181,11 @@ watch(
 
 // Use watchEffect for proper subscription cleanup on editor prop change
 watchEffect((onCleanup) => {
+    if (props.editor.isDestroyed()) {
+        selectedNode.value = null;
+        selectedTools.value = [];
+        return;
+    }
     updateSelection();
     const unsub1 = props.editor.on('selectionUpdate', updateSelection);
     const unsub2 = props.editor.on('update', updateSelection);
@@ -326,6 +344,40 @@ const subflowData = computed(() => {
         shareSession: data?.shareSession ?? true,
     };
 });
+
+const subflowOptions = computed(() => {
+    const options = [...availableSubflows.value];
+    const currentId = subflowData.value.subflowId;
+    if (currentId && !options.some((option) => option.id === currentId)) {
+        options.unshift({
+            id: currentId,
+            name: 'Custom ID',
+            description: 'Not in your workflow list.',
+        });
+    }
+    return options;
+});
+
+const selectedSubflow = computed(() => {
+    const currentId = subflowData.value.subflowId;
+    if (!currentId) return null;
+    return (
+        subflowOptions.value.find((option) => option.id === currentId) || null
+    );
+});
+
+const showManualSubflowInput = ref(false);
+
+watch(
+    () => [subflowData.value.subflowId, availableSubflows.value.length],
+    ([subflowId]) => {
+        if (!subflowId) return;
+        if (!availableSubflows.value.some((option) => option.id === subflowId)) {
+            showManualSubflowInput.value = true;
+        }
+    },
+    { immediate: true }
+);
 
 const routerData = computed(() => {
     const data = selectedNode.value?.data as any;
@@ -706,8 +758,24 @@ const updateHITLDefaultAction = (event: Event) => {
 };
 
 // Subflow update handlers
-const updateSubflowId = (event: Event) => {
-    debouncedUpdate('subflowId', (event.target as HTMLInputElement).value);
+const setSubflowId = (value: string) => {
+    debouncedUpdate('subflowId', value);
+};
+
+const updateSubflowIdInput = (event: Event) => {
+    setSubflowId((event.target as HTMLInputElement).value);
+};
+
+const updateSubflowIdSelect = (event: Event) => {
+    const value = (event.target as HTMLSelectElement).value;
+    setSubflowId(value);
+    if (value && availableSubflows.value.some((option) => option.id === value)) {
+        showManualSubflowInput.value = false;
+    }
+};
+
+const toggleManualSubflowInput = () => {
+    showManualSubflowInput.value = !showManualSubflowInput.value;
 };
 
 const toggleShareSession = () => {
@@ -1952,17 +2020,76 @@ Example: "Improve this text, making it clearer and more engaging."'
                 class="subflow-tab"
             >
                 <div class="field-group">
+                    <label class="field-label">Subflow</label>
+                    <select
+                        class="model-select"
+                        :value="subflowData.subflowId"
+                        :disabled="subflowListLoading"
+                        @change="updateSubflowIdSelect"
+                    >
+                        <option value="">
+                            {{
+                                subflowListLoading
+                                    ? 'Loading workflows...'
+                                    : 'Select a workflow...'
+                            }}
+                        </option>
+                        <option
+                            v-for="option in subflowOptions"
+                            :key="option.id"
+                            :value="option.id"
+                        >
+                            {{ option.name }} ({{ option.id }})
+                        </option>
+                    </select>
+                    <p v-if="subflowListLoading" class="field-hint">
+                        Loading available workflows...
+                    </p>
+                    <p v-else-if="subflowListError" class="field-hint">
+                        Unable to load workflows. You can still enter a subflow
+                        ID manually.
+                    </p>
+                    <p
+                        v-else-if="availableSubflows.length === 0"
+                        class="field-hint"
+                    >
+                        No workflows found yet. Create one in the Workflows tab
+                        or enter an ID manually.
+                    </p>
+                    <p v-else class="field-hint">
+                        {{
+                            selectedSubflow?.description ||
+                            'Choose a workflow to run inside this node.'
+                        }}
+                    </p>
+                    <div v-if="subflowData.subflowId" class="model-id">
+                        <span class="model-id-label">Workflow ID:</span>
+                        <code>{{ subflowData.subflowId }}</code>
+                    </div>
+                    <button
+                        class="subflow-manual-toggle"
+                        type="button"
+                        @click="toggleManualSubflowInput"
+                    >
+                        {{
+                            showManualSubflowInput
+                                ? 'Hide manual entry'
+                                : 'Enter ID manually'
+                        }}
+                    </button>
+                </div>
+
+                <div v-if="showManualSubflowInput" class="field-group">
                     <label class="field-label">Subflow ID</label>
                     <input
                         type="text"
                         class="text-input"
                         :value="subflowData.subflowId"
                         placeholder="e.g., email-composer"
-                        @input="updateSubflowId"
+                        @input="updateSubflowIdInput"
                     />
                     <p class="field-hint">
-                        ID of the subflow to execute. Must be registered in the
-                        subflow registry.
+                        Use this only if the workflow isn't listed.
                     </p>
                 </div>
 
@@ -2841,6 +2968,22 @@ Example: "Improve this text, making it clearer and more engaging."'
     display: flex;
     flex-direction: column;
     gap: var(--or3-spacing-xs, 4px);
+}
+
+.subflow-manual-toggle {
+    align-self: flex-start;
+    margin-top: var(--or3-spacing-xs, 4px);
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--or3-color-info, #3b82f6);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.subflow-manual-toggle:hover {
+    text-decoration: underline;
 }
 
 .input-mappings-section {

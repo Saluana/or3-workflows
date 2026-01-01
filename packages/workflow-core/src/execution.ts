@@ -799,6 +799,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             customEvaluators: this.options.customEvaluators,
             debug: this.options.debug,
             defaultModel: this.options.defaultModel,
+            subflowRegistry: this.options.subflowRegistry,
             subflowDepth: this.options._subflowDepth ?? 0,
             maxSubflowDepth: this.options.maxSubflowDepth ?? 10,
             tools: this.options.tools,
@@ -989,6 +990,13 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 // BUT provider in this class is LLMProvider. The constructor expects OpenRouter | LLMProvider.
                 // So we can pass `this.provider`.
 
+                const subflowCallbacks: ExecutionCallbacks = {
+                    onNodeStart: () => {},
+                    onNodeFinish: () => {},
+                    onNodeError: () => {},
+                    onToken: () => {},
+                };
+
                 const subAdapter = new OpenRouterExecutionAdapter(
                     this.provider,
                     {
@@ -999,10 +1007,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     }
                 );
 
-                return subAdapter.execute(wf, input, callbacks); // Use same callbacks?
-                // SubflowExtension wraps callbacks to namespace them.
-                // But `execute` signature takes `callbacks`.
-                // So yes, passing callbacks is correct.
+                return subAdapter.execute(wf, input, subflowCallbacks);
             },
         };
 

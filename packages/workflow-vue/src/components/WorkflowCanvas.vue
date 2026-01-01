@@ -80,6 +80,7 @@ watch(
 
 const nodes = ref<Node[]>([]);
 const edges = ref<Edge[]>([]);
+const canUseEditor = () => !props.editor.isDestroyed();
 
 // Cache for comparing changes using version-based fingerprints
 // This is O(1) per node/edge instead of O(n) with JSON.stringify
@@ -251,6 +252,7 @@ let unsubUpdate: (() => void) | null = null;
 let unsubSelection: (() => void) | null = null;
 
 onMounted(() => {
+    if (!canUseEditor()) return;
     syncFromEditor();
     unsubUpdate = props.editor.on('update', syncFromEditor);
     unsubSelection = props.editor.on('selectionUpdate', syncFromEditor);
@@ -266,6 +268,7 @@ onUnmounted(() => {
 
 // Handle connections
 onConnect((params: Connection) => {
+    if (!canUseEditor()) return;
     props.editor.commands.createEdge(
         params.source,
         params.target,
@@ -276,11 +279,13 @@ onConnect((params: Connection) => {
 
 // Handle node drag
 onNodeDragStop((event) => {
+    if (!canUseEditor()) return;
     props.editor.commands.setNodePosition(event.node.id, event.node.position);
 });
 
 // Handle node click
 const onNodeClick = (event: NodeMouseEvent) => {
+    if (!canUseEditor()) return;
     props.editor.commands.selectNode(event.node.id);
     emit('nodeClick', event.node);
 };
@@ -292,12 +297,14 @@ const onEdgeClick = (event: EdgeMouseEvent) => {
 
 // Handle pane click (deselect)
 const onPaneClick = () => {
+    if (!canUseEditor()) return;
     props.editor.commands.deselectAll();
     emit('paneClick');
 };
 
 // Handle drop from palette
 const onDrop = (event: DragEvent) => {
+    if (!canUseEditor()) return;
     const nodeType = event.dataTransfer?.getData('application/vueflow');
     const nodeDataStr = event.dataTransfer?.getData('application/json');
 
@@ -343,6 +350,7 @@ const onCanvasPointerDown = (event: MouseEvent) => {
 
 // Handle mobile touch drop
 const onMobileNodeDrop = (event: Event) => {
+    if (!canUseEditor()) return;
     const customEvent = event as CustomEvent<{
         nodeType: string;
         defaultData: CreateNodeData;
@@ -386,6 +394,7 @@ onUnmounted(() => {
 
 // Handle keyboard shortcuts
 const onKeyDown = (event: KeyboardEvent) => {
+    if (!canUseEditor()) return;
     // Ignore if in input
     const target = event.target as HTMLElement;
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
