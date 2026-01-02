@@ -104,10 +104,148 @@ interface InternalExecutionContext {
     readonly attachments: Attachment[];
     outputs: Record<string, string>;
     nodeChain: string[];
+    readonly nodePath: string[];
     readonly signal: AbortSignal;
     readonly session: Session;
     readonly memory: MemoryAdapter;
     readonly workflowName: string;
+}
+
+const SUBFLOW_SCOPE_PREFIX = 'sf:';
+const SUBFLOW_SCOPE_SEPARATOR = '|';
+
+function scopeNodeId(nodeId: string, path?: string[]): string {
+    if (!path || path.length === 0) return nodeId;
+    const scoped = path
+        .map((segment) => `${SUBFLOW_SCOPE_PREFIX}${segment}`)
+        .join(SUBFLOW_SCOPE_SEPARATOR);
+    return `${scoped}${SUBFLOW_SCOPE_SEPARATOR}${nodeId}`;
+}
+
+function scopeMeta(
+    meta: NodeExecutionMetadata | undefined,
+    path: string[]
+): NodeExecutionMetadata | undefined {
+    if (!meta) return meta;
+    return {
+        ...meta,
+        id: meta.id ? scopeNodeId(meta.id, path) : meta.id,
+        path: [...path],
+    };
+}
+
+function scopeExecutionCallbacks(
+    callbacks: ExecutionCallbacks,
+    path: string[]
+): ExecutionCallbacks {
+    const scopeId = (nodeId: string) => scopeNodeId(nodeId, path);
+    return {
+        onNodeStart: (nodeId, meta) => {
+            callbacks.onNodeStart(scopeId(nodeId), scopeMeta(meta, path));
+        },
+        onNodeFinish: (nodeId, output, meta) => {
+            callbacks.onNodeFinish(
+                scopeId(nodeId),
+                output,
+                scopeMeta(meta, path)
+            );
+        },
+        onNodeError: (nodeId, error, meta) => {
+            callbacks.onNodeError(
+                scopeId(nodeId),
+                error,
+                scopeMeta(meta, path)
+            );
+        },
+        onToken: (nodeId, token) => {
+            callbacks.onToken(scopeId(nodeId), token);
+        },
+        onWorkflowToken: callbacks.onWorkflowToken
+            ? (token, meta) => {
+                  const nextMeta = meta
+                      ? { ...meta, nodeId: scopeId(meta.nodeId) }
+                      : meta;
+                  callbacks.onWorkflowToken?.(token, nextMeta as any);
+              }
+            : undefined,
+        onReasoning: callbacks.onReasoning
+            ? (nodeId, token) => {
+                  callbacks.onReasoning?.(scopeId(nodeId), token);
+              }
+            : undefined,
+        onRouteSelected: callbacks.onRouteSelected
+            ? (nodeId, routeId, meta) => {
+                  callbacks.onRouteSelected?.(
+                      scopeId(nodeId),
+                      routeId,
+                      scopeMeta(meta, path)
+                  );
+              }
+            : undefined,
+        onTokenUsage: callbacks.onTokenUsage
+            ? (nodeId, usage) => {
+                  callbacks.onTokenUsage?.(scopeId(nodeId), usage);
+              }
+            : undefined,
+        onContextCompacted: callbacks.onContextCompacted
+            ? (result) => {
+                  callbacks.onContextCompacted?.(result);
+              }
+            : undefined,
+        onBranchToken: callbacks.onBranchToken
+            ? (nodeId, branchId, branchLabel, token) => {
+                  callbacks.onBranchToken?.(
+                      scopeId(nodeId),
+                      branchId,
+                      branchLabel,
+                      token
+                  );
+              }
+            : undefined,
+        onBranchReasoning: callbacks.onBranchReasoning
+            ? (nodeId, branchId, branchLabel, token) => {
+                  callbacks.onBranchReasoning?.(
+                      scopeId(nodeId),
+                      branchId,
+                      branchLabel,
+                      token
+                  );
+              }
+            : undefined,
+        onBranchStart: callbacks.onBranchStart
+            ? (nodeId, branchId, branchLabel, meta) => {
+                  callbacks.onBranchStart?.(
+                      scopeId(nodeId),
+                      branchId,
+                      branchLabel,
+                      scopeMeta(meta, path)
+                  );
+              }
+            : undefined,
+        onBranchComplete: callbacks.onBranchComplete
+            ? (nodeId, branchId, branchLabel, output, meta) => {
+                  callbacks.onBranchComplete?.(
+                      scopeId(nodeId),
+                      branchId,
+                      branchLabel,
+                      output,
+                      scopeMeta(meta, path)
+                  );
+              }
+            : undefined,
+        onLoopIteration: callbacks.onLoopIteration
+            ? (nodeId, iteration, maxIterations, meta) => {
+                  callbacks.onLoopIteration?.(
+                      scopeId(nodeId),
+                      iteration,
+                      maxIterations,
+                      scopeMeta(meta, path)
+                  );
+              }
+            : undefined,
+        // Avoid propagating subflow completion to parent completion handlers.
+        onComplete: undefined,
+    };
 }
 
 function getNodeLabel(node: WorkflowNode | undefined): string | undefined {
@@ -357,6 +495,9 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 outputs: { ...(resumeFrom?.nodeOutputs || {}) },
                 nodeChain: resumeFrom?.executionOrder
                     ? [...resumeFrom.executionOrder]
+                    : [],
+                nodePath: this.options._subflowPath
+                    ? [...this.options._subflowPath]
                     : [],
                 signal: this.abortController.signal,
                 session,
@@ -749,6 +890,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             id: nodeId,
             label: getNodeLabel(node),
             type: node?.type,
+            path: context.nodePath.length ? [...context.nodePath] : undefined,
         } satisfies Partial<NodeExecutionMetadata>;
 
         callbacks.onNodeStart(nodeId, meta);
@@ -996,12 +1138,15 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 // BUT provider in this class is LLMProvider. The constructor expects OpenRouter | LLMProvider.
                 // So we can pass `this.provider`.
 
-                const subflowCallbacks: ExecutionCallbacks = {
-                    onNodeStart: () => {},
-                    onNodeFinish: () => {},
-                    onNodeError: () => {},
-                    onToken: () => {},
-                };
+                const subflowPath = [...context.nodePath, nodeId];
+                const subflowCallbacks = scopeExecutionCallbacks(
+                    callbacks,
+                    subflowPath
+                );
+                const baseOnToolCallEvent =
+                    options?.onToolCallEvent ?? this.options.onToolCallEvent;
+                const baseOnHITLRequest =
+                    options?.onHITLRequest ?? this.options.onHITLRequest;
 
                 const subAdapter = new OpenRouterExecutionAdapter(
                     this.provider,
@@ -1010,6 +1155,29 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                         ...options,
                         // Pass subflow registry
                         subflowRegistry: this.options.subflowRegistry,
+                        _subflowPath: subflowPath,
+                        onToolCallEvent: baseOnToolCallEvent
+                            ? (event) => {
+                                  baseOnToolCallEvent({
+                                      ...event,
+                                      nodeId: scopeNodeId(
+                                          event.nodeId,
+                                          subflowPath
+                                      ),
+                                  });
+                              }
+                            : undefined,
+                        onHITLRequest: baseOnHITLRequest
+                            ? (request) => {
+                                  return baseOnHITLRequest({
+                                      ...request,
+                                      nodeId: scopeNodeId(
+                                          request.nodeId,
+                                          subflowPath
+                                      ),
+                                  });
+                              }
+                            : undefined,
                     }
                 );
 
@@ -1108,6 +1276,12 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         }
 
         const nodeLabel = getNodeLabel(node);
+        const meta = {
+            id: nodeId,
+            label: nodeLabel,
+            type: node.type,
+            path: context.nodePath.length ? [...context.nodePath] : undefined,
+        } satisfies Partial<NodeExecutionMetadata>;
 
         const nodeData = node.data as unknown as Record<string, unknown>;
         const errorConfig = nodeData?.errorHandling as
@@ -1197,11 +1371,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 if (mode === 'branch' && errorEdge) {
                     context.outputs[`${nodeId}_error`] =
                         this.serializeError(execError);
-                    callbacks.onNodeError(nodeId, execError, {
-                        id: nodeId,
-                        label: nodeLabel,
-                        type: node.type,
-                    });
+                    callbacks.onNodeError(nodeId, execError, meta);
                     return {
                         output: '',
                         nextNodes: [errorEdge.target],
@@ -1209,22 +1379,14 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 }
 
                 if (mode === 'continue') {
-                    callbacks.onNodeError(nodeId, execError, {
-                        id: nodeId,
-                        label: nodeLabel,
-                        type: node.type,
-                    });
+                    callbacks.onNodeError(nodeId, execError, meta);
                     return {
                         output: '',
                         nextNodes: this.getChildNodes(nodeId, edges),
                     };
                 }
 
-                callbacks.onNodeError(nodeId, execError, {
-                    id: nodeId,
-                    label: nodeLabel,
-                    type: node.type,
-                });
+                callbacks.onNodeError(nodeId, execError, meta);
                 throw execError;
             }
         }
@@ -1258,6 +1420,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             id: node.id,
             label: nodeLabel,
             type: node.type,
+            path: context.nodePath.length ? [...context.nodePath] : undefined,
         } satisfies Partial<NodeExecutionMetadata>;
 
         // No HITL configured or disabled, or no callback provided

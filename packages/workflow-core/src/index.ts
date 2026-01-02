@@ -18,6 +18,8 @@ export {
     type ResumeFromOptions,
     type TokenUsageDetails,
     type ChatMessage,
+    type ToolCallEvent,
+    type ToolCallEventWithNode,
     type NodeStatus,
     type Extension,
     type NodeExtension,

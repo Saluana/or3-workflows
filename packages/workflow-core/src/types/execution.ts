@@ -663,6 +663,11 @@ export interface ExecutionOptions {
      */
     _subflowDepth?: number;
     /**
+     * Internal: Path of parent subflow node IDs for scoping execution events.
+     * @internal
+     */
+    _subflowPath?: string[];
+    /**
      * Maximum number of tool call iterations for agent nodes (default: 10).
      * Prevents infinite tool-calling loops.
      */
