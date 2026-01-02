@@ -292,6 +292,9 @@ const onNodeClick = (event: NodeMouseEvent) => {
 
 // Handle edge click
 const onEdgeClick = (event: EdgeMouseEvent) => {
+    if (canUseEditor()) {
+        props.editor.commands.deselectAll();
+    }
     emit('edgeClick', event.edge);
 };
 
@@ -401,9 +404,22 @@ const onKeyDown = (event: KeyboardEvent) => {
 
     // Delete selected
     if (event.key === 'Delete' || event.key === 'Backspace') {
-        const selected = props.editor.getSelected();
-        selected.nodes.forEach((id) => props.editor.commands.deleteNode(id));
-        selected.edges.forEach((id) => props.editor.commands.deleteEdge(id));
+        event.preventDefault();
+        const selectedEdgeIds = edges.value
+            .filter((edge) => edge.selected)
+            .map((edge) => edge.id);
+        const selectedNodeIds = nodes.value
+            .filter((node) => node.selected)
+            .map((node) => node.id);
+
+        if (selectedEdgeIds.length) {
+            selectedEdgeIds.forEach((id) =>
+                props.editor.commands.deleteEdge(id)
+            );
+            return;
+        }
+
+        selectedNodeIds.forEach((id) => props.editor.commands.deleteNode(id));
     }
 
     // Undo: Ctrl/Cmd + Z
