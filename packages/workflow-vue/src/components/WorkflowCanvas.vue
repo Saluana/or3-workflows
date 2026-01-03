@@ -9,6 +9,8 @@ import {
     NodeMouseEvent,
     EdgeMouseEvent,
     type SelectionMode,
+    type GraphNode,
+    type GraphEdge,
 } from '@vue-flow/core';
 import type { KeyFilter } from '@vueuse/core';
 import { Background } from '@vue-flow/background';
@@ -45,6 +47,8 @@ const {
     onNodeDragStop,
     screenToFlowCoordinate,
     fitView,
+    nodes: vueFlowNodes,
+    edges: vueFlowEdges,
     panOnDrag: panOnDragState,
     selectionKeyCode: selectionKeyCodeState,
     selectionMode: selectionModeState,
@@ -277,10 +281,18 @@ onConnect((params: Connection) => {
     );
 });
 
-// Handle node drag
-onNodeDragStop((event) => {
+// Handle node drag - update ALL selected nodes, not just the primary one
+onNodeDragStop(() => {
     if (!canUseEditor()) return;
-    props.editor.commands.setNodePosition(event.node.id, event.node.position);
+    
+    // Use Vue Flow's nodes ref to get the actual current positions.
+    // The local nodes ref synced from editor may not have the updated positions
+    // from the drag operation - Vue Flow updates its internal state during drag.
+    const selectedNodes = vueFlowNodes.value.filter((n: GraphNode) => n.selected);
+    
+    for (const node of selectedNodes) {
+        props.editor.commands.setNodePosition(node.id, node.position);
+    }
 });
 
 // Handle node click
@@ -405,12 +417,13 @@ const onKeyDown = (event: KeyboardEvent) => {
     // Delete selected
     if (event.key === 'Delete' || event.key === 'Backspace') {
         event.preventDefault();
-        const selectedEdgeIds = edges.value
-            .filter((edge) => edge.selected)
-            .map((edge) => edge.id);
-        const selectedNodeIds = nodes.value
-            .filter((node) => node.selected)
-            .map((node) => node.id);
+        // Use Vue Flow's refs for selection state
+        const selectedEdgeIds = vueFlowEdges.value
+            .filter((edge: GraphEdge) => edge.selected)
+            .map((edge: GraphEdge) => edge.id);
+        const selectedNodeIds = vueFlowNodes.value
+            .filter((node: GraphNode) => node.selected)
+            .map((node: GraphNode) => node.id);
 
         if (selectedEdgeIds.length) {
             selectedEdgeIds.forEach((id) =>
@@ -560,6 +573,8 @@ defineExpose({
     height: 100%;
     background: var(--or3-color-bg-primary, #0a0a0f);
     outline: none;
+    /* Prevent browser handling of touch gestures - canvas handles its own pan/zoom */
+    touch-action: none;
 }
 
 .edge-label {
