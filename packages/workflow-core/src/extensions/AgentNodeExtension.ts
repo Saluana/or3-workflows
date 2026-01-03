@@ -35,12 +35,12 @@ interface ToolLoopResult {
     messages: ChatMessage[];
 }
 
-/** Content part in OpenRouter/OpenAI format (snake_case) */
+/** Content part in OpenRouter SDK format (camelCase) */
 type OpenRouterContentPart =
     | { type: 'text'; text: string }
     | {
           type: 'image_url';
-          image_url: { url: string; detail?: 'auto' | 'low' | 'high' };
+          imageUrl: { url: string; detail?: 'auto' | 'low' | 'high' };
       };
 
 /**
@@ -330,7 +330,7 @@ export const AgentNodeExtension: NodeExtension = {
                     case 'image':
                         contentParts.push({
                             type: 'image_url',
-                            image_url: { url }, // OpenRouter/OpenAI format
+                            imageUrl: { url },
                         });
                         break;
                     // TODO: Add support for other modalities when OpenRouter standardizes them
@@ -454,7 +454,6 @@ export const AgentNodeExtension: NodeExtension = {
                         output: finalContent,
                         workflowName:
                             context.workflowName || 'Unknown Workflow',
-                        sessionId: context.sessionId,
                     },
                     options: [
                         {
