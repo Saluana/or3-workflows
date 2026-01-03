@@ -163,6 +163,11 @@ const syncFromEditor = () => {
 
     // Only update nodes if something changed
     if (nodesChanged) {
+        // Get current Vue Flow selection state to preserve it
+        const currentSelectedIds = new Set(
+            vueFlowNodes.value.filter((n: GraphNode) => n.selected).map(n => n.id)
+        );
+        
         nodes.value = editorNodes.map((n) => ({
             id: n.id,
             type: n.type,
@@ -171,7 +176,8 @@ const syncFromEditor = () => {
                 ...n.data,
                 status: props.nodeStatuses?.[n.id] || 'idle',
             },
-            selected: n.selected,
+            // Preserve Vue Flow's selection state, falling back to editor state for new nodes
+            selected: currentSelectedIds.has(n.id) ? true : n.selected,
         }));
 
         // Update cache
