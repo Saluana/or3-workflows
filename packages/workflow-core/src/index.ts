@@ -11,6 +11,7 @@ export {
     type WhileLoopNodeData,
     type LoopState,
     type StartNodeData,
+    type Attachment,
     type ExecutionInput,
     type ExecutionResult,
     type ExecutionCallbacks,
