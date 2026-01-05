@@ -1472,7 +1472,7 @@ Example: "Improve this text, making it clearer and more engaging."'
             >
                 <div class="routes-header">
                     <label class="field-label">Defined Routes</label>
-                    <button class="add-btn" @click="addRoute">
+                    <button class="add-btn with-label" @click="addRoute">
                         <svg
                             viewBox="0 0 24 24"
                             fill="none"
@@ -3283,6 +3283,21 @@ Example: "Improve this text, making it clearer and more engaging."'
 .add-btn svg {
     width: 14px;
     height: 14px;
+}
+
+.add-btn.with-label {
+    width: auto;
+    height: auto;
+    padding: 6px 10px;
+    gap: 6px;
+    white-space: nowrap;
+    font-size: 12px;
+    line-height: 1;
+}
+
+.add-btn.with-label svg {
+    width: 12px;
+    height: 12px;
 }
 
 .routes-list {

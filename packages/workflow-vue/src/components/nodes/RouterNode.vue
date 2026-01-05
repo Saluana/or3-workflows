@@ -63,7 +63,9 @@ const handlePositions = computed(() => {
       type="source" 
       :position="Position.Bottom" 
       :id="route.id"
-      class="handle"
+      class="handle route-handle"
+      :data-route-label="route.label || route.id"
+      :title="route.label || route.id"
       :style="{ left: `${handlePositions[index]}%` }"
     />
     <Handle
@@ -141,6 +143,30 @@ const handlePositions = computed(() => {
   border: 2px solid var(--or3-color-border-hover, rgba(255, 255, 255, 0.15)) !important;
   width: 12px !important;
   height: 12px !important;
+}
+
+.route-handle::after {
+  content: attr(data-route-label);
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--or3-color-bg-elevated, #22222e);
+  border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+  color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.9));
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: var(--or3-radius-sm, 6px);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  z-index: 5;
+}
+
+.route-handle:hover::after,
+.route-handle:focus-visible::after {
+  opacity: 1;
 }
 
 .handle:hover {
