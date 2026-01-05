@@ -695,6 +695,13 @@ const updateLoopMode = (event: Event) => {
     debouncedUpdate('loopMode', (event.target as HTMLSelectElement).value);
 };
 
+const setLoopOutputMode = (mode: 'last' | 'accumulate') => {
+    if (!selectedNode.value) return;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        outputMode: mode,
+    });
+};
+
 const toggleIncludePreviousOutputs = () => {
     if (!selectedNode.value) return;
     const current = whileData.value.includePreviousOutputs !== false; // default true
@@ -1280,11 +1287,7 @@ Example: "Improve this text, making it clearer and more engaging."'
                                         (whileData.outputMode || 'last') ===
                                         'last',
                                 }"
-                                @click="
-                                    updateOutputMode({
-                                        target: { value: 'last' },
-                                    } as any)
-                                "
+                                @click="setLoopOutputMode('last')"
                             >
                                 Last Result Only
                             </button>
@@ -1294,11 +1297,7 @@ Example: "Improve this text, making it clearer and more engaging."'
                                     active:
                                         whileData.outputMode === 'accumulate',
                                 }"
-                                @click="
-                                    updateOutputMode({
-                                        target: { value: 'accumulate' },
-                                    } as any)
-                                "
+                                @click="setLoopOutputMode('accumulate')"
                             >
                                 Collect All
                             </button>

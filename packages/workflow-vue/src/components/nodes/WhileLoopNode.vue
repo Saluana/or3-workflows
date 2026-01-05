@@ -95,6 +95,7 @@ const emit = defineEmits<{
     display: flex;
     flex-direction: column;
     gap: var(--or3-spacing-sm, 8px);
+    position: relative;
 }
 
 .node-header {
@@ -112,6 +113,7 @@ const emit = defineEmits<{
     background: var(--or3-color-info-muted, rgba(59, 130, 246, 0.2));
     border-radius: var(--or3-radius-sm, 6px);
     color: var(--or3-color-info, #3b82f6);
+    flex-shrink: 0;
 }
 
 .loop-icon {
@@ -124,6 +126,9 @@ const emit = defineEmits<{
     font-weight: 600;
     color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
     font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .pill {
@@ -135,6 +140,9 @@ const emit = defineEmits<{
     border-radius: var(--or3-radius-full, 9999px);
     color: var(--or3-color-info, #3b82f6);
     letter-spacing: 0.5px;
+    position: absolute;
+    top: 0;
+    right: 0;
 }
 
 .pill.fixed {
