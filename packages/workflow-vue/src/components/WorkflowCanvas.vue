@@ -548,6 +548,7 @@ defineExpose({
             :pan-on-drag="panOnDrag"
             :selection-key-code="selectionKeyCode"
             :selection-mode="selectionMode"
+            :delete-key-code="null"
             @node-click="onNodeClick"
             @edge-click="onEdgeClick"
             @pane-click="onPaneClick"

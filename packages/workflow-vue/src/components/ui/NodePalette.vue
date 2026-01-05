@@ -148,6 +148,10 @@ let touchData: {
     defaultData: NodeData;
 } | null = null;
 let dropFiredFromTouch = false;
+let touchMoved = false;
+let touchStartX = 0;
+let touchStartY = 0;
+const TOUCH_MOVE_THRESHOLD = 6;
 
 const onTouchStart = (
     event: TouchEvent,
@@ -155,6 +159,22 @@ const onTouchStart = (
     defaultData: NodeData
 ) => {
     touchData = { nodeType, defaultData };
+    touchMoved = false;
+    const touch = event.touches[0];
+    if (touch) {
+        touchStartX = touch.clientX;
+        touchStartY = touch.clientY;
+    }
+};
+
+const onTouchMove = (event: TouchEvent) => {
+    if (!touchData || touchMoved) return;
+    const touch = event.touches[0];
+    if (!touch) return;
+    const dx = Math.abs(touch.clientX - touchStartX);
+    const dy = Math.abs(touch.clientY - touchStartY);
+    if (dx + dy < TOUCH_MOVE_THRESHOLD) return;
+    touchMoved = true;
     const target = event.currentTarget as HTMLElement;
     target.classList.add('dragging-touch');
 };
@@ -190,6 +210,7 @@ const onTouchEnd = (event: TouchEvent) => {
     }
     
     touchData = null;
+    touchMoved = false;
 };
 
 const dropNodeOnCanvas = (
@@ -247,6 +268,7 @@ const handleNodeTap = (
                 draggable="true"
                 @dragstart="onDragStart($event, node.type, node.defaultData)"
                 @touchstart="onTouchStart($event, node.type, node.defaultData)"
+                @touchmove="onTouchMove"
                 @touchend="onTouchEnd($event)"
                 @click="handleNodeTap($event, node.type, node.defaultData)"
             >
@@ -343,31 +365,36 @@ const handleNodeTap = (
 }
 
 /* Mobile-specific touch improvements */
-@media (max-width: 768px) {
-    .palette-nodes {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: var(--or3-spacing-sm, 8px);
-    }
+    @media (max-width: 768px) {
+        .palette-nodes {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: var(--or3-spacing-sm, 8px);
+        }
 
-    .palette-node {
-        padding: var(--or3-spacing-md, 12px);
-        touch-action: none;
-        user-select: none;
-        -webkit-user-select: none;
-        min-height: 64px;
-    }
+        .palette-node {
+            padding: var(--or3-spacing-md, 12px);
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+            min-height: 64px;
+            cursor: pointer;
+        }
     
     .node-icon {
         width: 40px;
         height: 40px;
     }
     
-    .node-icon svg {
-        width: 20px;
-        height: 20px;
+        .node-icon svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .drag-handle {
+            display: none;
+        }
     }
-}
 
 .node-icon {
     display: flex;
