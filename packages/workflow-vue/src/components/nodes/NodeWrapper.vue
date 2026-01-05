@@ -142,8 +142,8 @@ const classes = computed(() => [
 
 .node-id {
     position: absolute;
-    top: -20px;
-    right: 0;
+    top: 8px;
+    right: 8px;
     font-size: 10px;
     font-family: monospace;
     color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
