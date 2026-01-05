@@ -20,6 +20,7 @@ export type ErrorCode =
     | 'RATE_LIMIT'
     | 'AUTH'
     | 'VALIDATION'
+    | 'EXTENSION_VALIDATION_ERROR'
     | 'NETWORK'
     | 'UNKNOWN';
 
@@ -248,6 +249,7 @@ export function createExecutionError(
 
 /**
  * @deprecated Use createExecutionError instead. This mutates the original error.
+ * @internal Do not use in new code. Will be removed from public exports.
  */
 export function wrapError(
     error: unknown,

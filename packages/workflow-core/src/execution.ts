@@ -424,7 +424,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             const validation = validateWorkflow(
                 workflow.nodes,
                 workflow.edges,
-                validationContext
+                validationContext,
+                { strictDataValidation: this.options.strictDataValidation }
             );
 
             if (!validation.isValid) {

@@ -7,9 +7,18 @@ import {
     type ValidationContext,
     type NodeExtension,
 } from './types';
+import { validateNodeDataSafe } from './types/schemas';
 import { extensionRegistry } from './execution';
 
 export type { ValidationResult, ValidationError, ValidationWarning };
+
+/**
+ * Options for workflow validation.
+ */
+export interface ValidationOptions {
+    /** Validate node.data against Zod schemas (default: false for backward compatibility) */
+    strictDataValidation?: boolean;
+}
 
 /**
  * Build an adjacency list from nodes and edges.
@@ -84,6 +93,7 @@ function topologicalSort(
 
 /**
  * Find the actual cycle path for better error reporting.
+ * Uses single-pass DFS with recursion stack for O(V+E) complexity.
  */
 function findCyclePath(
     nodes: WorkflowNode[],
@@ -94,44 +104,41 @@ function findCyclePath(
 
     const adjacencyList = buildAdjacencyList(nodes, edges);
     const cycleSet = new Set(cycleNodes);
-
-    // DFS from the first cycle node to find the actual cycle
     const visited = new Set<string>();
+    const recStack = new Set<string>();
     const path: string[] = [];
 
     const dfs = (nodeId: string): string[] | null => {
-        if (path.includes(nodeId)) {
-            // Found the cycle, extract it
-            const cycleStart = path.indexOf(nodeId);
-            return [...path.slice(cycleStart), nodeId];
-        }
-
-        if (visited.has(nodeId)) return null;
-        if (!cycleSet.has(nodeId)) return null;
-
         visited.add(nodeId);
+        recStack.add(nodeId);
         path.push(nodeId);
 
-        const neighbors = adjacencyList.get(nodeId) || [];
-        for (const neighbor of neighbors) {
-            if (cycleSet.has(neighbor)) {
+        for (const neighbor of adjacencyList.get(nodeId) || []) {
+            if (!cycleSet.has(neighbor)) continue;
+            if (recStack.has(neighbor)) {
+                // Found cycle
+                const cycleStart = path.indexOf(neighbor);
+                return [...path.slice(cycleStart), neighbor];
+            }
+            if (!visited.has(neighbor)) {
                 const result = dfs(neighbor);
                 if (result) return result;
             }
         }
 
         path.pop();
+        recStack.delete(nodeId);
         return null;
     };
 
     for (const nodeId of cycleNodes) {
-        const cycle = dfs(nodeId);
-        if (cycle) return cycle;
-        visited.clear();
-        path.length = 0;
+        if (!visited.has(nodeId)) {
+            const result = dfs(nodeId);
+            if (result) return result;
+        }
     }
 
-    return cycleNodes;
+    return cycleNodes; // Fallback
 }
 
 /**
@@ -417,12 +424,14 @@ function validateRequiredPorts(
  * @param nodes - All nodes in the workflow
  * @param edges - All edges connecting nodes
  * @param context - Optional validation context with registries for deep validation
+ * @param options - Optional validation options
  * @returns ValidationResult with errors and warnings
  */
 export function validateWorkflow(
     nodes: WorkflowNode[],
     edges: WorkflowEdge[],
-    context?: ValidationContext
+    context?: ValidationContext,
+    options?: ValidationOptions
 ): ValidationResult {
     const errors: ValidationError[] = [];
     const warnings: ValidationWarning[] = [];
@@ -434,6 +443,23 @@ export function validateWorkflow(
     const nodeMap = new Map<string, WorkflowNode>();
     for (const node of nodes) {
         nodeMap.set(node.id, node);
+    }
+
+    // 0. Strict Data Validation (opt-in)
+    if (options?.strictDataValidation) {
+        for (const node of nodes) {
+            const dataResult = validateNodeDataSafe(node.type, node.data);
+            if (!dataResult.success) {
+                for (const err of dataResult.errors) {
+                    errors.push({
+                        type: 'error',
+                        code: 'DATA_VALIDATION_ERROR',
+                        message: `Node "${node.id}" data${err.path ? `.${err.path}` : ''}: ${err.message}`,
+                        nodeId: node.id,
+                    });
+                }
+            }
+        }
     }
 
     // 1. Check Start Node
@@ -548,7 +574,7 @@ export function validateWorkflow(
                 // Extension validator threw - treat as error
                 errors.push({
                     type: 'error',
-                    code: 'INVALID_CONNECTION',
+                    code: 'EXTENSION_VALIDATION_ERROR',
                     message: `Validation failed for ${node.type} node "${
                         node.id
                     }": ${err instanceof Error ? err.message : String(err)}`,

@@ -55,6 +55,8 @@ export {
     StrictWorkflowDataSchema,
     getNodeDataSchema,
     validateNodeData,
+    validateNodeDataSafe,
+    type NodeDataValidationResult,
 } from './types';
 export {
     type MemoryAdapter,
@@ -110,6 +112,7 @@ export type {
     ValidationResult,
     ValidationError,
     ValidationWarning,
+    ValidationOptions,
 } from './validation';
 
 // Execution adapters

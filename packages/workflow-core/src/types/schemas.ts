@@ -63,9 +63,8 @@ const RouteDefinitionSchema = z.object({
 const RouterNodeDataSchema = BaseNodeDataSchema.extend({
     model: z.string().optional(),
     prompt: z.string().optional(),
-    routes: z
-        .array(RouteDefinitionSchema)
-        .min(1, 'Router requires at least one route'),
+    routes: z.array(RouteDefinitionSchema).optional(), // UI metadata only, edges are source of truth
+    fallbackBehavior: z.enum(['first', 'error', 'none']).optional(),
     errorHandling: NodeErrorConfigSchema,
     hitl: HITLConfigSchema,
 });
@@ -169,7 +168,38 @@ export function validateNodeData(nodeType: string, data: unknown) {
     return schema.safeParse(data);
 }
 
+/**
+ * Result of safe node data validation.
+ */
+export interface NodeDataValidationResult {
+    success: boolean;
+    errors: Array<{ path: string; message: string }>;
+}
+
+/**
+ * Validate node data safely, returning errors instead of throwing.
+ * Use this for runtime validation where you want to collect all errors.
+ */
+export function validateNodeDataSafe(
+    nodeType: string,
+    data: unknown
+): NodeDataValidationResult {
+    const schema = getNodeDataSchema(nodeType);
+    const result = schema.safeParse(data);
+    if (result.success) {
+        return { success: true, errors: [] };
+    }
+    return {
+        success: false,
+        errors: result.error.issues.map((issue) => ({
+            path: issue.path.join('.'),
+            message: issue.message,
+        })),
+    };
+}
+
 // Legacy loose schemas for backwards compatibility
+// NOTE: Uses z.any() intentionally to allow casting to WorkflowData
 export const WorkflowNodeSchema = z.object({
     id: z.string(),
     type: z.string(),

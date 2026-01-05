@@ -682,6 +682,13 @@ export interface ExecutionOptions {
 
     /** Resume execution from a specific node using prior outputs/session. */
     resumeFrom?: ResumeFromOptions;
+
+    /**
+     * Enable strict Zod validation of node.data (default: false).
+     * When true, node data is validated against type-specific schemas.
+     * Existing workflows with loosely-typed data may fail validation.
+     */
+    strictDataValidation?: boolean;
 }
 
 /**
@@ -820,6 +827,8 @@ export interface ExecutionContext {
     ) => void;
     /** Callback when a loop iteration starts */
     onLoopIteration?: (iteration: number, maxIterations: number) => void;
+    /** Callback for non-fatal warnings (e.g., router fallback) */
+    onWarning?: (message: string) => void;
 }
 
 /** Execution adapter interface */

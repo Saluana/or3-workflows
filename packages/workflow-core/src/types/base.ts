@@ -484,7 +484,9 @@ export type ValidationErrorCode =
     | 'MISSING_CONDITION_PROMPT'
     | 'INVALID_MAX_ITERATIONS'
     | 'MISSING_BODY'
-    | 'MISSING_EXIT';
+    | 'MISSING_EXIT'
+    | 'EXTENSION_VALIDATION_ERROR'
+    | 'DATA_VALIDATION_ERROR';
 
 export type ValidationWarningCode =
     | 'EMPTY_PROMPT'

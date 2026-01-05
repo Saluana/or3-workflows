@@ -13,6 +13,13 @@ import type {
     ToolDefinition,
 } from '../types';
 import { estimateTokenUsage } from '../compaction';
+import { z } from 'zod';
+
+/** Zod schema for validating router tool call arguments */
+const ToolArgsSchema = z.object({
+    route_id: z.string(),
+    reasoning: z.string().optional(),
+});
 
 /** Default model for router classification */
 const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
@@ -317,26 +324,32 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
             const call = result.toolCalls[0];
             try {
                 // Handle both parsed object and string arguments
-                const args =
+                const rawArgs =
                     typeof call.function.arguments === 'string'
                         ? JSON.parse(call.function.arguments)
                         : call.function.arguments;
 
-                const selectedId = args.route_id;
-                reasoning = args.reasoning || '';
+                // Validate with Zod for type safety
+                const parsed = ToolArgsSchema.safeParse(rawArgs);
+                if (parsed.success) {
+                    const { route_id, reasoning: r } = parsed.data;
+                    reasoning = r || '';
 
-                // Verify the ID exists
-                const route = routeOptions.find((r) => r.id === selectedId);
-                if (route) {
-                    selectedRouteId = route.id;
-                }
+                    // Verify the ID exists in available routes
+                    const route = routeOptions.find((opt) => opt.id === route_id);
+                    if (route) {
+                        selectedRouteId = route.id;
+                    }
 
-                if (debug) {
-                    console.log('[Router] Tool call result:', {
-                        selectedId,
-                        reasoning,
-                        valid: !!route,
-                    });
+                    if (debug) {
+                        console.log('[Router] Tool call result:', {
+                            selectedId: route_id,
+                            reasoning,
+                            valid: !!route,
+                        });
+                    }
+                } else if (debug) {
+                    console.warn('[Router] Invalid tool args:', parsed.error.message);
                 }
             } catch (e) {
                 if (debug) {
@@ -385,6 +398,14 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
 
             // Default: fallback to first route
             selectedRouteId = routeOptions[0].id;
+            
+            // Emit warning via callback if available
+            if (context.onWarning) {
+                context.onWarning(
+                    `Router "${node.id}" failed to select a valid route; falling back to "${selectedRouteId}".`
+                );
+            }
+            
             if (debug) {
                 console.warn(
                     `[Router] Failed to select valid route, falling back to first route: ${selectedRouteId}`
