@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { Handle, Position } from '@vue-flow/core';
 import NodeWrapper from './NodeWrapper.vue';
+import IconAgent from '../icons/IconAgent.vue';
 
 const props = defineProps<{
     id: string;
@@ -22,6 +23,9 @@ const modelShort = computed(() => {
     const parts = model.value.split('/');
     return parts[parts.length - 1];
 });
+const emit = defineEmits<{
+    (e: 'inspect'): void;
+}>();
 </script>
 
 <template>
@@ -30,13 +34,14 @@ const modelShort = computed(() => {
         :selected="selected"
         :status="status"
         variant="accent"
+        @inspect="emit('inspect')"
     >
         <Handle type="target" :position="Position.Top" class="handle" />
 
         <div class="agent-node">
             <div class="node-header">
                 <div class="icon-wrapper">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" class="bot-icon"><!-- Icon from Tabler Icons by Paweł Kuna - https://github.com/tabler/tabler-icons/blob/master/LICENSE --><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2zm6-4v2m-3 8v9m6-9v9M5 16l4-2m6 0l4 2M9 18h6M10 8v.01M14 8v.01"/></svg>
+                    <IconAgent class="bot-icon" />
                 </div>
                 <span class="node-label">{{ label }}</span>
                 <div v-if="status === 'active'" class="status-spinner"></div>

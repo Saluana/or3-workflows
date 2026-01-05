@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue';
 import { NodeData, WorkflowEditor } from '@or3/workflow-core';
+import IconAgent from '../icons/IconAgent.vue';
+import IconRouter from '../icons/IconRouter.vue';
+import IconParallel from '../icons/IconParallel.vue';
+import IconWhileLoop from '../icons/IconWhileLoop.vue';
+import IconSubflow from '../icons/IconSubflow.vue';
+import IconOutput from '../icons/IconOutput.vue';
+import IconPlus from '../icons/IconPlus.vue';
+import IconDragHandle from '../icons/IconDragHandle.vue';
+import IconInfoCircle from '../icons/IconInfoCircle.vue';
 
 const props = defineProps<{
     editor?: WorkflowEditor;
@@ -33,6 +42,7 @@ const nodeTypes = [
         description:
             'Connect to an AI model to process and respond to messages',
         colorVar: '--or3-color-accent',
+        icon: IconAgent,
         defaultData: {
             label: 'New Agent',
             model: 'z-ai/glm-4.6:exacto',
@@ -45,6 +55,7 @@ const nodeTypes = [
         description:
             'Route messages to different paths based on intent',
         colorVar: '--or3-color-warning',
+        icon: IconRouter,
         defaultData: {
             label: 'Decision',
             // Routes are derived from connected edges
@@ -56,6 +67,7 @@ const nodeTypes = [
         description:
             'Run multiple tasks at once and combine results',
         colorVar: '--or3-color-info',
+        icon: IconParallel,
         defaultData: {
             label: 'Parallel',
             model: 'z-ai/glm-4.6:exacto',
@@ -68,6 +80,7 @@ const nodeTypes = [
         label: 'Loop',
         description: 'Repeat a sequence until a condition is met',
         colorVar: '--or3-color-info',
+        icon: IconWhileLoop,
         defaultData: {
             label: 'Loop',
             conditionPrompt:
@@ -81,6 +94,7 @@ const nodeTypes = [
         label: 'Sub-workflow',
         description: 'Embed another workflow as a single node',
         colorVar: '--or3-color-secondary',
+        icon: IconSubflow,
         defaultData: {
             label: 'Sub-workflow',
             subflowId: '',
@@ -93,6 +107,7 @@ const nodeTypes = [
         label: 'Output',
         description: 'Define the final output format',
         colorVar: '--or3-color-success',
+        icon: IconOutput,
         defaultData: {
             label: 'Output',
             format: 'text',
@@ -220,16 +235,7 @@ const handleNodeTap = (
 <template>
     <div class="node-palette">
         <div class="palette-header">
-            <svg
-                class="plus-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-            >
-                <line x1="12" y1="5" x2="12" y2="19"></line>
-                <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
+            <IconPlus class="plus-icon" />
             <span>Add Nodes</span>
         </div>
 
@@ -250,36 +256,18 @@ const handleNodeTap = (
                         '--node-color': `var(${node.colorVar}, #8b5cf6)`,
                     }"
                 >
-                    <svg v-if="node.type === 'agent'" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"><!-- Icon from Tabler Icons by Paweł Kuna - https://github.com/tabler/tabler-icons/blob/master/LICENSE --><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2zm6-4v2m-3 8v9m6-9v9M5 16l4-2m6 0l4 2M9 18h6M10 8v.01M14 8v.01"/></svg>
-                    <svg v-else-if="node.type === 'router'" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"><!-- Icon from Tabler Icons by Paweł Kuna - https://github.com/tabler/tabler-icons/blob/master/LICENSE --><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 17a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zm12 0a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2zM9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2zM6 15v-1a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1m-6-6v3"/></svg>
-                    <svg v-else-if="node.type === 'parallel'" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"><!-- Icon from Tabler Icons by Paweł Kuna - https://github.com/tabler/tabler-icons/blob/master/LICENSE --><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M21 17h-5.397a5 5 0 0 1-4.096-2.133l-.514-.734A5 5 0 0 0 6.897 12H3m18-5h-5.395a5 5 0 0 0-4.098 2.135l-.51.73A5 5 0 0 1 6.9 12H3"/><path d="m18 10l3-3l-3-3m0 16l3-3l-3-3"/></g></svg>
-                    <svg v-else-if="node.type === 'whileLoop'" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"><!-- Icon from Tabler Icons by Paweł Kuna - https://github.com/tabler/tabler-icons/blob/master/LICENSE --><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6a3 3 0 1 0 6 0a3 3 0 0 0-6 0m18 5V8a2 2 0 0 0-2-2h-6l3 3m0-6l-3 3M3 13v3a2 2 0 0 0 2 2h6l-3-3m0 6l3-3m4 0a3 3 0 1 0 6 0a3 3 0 0 0-6 0"/></svg>
-                    <svg v-else-if="node.type === 'subflow'" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"><!-- Icon from Tabler Icons by Paweł Kuna - https://github.com/tabler/tabler-icons/blob/master/LICENSE --><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m14 12l6-3l-8-4l-8 4l6 3"/><path fill="currentColor" d="m10 12l-6 3l8 4l8-4l-6-3l-2 1z"/></g></svg>
-                    <svg v-else-if="node.type === 'output'" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"><!-- Icon from Tabler Icons by Paweł Kuna - https://github.com/tabler/tabler-icons/blob/master/LICENSE --><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.042 19.933A9.8 9.8 0 0 1 7.7 19L3 20l1.3-3.9C1.976 12.663 2.874 8.228 6.4 5.726c3.526-2.501 8.59-2.296 11.845.48c2.127 1.814 3.052 4.36 2.694 6.808M15 19l2 2l4-4"/></svg>
+                    <component :is="node.icon" />
                 </div>
                 <div class="node-info">
                     <span class="node-name">{{ node.label }}</span>
                     <span class="node-desc">{{ node.description }}</span>
                 </div>
-                <svg
-                    class="drag-handle"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                >
-                    <circle cx="9" cy="5" r="1"></circle>
-                    <circle cx="9" cy="12" r="1"></circle>
-                    <circle cx="9" cy="19" r="1"></circle>
-                    <circle cx="15" cy="5" r="1"></circle>
-                    <circle cx="15" cy="12" r="1"></circle>
-                    <circle cx="15" cy="19" r="1"></circle>
-                </svg>
+                <IconDragHandle class="drag-handle" />
             </div>
         </div>
 
         <div class="palette-hint">
-            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"><!-- Icon from Tabler Icons by Paweł Kuna - https://github.com/tabler/tabler-icons/blob/master/LICENSE --><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0-18 0m9-3h.01"/><path d="M11 12h1v4h1"/></g></svg>
+            <IconInfoCircle class="hint-icon" />
             <p>
                 Drag nodes onto the canvas to build your workflow. Connect nodes
                 by dragging from output to input handles.

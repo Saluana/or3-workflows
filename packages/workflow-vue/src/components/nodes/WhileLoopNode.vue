@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { Handle, Position } from '@vue-flow/core';
 import NodeWrapper from './NodeWrapper.vue';
+import IconWhileLoop from '../icons/IconWhileLoop.vue';
 
 const props = defineProps<{
     id: string;
@@ -30,16 +31,19 @@ const iteration = computed(() =>
 const modeLabel = computed(() =>
     loopMode.value === 'fixed' ? 'Fixed' : 'While'
 );
+const emit = defineEmits<{
+    (e: 'inspect'): void;
+}>();
 </script>
 
 <template>
-    <NodeWrapper :id="id" :selected="selected" :status="status" variant="info">
+    <NodeWrapper :id="id" :selected="selected" :status="status" variant="info" @inspect="emit('inspect')">
         <Handle type="target" :position="Position.Top" class="handle" />
 
         <div class="while-node">
             <div class="node-header">
                 <div class="icon-wrapper">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"><!-- Icon from Tabler Icons by Paweł Kuna - https://github.com/tabler/tabler-icons/blob/master/LICENSE --><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6a3 3 0 1 0 6 0a3 3 0 0 0-6 0m18 5V8a2 2 0 0 0-2-2h-6l3 3m0-6l-3 3M3 13v3a2 2 0 0 0 2 2h6l-3-3m0 6l3-3m4 0a3 3 0 1 0 6 0a3 3 0 0 0-6 0"/></svg>
+                    <IconWhileLoop class="loop-icon" />
                 </div>
                 <span class="node-label">{{ label }}</span>
                 <span class="pill" :class="{ fixed: loopMode === 'fixed' }">{{
@@ -108,6 +112,11 @@ const modeLabel = computed(() =>
     background: var(--or3-color-info-muted, rgba(59, 130, 246, 0.2));
     border-radius: var(--or3-radius-sm, 6px);
     color: var(--or3-color-info, #3b82f6);
+}
+
+.loop-icon {
+    width: 18px;
+    height: 18px;
 }
 
 .node-label {

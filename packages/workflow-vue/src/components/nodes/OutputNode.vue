@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { Handle, Position } from '@vue-flow/core';
 import NodeWrapper from './NodeWrapper.vue';
+import IconOutput from '../icons/IconOutput.vue';
 
 const props = defineProps<{
     id: string;
@@ -32,16 +33,25 @@ const formatLabel = computed(() => {
             return 'TXT';
     }
 });
+const emit = defineEmits<{
+    (e: 'inspect'): void;
+}>();
 </script>
 
 <template>
-    <NodeWrapper :id="id" :selected="selected" :status="status" variant="info">
+    <NodeWrapper
+        :id="id"
+        :selected="selected"
+        :status="status"
+        variant="info"
+        @inspect="emit('inspect')"
+    >
         <Handle type="target" :position="Position.Top" class="handle" />
 
         <div class="output-node">
             <div class="node-header">
                 <div class="icon-wrapper">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" class="output-icon"><!-- Icon from Tabler Icons by Paweł Kuna - https://github.com/tabler/tabler-icons/blob/master/LICENSE --><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.042 19.933A9.8 9.8 0 0 1 7.7 19L3 20l1.3-3.9C1.976 12.663 2.874 8.228 6.4 5.726c3.526-2.501 8.59-2.296 11.845.48c2.127 1.814 3.052 4.36 2.694 6.808M15 19l2 2l4-4"/></svg>
+                    <IconOutput class="output-icon" />
                 </div>
                 <span class="node-label">{{ label }}</span>
                 <div v-if="status === 'active'" class="status-spinner"></div>

@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { Handle, Position } from '@vue-flow/core';
 import NodeWrapper from './NodeWrapper.vue';
+import IconRouter from '../icons/IconRouter.vue';
 
 const props = defineProps<{
   id: string;
@@ -31,16 +32,19 @@ const handlePositions = computed(() => {
   if (count === 1) return [50];
   return routes.value.map((_, i) => ((i + 1) / (count + 1)) * 100);
 });
+const emit = defineEmits<{
+  (e: 'inspect'): void;
+}>();
 </script>
 
 <template>
-  <NodeWrapper :id="id" :selected="selected" :status="status" variant="warning">
+  <NodeWrapper :id="id" :selected="selected" :status="status" variant="warning" @inspect="emit('inspect')">
     <Handle type="target" :position="Position.Top" class="handle" />
     
     <div class="router-node">
       <div class="node-header">
         <div class="icon-wrapper">
-          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" class="branch-icon"><!-- Icon from Tabler Icons by Paweł Kuna - https://github.com/tabler/tabler-icons/blob/master/LICENSE --><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 17a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zm12 0a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2zM9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2zM6 15v-1a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1m-6-6v3"/></svg>
+          <IconRouter class="branch-icon" />
         </div>
         <span class="node-label">{{ label }}</span>
         <div v-if="status === 'active'" class="status-spinner"></div>

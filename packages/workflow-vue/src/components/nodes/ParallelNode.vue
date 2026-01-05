@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { Handle, Position } from '@vue-flow/core';
 import NodeWrapper from './NodeWrapper.vue';
+import IconParallel from '../icons/IconParallel.vue';
 
 const props = defineProps<{
     id: string;
@@ -27,17 +28,19 @@ const handlePositions = computed(() => {
     if (count === 1) return [50];
     return branches.value.map((_, i) => ((i + 1) / (count + 1)) * 100);
 });
+const emit = defineEmits<{
+    (e: 'inspect'): void;
+}>();
 </script>
 
 <template>
-    <NodeWrapper :id="id" :selected="selected" :status="status" variant="info">
+    <NodeWrapper :id="id" :selected="selected" :status="status" variant="info" @inspect="emit('inspect')">
         <Handle type="target" :position="Position.Top" class="handle" />
 
         <div class="parallel-node">
             <div class="node-header">
                 <div class="icon-wrapper">
-                    <svg
-                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" class="merge-icon"><!-- Icon from Tabler Icons by Paweł Kuna - https://github.com/tabler/tabler-icons/blob/master/LICENSE --><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M21 17h-5.397a5 5 0 0 1-4.096-2.133l-.514-.734A5 5 0 0 0 6.897 12H3m18-5h-5.395a5 5 0 0 0-4.098 2.135l-.51.73A5 5 0 0 1 6.9 12H3"/><path d="m18 10l3-3l-3-3m0 16l3-3l-3-3"/></g></svg>
+                    <IconParallel class="merge-icon" />
                 </div>
                 <span class="node-label">{{ label }}</span>
                 <div v-if="status === 'active'" class="status-spinner"></div>

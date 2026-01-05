@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import IconSettings from '../icons/IconSettings.vue';
 
 const props = withDefaults(
     defineProps<{
@@ -14,17 +15,31 @@ const props = withDefaults(
     }
 );
 
+const emit = defineEmits<{
+    (e: 'inspect'): void;
+}>();
+
 const classes = computed(() => [
     'node-wrapper',
     `status-${props.status}`,
     `variant-${props.variant}`,
     { selected: props.selected },
 ]);
+
+function onInspect(e: MouseEvent) {
+    e.stopPropagation();
+    emit('inspect');
+}
 </script>
 
 <template>
     <div :class="classes">
-        <div class="node-id">{{ id.slice(0, 6) }}</div>
+        <div class="node-meta-container">
+            <div class="node-id">{{ id.slice(0, 6) }}</div>
+            <button class="inspect-btn" title="Open inspector" aria-label="Open node inspector" @click="onInspect">
+                <IconSettings />
+            </button>
+        </div>
         <slot />
     </div>
 </template>
@@ -140,24 +155,56 @@ const classes = computed(() => [
     box-shadow: var(--or3-shadow-glow, 0 0 20px rgba(100, 116, 139, 0.3));
 }
 
-.node-id {
+.node-meta-container {
     position: absolute;
     top: 8px;
     right: 8px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    z-index: 10;
+}
+
+.node-wrapper:hover .node-meta-container,
+.node-wrapper.selected .node-meta-container {
+    opacity: 1;
+}
+
+.node-id {
     font-size: 10px;
     font-family: monospace;
     color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
     background: var(--or3-color-bg-tertiary, #18181d);
     padding: 2px 6px;
+    height: 20px;
+    display: flex;
+    align-items: center;
     border-radius: 4px;
     border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
     pointer-events: none;
-    opacity: 0;
-    transition: opacity 0.2s ease;
 }
 
-.node-wrapper:hover .node-id,
-.node-wrapper.selected .node-id {
-    opacity: 1;
+.inspect-btn {
+    font-size: 10px;
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+    background: var(--or3-color-bg-tertiary, #18181d);
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    cursor: pointer;
+    transition: all 0.2s ease;
 }
+
+.inspect-btn:hover {
+    color: var(--or3-color-text-primary, #ffffff);
+    background: var(--or3-color-bg-hover, rgba(255, 255, 255, 0.05));
+    border-color: var(--or3-color-accent, #8b5cf6);
+}
+
 </style>

@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { Handle, Position } from '@vue-flow/core';
 import NodeWrapper from './NodeWrapper.vue';
+import IconSubflow from '../icons/IconSubflow.vue';
 
 const props = defineProps<{
     id: string;
@@ -29,6 +30,9 @@ const inputCount = computed(() => {
     const mappings = props.data.inputMappings || {};
     return Object.keys(mappings).length;
 });
+const emit = defineEmits<{
+    (e: 'inspect'): void;
+}>();
 </script>
 
 <template>
@@ -37,13 +41,14 @@ const inputCount = computed(() => {
         :selected="selected"
         :status="status"
         variant="secondary"
+        @inspect="emit('inspect')"
     >
         <Handle type="target" :position="Position.Top" class="handle" />
 
         <div class="subflow-node">
             <div class="node-header">
                 <div class="icon-wrapper">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" class="subflow-icon"><!-- Icon from Tabler Icons by Paweł Kuna - https://github.com/tabler/tabler-icons/blob/master/LICENSE --><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m14 12l6-3l-8-4l-8 4l6 3"/><path fill="currentColor" d="m10 12l-6 3l8 4l8-4l-6-3l-2 1z"/></g></svg>
+                    <IconSubflow class="subflow-icon" />
                 </div>
                 <span class="node-label">{{ label }}</span>
                 <div v-if="status === 'active'" class="status-spinner"></div>

@@ -99,6 +99,12 @@ export class CommandManager {
 
         const node = this.editor.nodes[index];
 
+        // Prevent deletion of the start node
+        if (node.type === 'start') {
+            console.warn('Cannot delete start node');
+            return false;
+        }
+
         // Track edges being deleted for version cleanup
         const deletedEdgeIds = this.editor.edges
             .filter((e) => e.source === id || e.target === id)
@@ -357,6 +363,32 @@ export class CommandManager {
         );
 
         this.editor.emit('selectionUpdate');
+        return true;
+    }
+
+    /**
+     * Set the selection to a specific set of node IDs.
+     * Used for syncing Vue Flow's multi-selection (box-select) back to the editor.
+     */
+    public setSelection(selectedIds: string[]): boolean {
+        const selectedSet = new Set(selectedIds);
+        const changedNodeIds: string[] = [];
+
+        this.editor.nodes = this.editor.nodes.map((n) => {
+            const newSelected = selectedSet.has(n.id);
+            if (n.selected !== newSelected) {
+                changedNodeIds.push(n.id);
+            }
+            return { ...n, selected: newSelected };
+        });
+
+        // Only emit if something actually changed
+        if (changedNodeIds.length > 0) {
+            changedNodeIds.forEach((nodeId) =>
+                this.editor.incrementNodeVersion(nodeId)
+            );
+            this.editor.emit('selectionUpdate');
+        }
         return true;
     }
 

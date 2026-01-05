@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted, computed, nextTick } from 'vue';
 import {
     VueFlow,
     useVueFlow,
@@ -35,12 +35,27 @@ const props = defineProps<{
 
 type CreateNodeData = Parameters<WorkflowEditor['commands']['createNode']>[1];
 
+interface InspectableNodeProps {
+    id: string;
+}
+
 const emit = defineEmits<{
     (e: 'nodeClick', node: Node): void;
     (e: 'edgeClick', edge: Edge): void;
     (e: 'paneClick'): void;
     (e: 'drop', event: DragEvent): void;
+    (e: 'nodeInspect', node: Node): void;
 }>();
+
+function onNodeInspect(nodeProps: InspectableNodeProps) {
+    if (!canUseEditor()) return;
+    // Select the node first so the inspector shows the correct node
+    props.editor.commands.selectNode(nodeProps.id);
+    const node = nodes.value.find((n) => n.id === nodeProps.id);
+    if (node) {
+        emit('nodeInspect', node);
+    }
+}
 
 const {
     onConnect,
@@ -163,11 +178,6 @@ const syncFromEditor = () => {
 
     // Only update nodes if something changed
     if (nodesChanged) {
-        // Get current Vue Flow selection state to preserve it
-        const currentSelectedIds = new Set(
-            vueFlowNodes.value.filter((n: GraphNode) => n.selected).map(n => n.id)
-        );
-        
         nodes.value = editorNodes.map((n) => ({
             id: n.id,
             type: n.type,
@@ -176,8 +186,8 @@ const syncFromEditor = () => {
                 ...n.data,
                 status: props.nodeStatuses?.[n.id] || 'idle',
             },
-            // Preserve Vue Flow's selection state, falling back to editor state for new nodes
-            selected: currentSelectedIds.has(n.id) ? true : n.selected,
+            // Use editor's selection state as the source of truth
+            selected: n.selected,
         }));
 
         // Update cache
@@ -261,11 +271,45 @@ watch(
 let unsubUpdate: (() => void) | null = null;
 let unsubSelection: (() => void) | null = null;
 
+// Flag to prevent infinite selection sync loops
+let isSyncingSelectionFromEditor = false;
+
+// Optimize selection watching by computing a fingerprint
+const selectionFingerprint = computed(() =>
+    vueFlowNodes.value
+        .filter((n: GraphNode) => n.selected)
+        .map((n) => n.id)
+        .sort()
+        .join(',')
+);
+
+// Watch Vue Flow's selection state and sync it TO the editor
+// This handles box-select and other Vue Flow-initiated selection changes
+watch(
+    selectionFingerprint,
+    (newFingerprint, oldFingerprint) => {
+        if (!canUseEditor() || isSyncingSelectionFromEditor) return;
+        if (newFingerprint === oldFingerprint) return;
+
+        const selectedIds = newFingerprint ? newFingerprint.split(',') : [];
+        
+        // Sync Vue Flow's selection state TO the editor
+        props.editor.commands.setSelection(selectedIds);
+    }
+);
+
 onMounted(() => {
     if (!canUseEditor()) return;
     syncFromEditor();
     unsubUpdate = props.editor.on('update', syncFromEditor);
-    unsubSelection = props.editor.on('selectionUpdate', syncFromEditor);
+    
+    // When editor's selection changes, set flag before syncing to Vue Flow
+    unsubSelection = props.editor.on('selectionUpdate', () => {
+        isSyncingSelectionFromEditor = true;
+        syncFromEditor();
+        // Reset flag after Vue reactivity has settled
+        void nextTick(() => { isSyncingSelectionFromEditor = false; });
+    });
 
     // Fit view after initial render
     setTimeout(() => fitView({ padding: 0.2 }), 100);
@@ -334,20 +378,26 @@ const onDrop = (event: DragEvent) => {
     let parsed: unknown;
     try {
         parsed = JSON.parse(nodeDataStr);
-    } catch {
+    } catch (e) {
+        console.warn('Failed to parse dropped node data', e);
         return;
     }
 
-    // Validate incoming data has required label field
-    if (
-        typeof parsed !== 'object' ||
-        parsed === null ||
-        !('label' in parsed) ||
-        typeof (parsed as Record<string, unknown>).label !== 'string'
-    ) {
+    // Type guard for validation
+    const isValidNodeData = (data: unknown): data is { label: string } & Record<string, unknown> => {
+        return (
+            typeof data === 'object' &&
+            data !== null &&
+            'label' in data &&
+            typeof (data as Record<string, unknown>).label === 'string'
+        );
+    };
+
+    if (!isValidNodeData(parsed)) {
+        console.warn('Dropped node data is missing required "label" field');
         return;
     }
-    const nodeData = parsed as { label: string } & Record<string, unknown>;
+    const nodeData = parsed;
 
     const position = screenToFlowCoordinate({
         x: event.clientX,
@@ -428,7 +478,7 @@ const onKeyDown = (event: KeyboardEvent) => {
             .filter((edge: GraphEdge) => edge.selected)
             .map((edge: GraphEdge) => edge.id);
         const selectedNodeIds = vueFlowNodes.value
-            .filter((node: GraphNode) => node.selected)
+            .filter((node: GraphNode) => node.selected && node.type !== 'start')
             .map((node: GraphNode) => node.id);
 
         if (selectedEdgeIds.length) {
@@ -519,49 +569,43 @@ defineExpose({
 
             <template #node-agent="nodeProps">
                 <AgentNode
-                    :id="nodeProps.id"
-                    :data="nodeProps.data"
-                    :selected="nodeProps.selected"
+                    v-bind="nodeProps"
+                    @inspect="onNodeInspect(nodeProps)"
                 />
             </template>
 
             <template #node-router="nodeProps">
                 <RouterNode
-                    :id="nodeProps.id"
-                    :data="nodeProps.data"
-                    :selected="nodeProps.selected"
+                    v-bind="nodeProps"
+                    @inspect="onNodeInspect(nodeProps)"
                 />
             </template>
 
             <template #node-parallel="nodeProps">
                 <ParallelNode
-                    :id="nodeProps.id"
-                    :data="nodeProps.data"
-                    :selected="nodeProps.selected"
+                    v-bind="nodeProps"
+                    @inspect="onNodeInspect(nodeProps)"
                 />
             </template>
 
             <template #node-whileLoop="nodeProps">
                 <WhileLoopNode
-                    :id="nodeProps.id"
-                    :data="nodeProps.data"
-                    :selected="nodeProps.selected"
+                    v-bind="nodeProps"
+                    @inspect="onNodeInspect(nodeProps)"
                 />
             </template>
 
             <template #node-subflow="nodeProps">
                 <SubflowNode
-                    :id="nodeProps.id"
-                    :data="nodeProps.data"
-                    :selected="nodeProps.selected"
+                    v-bind="nodeProps"
+                    @inspect="onNodeInspect(nodeProps)"
                 />
             </template>
 
             <template #node-output="nodeProps">
                 <OutputNode
-                    :id="nodeProps.id"
-                    :data="nodeProps.data"
-                    :selected="nodeProps.selected"
+                    v-bind="nodeProps"
+                    @inspect="onNodeInspect(nodeProps)"
                 />
             </template>
 
