@@ -43,19 +43,7 @@ const inputCount = computed(() => {
         <div class="subflow-node">
             <div class="node-header">
                 <div class="icon-wrapper">
-                    <svg
-                        class="subflow-icon"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                    >
-                        <rect x="3" y="3" width="7" height="7" rx="1"></rect>
-                        <rect x="14" y="3" width="7" height="7" rx="1"></rect>
-                        <rect x="8.5" y="14" width="7" height="7" rx="1"></rect>
-                        <path d="M6.5 10v2a2 2 0 002 2h1"></path>
-                        <path d="M17.5 10v2a2 2 0 01-2 2h-1"></path>
-                    </svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" class="subflow-icon"><!-- Icon from Tabler Icons by Paweł Kuna - https://github.com/tabler/tabler-icons/blob/master/LICENSE --><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m14 12l6-3l-8-4l-8 4l6 3"/><path fill="currentColor" d="m10 12l-6 3l8 4l8-4l-6-3l-2 1z"/></g></svg>
                 </div>
                 <span class="node-label">{{ label }}</span>
                 <div v-if="status === 'active'" class="status-spinner"></div>

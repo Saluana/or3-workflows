@@ -39,16 +39,7 @@ const modeLabel = computed(() =>
         <div class="while-node">
             <div class="node-header">
                 <div class="icon-wrapper">
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                    >
-                        <path d="M5 12h4" />
-                        <path d="M15 12h4" />
-                        <path d="M9 12c0-4 6-4 6 0s-6 4-6 0Z" />
-                    </svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"><!-- Icon from Tabler Icons by Paweł Kuna - https://github.com/tabler/tabler-icons/blob/master/LICENSE --><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6a3 3 0 1 0 6 0a3 3 0 0 0-6 0m18 5V8a2 2 0 0 0-2-2h-6l3 3m0-6l-3 3M3 13v3a2 2 0 0 0 2 2h6l-3-3m0 6l3-3m4 0a3 3 0 1 0 6 0a3 3 0 0 0-6 0"/></svg>
                 </div>
                 <span class="node-label">{{ label }}</span>
                 <span class="pill" :class="{ fixed: loopMode === 'fixed' }">{{
