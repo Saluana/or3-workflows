@@ -32,7 +32,9 @@ export function resolveAttachmentUrl(attachment: {
 }): string | null {
     if (attachment.url) return attachment.url;
     if (attachment.content && attachment.mimeType) {
-        return `data:${attachment.mimeType};base64,${attachment.content}`;
+        const url = `data:${attachment.mimeType};base64,${attachment.content}`;
+        attachment.url = url;
+        return url;
     }
     return null;
 }

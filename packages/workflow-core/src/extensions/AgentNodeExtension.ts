@@ -15,6 +15,7 @@ import {
     type OpenRouterContentPart,
     type ToolForLLM,
     type ToolLoopResult,
+    resolveAttachmentUrl,
 } from './shared';
 
 /** Default model for agent nodes */
@@ -285,17 +286,22 @@ export const AgentNodeExtension: NodeExtension = {
 
         // Construct user content with attachments
         let userContent: string | OpenRouterContentPart[] = context.input;
-        if (context.attachments && context.attachments.length > 0) {
-            console.log('[AgentNodeExtension] Processing attachments:', context.attachments.map(a => ({
-                type: a.type,
-                mimeType: a.mimeType,
-                name: a.name,
-                urlLength: a.url?.length || 0,
-            })));
+        const debug = context.debug ?? false;
+        if (debug && context.attachments && context.attachments.length > 0) {
+            console.log(
+                '[AgentNodeExtension] Processing attachments:',
+                context.attachments.map((a) => ({
+                    type: a.type,
+                    mimeType: a.mimeType,
+                    name: a.name,
+                    urlLength: a.url?.length || 0,
+                }))
+            );
+        }
             
-            const contentParts: OpenRouterContentPart[] = [
-                { type: 'text', text: context.input },
-            ];
+        const contentParts: OpenRouterContentPart[] = [
+            { type: 'text', text: context.input },
+        ];
 
             for (const attachment of context.attachments) {
                 // Skip unsupported modalities (but NOT files - OpenRouter handles PDFs for all models)
@@ -308,11 +314,7 @@ export const AgentNodeExtension: NodeExtension = {
                     continue;
                 }
 
-                const url =
-                    attachment.url ||
-                    (attachment.content
-                        ? `data:${attachment.mimeType};base64,${attachment.content}`
-                        : null);
+                const url = resolveAttachmentUrl(attachment);
 
                 if (!url) continue;
 

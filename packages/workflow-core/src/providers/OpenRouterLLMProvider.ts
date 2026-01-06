@@ -7,6 +7,7 @@ import type {
     ToolDefinition,
     ToolCallResult,
 } from '../types';
+import { modelRegistry } from '../models';
 
 type ChatOptions = {
     temperature?: number;
@@ -475,6 +476,36 @@ export class OpenRouterLLMProvider implements LLMProvider {
         // Check cache first
         if (this.modelCapabilitiesCache.has(modelId)) {
             return this.modelCapabilitiesCache.get(modelId) || null;
+        }
+
+        const registered = modelRegistry.get(modelId);
+        if (registered) {
+            const inputModalities = Array.isArray(
+                registered.architecture?.inputModalities
+            )
+                ? registered.architecture?.inputModalities
+                : ['text'];
+            const outputModalities = Array.isArray(
+                registered.architecture?.outputModalities
+            )
+                ? registered.architecture?.outputModalities
+                : ['text'];
+            const supportedParameters = Array.isArray(
+                registered.supportedParameters
+            )
+                ? registered.supportedParameters
+                : ['temperature', 'max_tokens', 'top_p'];
+
+            const capabilities: ModelCapabilities = {
+                id: modelId,
+                name: registered.name || modelId.split('/').pop() || modelId,
+                inputModalities,
+                outputModalities,
+                contextLength: registered.contextLength || 4096,
+                supportedParameters,
+            };
+            this.modelCapabilitiesCache.set(modelId, capabilities);
+            return capabilities;
         }
 
         // Infer capabilities from model naming conventions
