@@ -138,11 +138,25 @@ export interface ToolCallResult {
 }
 
 /**
+ * Content part types for multimodal messages (OpenRouter SDK format).
+ */
+export type ChatMessageContentPart =
+    | { type: 'text'; text: string }
+    | { type: 'image_url'; imageUrl: { url: string; detail?: 'auto' | 'low' | 'high' } }
+    | { type: 'file'; file: { filename: string; fileData: string } };
+
+/**
+ * Chat message content - can be a string or array of content parts.
+ */
+export type ChatMessageContent = string | ChatMessageContentPart[];
+
+/**
  * Chat message for conversation history.
+ * Supports both simple string content and multimodal content arrays.
  */
 export interface ChatMessage {
     role: 'system' | 'user' | 'assistant';
-    content: string;
+    content: ChatMessageContent;
 }
 
 /**

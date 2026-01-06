@@ -13,3 +13,6 @@ export * from './configure.js';
 
 // StarterKit Bundle
 export * from './StarterKit.js';
+
+// Shared Utilities
+export * from './shared.js';

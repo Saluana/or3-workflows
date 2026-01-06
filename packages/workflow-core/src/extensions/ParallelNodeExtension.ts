@@ -12,65 +12,16 @@ import type {
     ValidationWarning,
 } from '../types';
 import { estimateTokenUsage } from '../compaction';
+import {
+    type ToolForLLM,
+    type ToolLoopResult,
+    buildUserContentWithAttachments,
+} from './shared';
 
 const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
 
 /** Default maximum number of tool call iterations */
 const DEFAULT_MAX_TOOL_ITERATIONS = 10;
-
-/** Content part in OpenRouter SDK format (camelCase) */
-type OpenRouterContentPart =
-    | { type: 'text'; text: string }
-    | { type: 'image_url'; imageUrl: { url: string; detail?: 'auto' | 'low' | 'high' } };
-
-function resolveAttachmentUrl(attachment: {
-    url?: string;
-    content?: string;
-    mimeType?: string;
-}): string | null {
-    if (attachment.url) return attachment.url;
-    if (attachment.content && attachment.mimeType) {
-        return `data:${attachment.mimeType};base64,${attachment.content}`;
-    }
-    return null;
-}
-
-function buildUserContentWithAttachments(
-    input: string,
-    attachments: ExecutionContext['attachments'],
-    supportsImages: boolean
-): string | OpenRouterContentPart[] {
-    if (!supportsImages || !attachments || attachments.length === 0) {
-        return input;
-    }
-
-    const parts: OpenRouterContentPart[] = [{ type: 'text', text: input }];
-    for (const attachment of attachments) {
-        if (attachment.type !== 'image') continue;
-        const url = resolveAttachmentUrl(attachment);
-        if (!url) continue;
-        parts.push({ type: 'image_url', imageUrl: { url } });
-    }
-
-    return parts.length > 1 ? parts : input;
-}
-
-/** Tool definition for LLM calls */
-interface ToolForLLM {
-    type: 'function';
-    function: {
-        name: string;
-        description?: string;
-        parameters?: Record<string, unknown>;
-    };
-}
-
-/** Result from running a tool loop */
-interface ToolLoopResult {
-    finalContent: string;
-    iterations: number;
-    messages: ChatMessage[];
-}
 
 /**
  * Run the tool execution loop for a branch.
@@ -86,6 +37,7 @@ async function runToolLoop(
     branchLabel: string,
     maxIterations: number
 ): Promise<ToolLoopResult> {
+
     const currentMessages = [...messages];
     let iterations = 0;
     let finalContent = '';
@@ -346,9 +298,10 @@ export const ParallelNodeExtension: NodeExtension = {
                         false;
                 }
                 if (context.attachments && context.attachments.length > 0) {
-                    if (!supportsImages) {
+                    const hasImages = context.attachments.some(a => a.type === 'image');
+                    if (!supportsImages && hasImages) {
                         console.warn(
-                            `Model ${branchModel} does not support image input; skipping attachments for branch "${branch.label}".`
+                            `Model ${branchModel} does not support image input; skipping image attachments for branch "${branch.label}" (PDFs will still be included).`
                         );
                     }
                 }

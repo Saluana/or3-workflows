@@ -13,6 +13,7 @@ import type {
     ToolDefinition,
 } from '../types';
 import { estimateTokenUsage } from '../compaction';
+import { buildUserContentWithAttachments } from './shared';
 import { z } from 'zod';
 
 /** Zod schema for validating router tool call arguments */
@@ -24,43 +25,6 @@ const ToolArgsSchema = z.object({
 /** Default model for router classification */
 const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
 
-/** Content part in OpenRouter SDK format (camelCase) */
-type OpenRouterContentPart =
-    | { type: 'text'; text: string }
-    | { type: 'image_url'; imageUrl: { url: string; detail?: 'auto' | 'low' | 'high' } };
-
-function resolveAttachmentUrl(attachment: {
-    url?: string;
-    content?: string;
-    mimeType?: string;
-}): string | null {
-    if (attachment.url) return attachment.url;
-    if (attachment.content && attachment.mimeType) {
-        return `data:${attachment.mimeType};base64,${attachment.content}`;
-    }
-    return null;
-}
-
-function buildUserContentWithAttachments(
-    input: string,
-    attachments: ExecutionContext['attachments'],
-    supportsImages: boolean
-): string | OpenRouterContentPart[] {
-    if (!supportsImages || !attachments || attachments.length === 0) {
-        return input;
-    }
-
-    const parts: OpenRouterContentPart[] = [{ type: 'text', text: input }];
-    for (const attachment of attachments) {
-        if (attachment.type !== 'image') continue;
-        const url = resolveAttachmentUrl(attachment);
-        if (!url) continue;
-        parts.push({ type: 'image_url', imageUrl: { url } });
-    }
-
-    return parts.length > 1 ? parts : input;
-}
-
 /**
  * Router Node Extension
  *
@@ -68,6 +32,7 @@ function buildUserContentWithAttachments(
  * which route to take based on the input content.
  */
 export const RouterNodeExtension: NodeExtension = {
+
     name: 'router',
     type: 'node',
 

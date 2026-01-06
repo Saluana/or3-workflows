@@ -11,6 +11,11 @@ import type {
 } from '../types';
 import type { HITLRequest } from '../hitl';
 import { estimateTokenUsage } from '../compaction';
+import {
+    type OpenRouterContentPart,
+    type ToolForLLM,
+    type ToolLoopResult,
+} from './shared';
 
 /** Default model for agent nodes */
 const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
@@ -18,32 +23,8 @@ const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
 /** Default maximum number of tool call iterations to prevent infinite loops */
 const DEFAULT_MAX_TOOL_ITERATIONS = 10;
 
-/** Tool definition for LLM calls (without handler) */
-interface ToolForLLM {
-    type: 'function';
-    function: {
-        name: string;
-        description?: string;
-        parameters?: Record<string, unknown>;
-    };
-}
-
-/** Result from running a tool loop */
-interface ToolLoopResult {
-    finalContent: string;
-    iterations: number;
-    messages: ChatMessage[];
-}
-
-/** Content part in OpenRouter SDK format (camelCase) */
-type OpenRouterContentPart =
-    | { type: 'text'; text: string }
-    | {
-          type: 'image_url';
-          imageUrl: { url: string; detail?: 'auto' | 'low' | 'high' };
-      };
-
 /**
+
  * Run the tool execution loop until completion or max iterations.
  * This handles calling the LLM, executing tool calls, and collecting results.
  */
@@ -305,13 +286,22 @@ export const AgentNodeExtension: NodeExtension = {
         // Construct user content with attachments
         let userContent: string | OpenRouterContentPart[] = context.input;
         if (context.attachments && context.attachments.length > 0) {
+            console.log('[AgentNodeExtension] Processing attachments:', context.attachments.map(a => ({
+                type: a.type,
+                mimeType: a.mimeType,
+                name: a.name,
+                urlLength: a.url?.length || 0,
+            })));
+            
             const contentParts: OpenRouterContentPart[] = [
                 { type: 'text', text: context.input },
             ];
 
             for (const attachment of context.attachments) {
-                // Skip unsupported modalities
-                if (!supportedModalities.includes(attachment.type)) {
+                // Skip unsupported modalities (but NOT files - OpenRouter handles PDFs for all models)
+                // Per OpenRouter docs: "This feature works on any model on OpenRouter"
+                // OpenRouter parses PDFs server-side for models without native file support
+                if (attachment.type !== 'file' && !supportedModalities.includes(attachment.type)) {
                     console.warn(
                         `Model ${model} does not support ${attachment.type} modality, skipping attachment`
                     );
@@ -333,7 +323,16 @@ export const AgentNodeExtension: NodeExtension = {
                             imageUrl: { url },
                         });
                         break;
-                    // TODO: Add support for other modalities when OpenRouter standardizes them
+                    case 'file':
+                        // PDF and other file attachments
+                        contentParts.push({
+                            type: 'file',
+                            file: {
+                                filename: attachment.name || 'document',
+                                fileData: url,
+                            },
+                        });
+                        break;
                 }
             }
 
