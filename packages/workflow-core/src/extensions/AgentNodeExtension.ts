@@ -91,9 +91,11 @@ async function runToolLoop(
         }
 
         // Add assistant message with tool calls to conversation
+        // Some providers (e.g., Moonshot AI) require non-empty content even with tool_calls
+        const assistantContent = result.content || '[Calling tools...]';
         currentMessages.push({
             role: 'assistant' as const,
-            content: result.content || '',
+            content: assistantContent,
         });
 
         // Execute each tool call
@@ -298,16 +300,20 @@ export const AgentNodeExtension: NodeExtension = {
                 }))
             );
         }
-            
-        const contentParts: OpenRouterContentPart[] = [
-            { type: 'text', text: context.input },
-        ];
+
+        if (context.attachments && context.attachments.length > 0) {
+            const contentParts: OpenRouterContentPart[] = [
+                { type: 'text', text: context.input },
+            ];
 
             for (const attachment of context.attachments) {
                 // Skip unsupported modalities (but NOT files - OpenRouter handles PDFs for all models)
                 // Per OpenRouter docs: "This feature works on any model on OpenRouter"
                 // OpenRouter parses PDFs server-side for models without native file support
-                if (attachment.type !== 'file' && !supportedModalities.includes(attachment.type)) {
+                if (
+                    attachment.type !== 'file' &&
+                    !supportedModalities.includes(attachment.type)
+                ) {
                     console.warn(
                         `Model ${model} does not support ${attachment.type} modality, skipping attachment`
                     );

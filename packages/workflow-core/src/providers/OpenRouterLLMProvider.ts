@@ -180,7 +180,9 @@ export class OpenRouterLLMProvider implements LLMProvider {
         return messages.some((message) => {
             const content = message.content;
             if (!Array.isArray(content)) return false;
-            return content.some((part) => (part as { type?: string }).type === 'file');
+            return content.some(
+                (part) => (part as { type?: string }).type === 'file'
+            );
         });
     }
 
@@ -307,9 +309,11 @@ export class OpenRouterLLMProvider implements LLMProvider {
             Accept: 'text/event-stream',
         };
 
-        const clientOptions = (this.client as {
-            _options?: { httpReferer?: string; xTitle?: string };
-        })._options;
+        const clientOptions = (
+            this.client as {
+                _options?: { httpReferer?: string; xTitle?: string };
+            }
+        )._options;
         if (clientOptions?.httpReferer) {
             headers['HTTP-Referer'] = clientOptions.httpReferer;
         }
@@ -332,10 +336,9 @@ export class OpenRouterLLMProvider implements LLMProvider {
                 // ignore read errors
             }
             throw new Error(
-                `OpenRouter request failed ${response.status} ${response.statusText}: ${responseText.slice(
-                    0,
-                    300
-                )}`
+                `OpenRouter request failed ${response.status} ${
+                    response.statusText
+                }: ${responseText.slice(0, 300)}`
             );
         }
 
@@ -392,21 +395,29 @@ export class OpenRouterLLMProvider implements LLMProvider {
                 for (const choice of choices) {
                     const delta = choice.delta || {};
 
-                    const reasoningDetails = (delta as {
-                        reasoning_details?: Array<{
-                            type?: string;
-                            text?: string;
-                            summary?: string;
-                        }>;
-                    }).reasoning_details;
+                    const reasoningDetails = (
+                        delta as {
+                            reasoning_details?: Array<{
+                                type?: string;
+                                text?: string;
+                                summary?: string;
+                            }>;
+                        }
+                    ).reasoning_details;
                     const firstReasoning = reasoningDetails?.[0];
                     if (firstReasoning?.type === 'reasoning.text') {
-                        if (firstReasoning.text) pushReasoning(firstReasoning.text);
+                        if (firstReasoning.text)
+                            pushReasoning(firstReasoning.text);
                     } else if (firstReasoning?.type === 'reasoning.summary') {
                         if (firstReasoning.summary)
                             pushReasoning(firstReasoning.summary);
-                    } else if (typeof (delta as { reasoning?: unknown }).reasoning === 'string') {
-                        pushReasoning((delta as { reasoning: string }).reasoning);
+                    } else if (
+                        typeof (delta as { reasoning?: unknown }).reasoning ===
+                        'string'
+                    ) {
+                        pushReasoning(
+                            (delta as { reasoning: string }).reasoning
+                        );
                     }
 
                     const deltaContent = delta.content;
@@ -414,8 +425,9 @@ export class OpenRouterLLMProvider implements LLMProvider {
                         pushText(deltaContent);
                     } else if (Array.isArray(deltaContent)) {
                         for (const part of deltaContent) {
-                            const text = (part as { type?: string; text?: string })
-                                .text;
+                            const text = (
+                                part as { type?: string; text?: string }
+                            ).text;
                             if (
                                 (part as { type?: string }).type === 'text' &&
                                 typeof text === 'string'
@@ -425,7 +437,9 @@ export class OpenRouterLLMProvider implements LLMProvider {
                         }
                     }
 
-                    if (typeof (delta as { text?: unknown }).text === 'string') {
+                    if (
+                        typeof (delta as { text?: unknown }).text === 'string'
+                    ) {
                         pushText((delta as { text: string }).text);
                     }
 
@@ -484,12 +498,12 @@ export class OpenRouterLLMProvider implements LLMProvider {
                 registered.architecture?.inputModalities
             )
                 ? registered.architecture?.inputModalities
-                : ['text'];
+                : (['text'] as const);
             const outputModalities = Array.isArray(
                 registered.architecture?.outputModalities
             )
                 ? registered.architecture?.outputModalities
-                : ['text'];
+                : (['text'] as const);
             const supportedParameters = Array.isArray(
                 registered.supportedParameters
             )
@@ -499,8 +513,10 @@ export class OpenRouterLLMProvider implements LLMProvider {
             const capabilities: ModelCapabilities = {
                 id: modelId,
                 name: registered.name || modelId.split('/').pop() || modelId,
-                inputModalities,
-                outputModalities,
+                inputModalities:
+                    inputModalities as ModelCapabilities['inputModalities'],
+                outputModalities:
+                    outputModalities as ModelCapabilities['outputModalities'],
                 contextLength: registered.contextLength || 4096,
                 supportedParameters,
             };
