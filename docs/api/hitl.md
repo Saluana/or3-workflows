@@ -13,7 +13,7 @@ import {
     type HITLAdapter,
     InMemoryHITLAdapter,
     createDefaultHITLConfig,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 ```
 
 ## Overview
@@ -264,7 +264,7 @@ hitl: {
 ```vue
 <script setup lang="ts">
 import { ref } from 'vue';
-import type { HITLRequest, HITLResponse } from '@or3/workflow-core';
+import type { HITLRequest, HITLResponse } from 'or3-workflow-core';
 
 const showModal = ref(false);
 const currentRequest = ref<HITLRequest | null>(null);
@@ -392,7 +392,7 @@ import {
     isHITLConfig,
     isHITLRequest,
     isHITLResponse,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 if (isHITLConfig(nodeData.hitl)) {
     // Safe to use as HITLConfig
@@ -468,7 +468,7 @@ interface HITLAdapter {
 The default in-memory implementation is suitable for interactive workflows where the process stays alive:
 
 ```typescript
-import { InMemoryHITLAdapter } from '@or3/workflow-core';
+import { InMemoryHITLAdapter } from 'or3-workflow-core';
 
 const hitlAdapter = new InMemoryHITLAdapter();
 
@@ -491,7 +491,7 @@ import type {
     HITLAdapter,
     HITLRequest,
     HITLResponse,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 import Redis from 'ioredis';
 
 export class RedisHITLAdapter implements HITLAdapter {

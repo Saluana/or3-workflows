@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import {
     OpenRouterExecutionAdapter,
     type WorkflowData,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 import { OpenRouter } from '@openrouter/sdk';
 
 async function fileExists(path: string): Promise<boolean> {

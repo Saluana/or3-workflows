@@ -1,5 +1,5 @@
 import { ref } from 'vue';
-import type { StorageAdapter, WorkflowData, WorkflowSummary } from '@or3/workflow-core';
+import type { StorageAdapter, WorkflowData, WorkflowSummary } from 'or3-workflow-core';
 
 export interface UseWorkflowStorageReturn {
   // State

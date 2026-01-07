@@ -5,13 +5,13 @@ The `StarterKit` is a bundle of all built-in extensions with sensible defaults. 
 ## Import
 
 ```typescript
-import { StarterKit } from '@or3/workflow-core';
+import { StarterKit } from 'or3-workflow-core';
 ```
 
 ## Basic Usage
 
 ```typescript
-import { WorkflowEditor, StarterKit } from '@or3/workflow-core';
+import { WorkflowEditor, StarterKit } from 'or3-workflow-core';
 
 const editor = new WorkflowEditor({
     extensions: StarterKit.configure(),
@@ -157,7 +157,7 @@ interface SubflowOptions {
 **Example:**
 
 ```typescript
-import { DefaultSubflowRegistry } from '@or3/workflow-core';
+import { DefaultSubflowRegistry } from 'or3-workflow-core';
 
 const registry = new DefaultSubflowRegistry();
 registry.register({
@@ -215,7 +215,7 @@ const defaults = StarterKit.getDefaultOptions();
 Combine StarterKit with your own extensions:
 
 ```typescript
-import { WorkflowEditor, StarterKit } from '@or3/workflow-core';
+import { WorkflowEditor, StarterKit } from 'or3-workflow-core';
 import { NotificationExtension } from './extensions';
 
 const editor = new WorkflowEditor({
@@ -278,7 +278,7 @@ StarterKit.configure({
 With memory support:
 
 ```typescript
-import { InMemoryAdapter } from '@or3/workflow-core';
+import { InMemoryAdapter } from 'or3-workflow-core';
 
 StarterKit.configure({
     memory: {

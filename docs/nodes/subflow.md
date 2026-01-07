@@ -13,7 +13,7 @@ import {
     SubflowExtension,
     DefaultSubflowRegistry,
     type SubflowDefinition,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 ```
 
 ## Configuration
@@ -85,7 +85,7 @@ interface SubflowOutput {
 ### Creating a Registry
 
 ```typescript
-import { DefaultSubflowRegistry } from '@or3/workflow-core';
+import { DefaultSubflowRegistry } from 'or3-workflow-core';
 
 const registry = new DefaultSubflowRegistry();
 ```
@@ -259,7 +259,7 @@ const adapter = new OpenRouterExecutionAdapter(client, {
 ### Validate Input Mappings
 
 ```typescript
-import { validateInputMappings } from '@or3/workflow-core';
+import { validateInputMappings } from 'or3-workflow-core';
 
 const result = validateInputMappings(subflow, node.data.inputMappings || {});
 
@@ -275,7 +275,7 @@ if (!result.valid) {
 Get dynamic ports for a subflow node based on its definition:
 
 ```typescript
-import { getSubflowPorts } from '@or3/workflow-core';
+import { getSubflowPorts } from 'or3-workflow-core';
 
 const { inputs, outputs } = getSubflowPorts(subflowId, registry);
 ```
@@ -285,7 +285,7 @@ const { inputs, outputs } = getSubflowPorts(subflowId, registry);
 Create default input mappings from a subflow definition:
 
 ```typescript
-import { createDefaultInputMappings } from '@or3/workflow-core';
+import { createDefaultInputMappings } from 'or3-workflow-core';
 
 const mappings = createDefaultInputMappings(subflowId, registry);
 ```

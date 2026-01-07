@@ -4,15 +4,15 @@ Vue 3 composables for workflow editing, execution, and storage.
 
 ## Overview
 
-The `@or3/workflow-vue` package provides composables that integrate the workflow engine with Vue's reactivity system.
+The `or3-workflow-vue` package provides composables that integrate the workflow engine with Vue's reactivity system.
 
 ## useWorkflowEditor
 
 Create and manage a `WorkflowEditor` instance with Vue reactivity:
 
 ```typescript
-import { useWorkflowEditor } from '@or3/workflow-vue';
-import { StarterKit } from '@or3/workflow-core';
+import { useWorkflowEditor } from 'or3-workflow-vue';
+import { StarterKit } from 'or3-workflow-core';
 
 const editor = useWorkflowEditor({
     extensions: StarterKit.configure(),
@@ -58,9 +58,9 @@ type UseWorkflowEditorReturn = import('vue').ShallowRef<WorkflowEditor | null>;
 
 ```vue
 <script setup lang="ts">
-import { WorkflowCanvas } from '@or3/workflow-vue';
-import { useWorkflowEditor } from '@or3/workflow-vue';
-import { StarterKit } from '@or3/workflow-core';
+import { WorkflowCanvas } from 'or3-workflow-vue';
+import { useWorkflowEditor } from 'or3-workflow-vue';
+import { StarterKit } from 'or3-workflow-core';
 
 const editor = useWorkflowEditor({
     extensions: StarterKit.configure(),
@@ -92,43 +92,27 @@ function addAgent() {
 Track workflow execution state:
 
 ```typescript
-import { useExecutionState } from '@or3/workflow-vue';
+import { useExecutionState } from 'or3-workflow-vue';
 
-const {
-    isExecuting,
-    isPaused,
-    currentNode,
-    executedNodes,
-    pendingNodes,
-    errors,
-    progress,
-} = useExecutionState(editor);
+const { state, setRunning, setNodeStatus, setError, reset } =
+    useExecutionState();
 ```
 
 ### Returns
 
 ```typescript
 interface UseExecutionStateReturn {
-    /** Currently executing */
-    isExecuting: ComputedRef<boolean>;
-
-    /** Paused (e.g., waiting for HITL) */
-    isPaused: ComputedRef<boolean>;
-
-    /** Currently executing node ID */
-    currentNode: ComputedRef<string | null>;
-
-    /** Successfully executed node IDs */
-    executedNodes: ComputedRef<string[]>;
-
-    /** Nodes waiting to execute */
-    pendingNodes: ComputedRef<string[]>;
-
-    /** Execution errors */
-    errors: ComputedRef<ExecutionError[]>;
-
-    /** Progress 0-100 */
-    progress: ComputedRef<number>;
+    state: DeepReadonly<Ref<ExecutionState>>;
+    setRunning: (isRunning: boolean) => void;
+    setStreamingContent: (content: string) => void;
+    appendStreamingContent: (content: string) => void;
+    setNodeStatus: (
+        nodeId: string,
+        status: 'idle' | 'active' | 'completed' | 'error'
+    ) => void;
+    setCurrentNodeId: (nodeId: string | null) => void;
+    setError: (error: Error | null) => void;
+    reset: () => void;
 }
 ```
 
@@ -136,7 +120,7 @@ interface UseExecutionStateReturn {
 
 ```vue
 <script setup lang="ts">
-import { useExecutionState } from '@or3/workflow-vue';
+import { useExecutionState } from 'or3-workflow-vue';
 
 const props = defineProps<{ editor: WorkflowEditor }>();
 const { isExecuting, currentNode, progress, errors } = useExecutionState(
@@ -171,8 +155,8 @@ const { isExecuting, currentNode, progress, errors } = useExecutionState(
 Execute workflows with reactive state:
 
 ```typescript
-import { useWorkflowExecution } from '@or3/workflow-vue';
-import { OpenRouterExecutionAdapter } from '@or3/workflow-core';
+import { useWorkflowExecution } from 'or3-workflow-vue';
+import { OpenRouterExecutionAdapter } from 'or3-workflow-core';
 
 const {
     execute,
@@ -194,14 +178,19 @@ const adapter = new OpenRouterExecutionAdapter(client, {
     defaultModel: 'openai/gpt-4o-mini',
 });
 
-await execute(adapter, workflow, { text: 'Hello' }, {
-    onNodeFinish: (nodeId, output) => {
-        console.log(nodeId, output);
-    },
-    onToken: (_nodeId, token) => {
-        streamingContent.value += token;
-    },
-});
+await execute(
+    adapter,
+    workflow,
+    { text: 'Hello' },
+    {
+        onNodeFinish: (nodeId, output) => {
+            console.log(nodeId, output);
+        },
+        onToken: (_nodeId, token) => {
+            streamingContent.value += token;
+        },
+    }
+);
 ```
 
 ### Returns
@@ -234,18 +223,12 @@ interface UseWorkflowExecutionReturn {
 <script setup lang="ts">
 import { ref } from 'vue';
 import OpenRouter from '@openrouter/sdk';
-import { OpenRouterExecutionAdapter } from '@or3/workflow-core';
-import { useWorkflowExecution, useWorkflowEditor } from '@or3/workflow-vue';
+import { OpenRouterExecutionAdapter } from 'or3-workflow-core';
+import { useWorkflowExecution, useWorkflowEditor } from 'or3-workflow-vue';
 
 const editor = useWorkflowEditor();
-const {
-    execute,
-    stop,
-    isRunning,
-    nodeStatuses,
-    nodeOutputs,
-    result,
-} = useWorkflowExecution();
+const { execute, stop, isRunning, nodeStatuses, nodeOutputs, result } =
+    useWorkflowExecution();
 
 const streamingContent = ref('');
 
@@ -260,18 +243,24 @@ async function run(message: string) {
     if (!editor.value) return;
     streamingContent.value = '';
 
-    await execute(adapter, editor.value.getJSON(), { text: message }, {
-        onToken: (_nodeId, token) => {
-            streamingContent.value += token;
-        },
-    });
+    await execute(
+        adapter,
+        editor.value.getJSON(),
+        { text: message },
+        {
+            onToken: (_nodeId, token) => {
+                streamingContent.value += token;
+            },
+        }
+    );
 }
 </script>
 
 <template>
     <div class="chat-panel">
         <div v-for="(output, nodeId) in nodeOutputs" :key="nodeId">
-            <strong>{{ nodeId }}</strong>: {{ output }}
+            <strong>{{ nodeId }}</strong
+            >: {{ output }}
         </div>
 
         <button @click="run('Hello')" :disabled="isRunning">
@@ -292,8 +281,8 @@ async function run(message: string) {
 Manage workflow persistence:
 
 ```typescript
-import { useWorkflowStorage } from '@or3/workflow-vue';
-import { LocalStorageAdapter } from '@or3/workflow-core';
+import { useWorkflowStorage } from 'or3-workflow-vue';
+import { LocalStorageAdapter } from 'or3-workflow-core';
 
 const storage = new LocalStorageAdapter();
 const {
@@ -350,8 +339,8 @@ interface UseWorkflowStorageReturn {
 
 ```vue
 <script setup lang="ts">
-import { useWorkflowStorage } from '@or3/workflow-vue';
-import { LocalStorageAdapter } from '@or3/workflow-core';
+import { useWorkflowStorage } from 'or3-workflow-vue';
+import { LocalStorageAdapter } from 'or3-workflow-core';
 
 const storage = new LocalStorageAdapter();
 const { workflows, isLoading, loadList, load, save, remove } =
@@ -404,7 +393,7 @@ async function handleDelete(id: string) {
 Track individual node state:
 
 ```typescript
-import { useNodeState } from '@or3/workflow-vue';
+import { useNodeState } from 'or3-workflow-vue';
 
 const { isSelected, isExecuting, hasError, validationErrors } = useNodeState(
     editor,
@@ -437,7 +426,7 @@ interface UseNodeStateReturn {
 
 ```vue
 <script setup lang="ts">
-import { useNodeState } from '@or3/workflow-vue';
+import { useNodeState } from 'or3-workflow-vue';
 
 const props = defineProps<{
     editor: WorkflowEditor;
@@ -482,8 +471,8 @@ import {
     useWorkflowEditor,
     useWorkflowExecution,
     useWorkflowStorage,
-} from '@or3/workflow-vue';
-import { StarterKit, LocalStorageAdapter } from '@or3/workflow-core';
+} from 'or3-workflow-vue';
+import { StarterKit, LocalStorageAdapter } from 'or3-workflow-core';
 
 // Editor
 const editor = useWorkflowEditor({

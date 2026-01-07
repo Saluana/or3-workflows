@@ -18,10 +18,10 @@ Building AI applications often requires orchestrating multiple LLM calls in sequ
 
 ## Packages
 
-| Package              | Description                                                             |
-| -------------------- | ----------------------------------------------------------------------- |
-| `@or3/workflow-core` | Framework-agnostic editor, history, commands, validation, and execution |
-| `@or3/workflow-vue`  | Vue 3 components: canvas, nodes, inspector, palette                     |
+| Package             | Description                                                             |
+| ------------------- | ----------------------------------------------------------------------- |
+| `or3-workflow-core` | Framework-agnostic editor, history, commands, validation, and execution |
+| `or3-workflow-vue`  | Vue 3 components: canvas, nodes, inspector, palette                     |
 
 ## Documentation
 
@@ -32,10 +32,10 @@ Building AI applications often requires orchestrating multiple LLM calls in sequ
 
 ```bash
 # Using bun (recommended)
-bun add @or3/workflow-core @or3/workflow-vue
+bun add or3-workflow-core or3-workflow-vue
 
 # Using npm
-npm install @or3/workflow-core @or3/workflow-vue
+npm install or3-workflow-core or3-workflow-vue
 ```
 
 ## Quick Start
@@ -43,7 +43,7 @@ npm install @or3/workflow-core @or3/workflow-vue
 ### TipTap-Style Setup
 
 ```typescript
-import { WorkflowEditor, StarterKit } from '@or3/workflow-core';
+import { WorkflowEditor, StarterKit } from 'or3-workflow-core';
 
 // Basic setup with all extensions
 const editor = new WorkflowEditor({
@@ -78,8 +78,8 @@ import {
     NodePalette,
     NodeInspector,
     useWorkflowEditor,
-} from '@or3/workflow-vue';
-import type { WorkflowData } from '@or3/workflow-core';
+} from 'or3-workflow-vue';
+import type { WorkflowData } from 'or3-workflow-core';
 
 // Create the editor instance
 const editor = useWorkflowEditor();
@@ -127,7 +127,7 @@ editor.value?.load(workflow);
 The central state manager for your workflow.
 
 ```typescript
-import { WorkflowEditor } from '@or3/workflow-core';
+import { WorkflowEditor } from 'or3-workflow-core';
 
 const editor = new WorkflowEditor({
     content: workflowData, // Initial workflow
@@ -189,7 +189,7 @@ Commands return `true` on success and `false` when validation fails (for example
 Validate workflows before execution:
 
 ```typescript
-import { validateWorkflow } from '@or3/workflow-core';
+import { validateWorkflow } from 'or3-workflow-core';
 
 const result = validateWorkflow(editor.nodes, editor.edges);
 // {
@@ -211,7 +211,7 @@ Checks include:
 Built-in localStorage adapter with autosave:
 
 ```typescript
-import { LocalStorageAdapter } from '@or3/workflow-core';
+import { LocalStorageAdapter } from 'or3-workflow-core';
 
 const storage = new LocalStorageAdapter();
 
@@ -335,7 +335,7 @@ import OpenRouter from '@openrouter/sdk';
 import {
     OpenRouterExecutionAdapter,
     type WorkflowData,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY! });
 const adapter = new OpenRouterExecutionAdapter(client, {
@@ -369,7 +369,7 @@ import {
     OpenRouterExecutionAdapter,
     type HITLRequest,
     type HITLResponse,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 const client = new OpenRouter({ apiKey });
 const adapter = new OpenRouterExecutionAdapter(client, {
@@ -411,7 +411,7 @@ import OpenRouter from '@openrouter/sdk';
 import {
     OpenRouterExecutionAdapter,
     ApproximateTokenCounter,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 const client = new OpenRouter({ apiKey });
 const adapter = new OpenRouterExecutionAdapter(client, {
@@ -430,7 +430,7 @@ const adapter = new OpenRouterExecutionAdapter(client, {
 For custom token counting (tiktoken, etc.), implement `TokenCounter`:
 
 ```typescript
-import { TokenCounter } from '@or3/workflow-core';
+import { TokenCounter } from 'or3-workflow-core';
 import { encoding_for_model } from 'tiktoken';
 
 class TiktokenCounter implements TokenCounter {
@@ -453,7 +453,7 @@ TipTap-style configurable extensions for custom node types.
 ### Using StarterKit
 
 ```typescript
-import { WorkflowEditor, StarterKit } from '@or3/workflow-core';
+import { WorkflowEditor, StarterKit } from 'or3-workflow-core';
 
 // All built-in extensions
 const editor = new WorkflowEditor({
@@ -472,8 +472,8 @@ const editor = new WorkflowEditor({
 ### Creating Custom Extensions
 
 ```typescript
-import { createConfigurableExtension } from '@or3/workflow-core';
-import type { Extension } from '@or3/workflow-core';
+import { createConfigurableExtension } from 'or3-workflow-core';
+import type { Extension } from 'or3-workflow-core';
 
 interface ApprovalOptions {
     defaultTimeout?: number;

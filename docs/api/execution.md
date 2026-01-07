@@ -10,7 +10,7 @@ import {
     type ExecutionOptions,
     type ExecutionCallbacks,
     type ExecutionResult,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 import OpenRouter from '@openrouter/sdk';
 ```
 
@@ -45,8 +45,18 @@ interface ExecutionOptions {
     /** Safety limit for graph traversal iterations */
     maxIterations?: number;
 
+    /**
+     * Maximum executions per individual node (circuit breaker).
+     * Prevents infinite loops caused by nodes re-queueing themselves.
+     * Default: 100
+     */
+    maxNodeExecutions?: number;
+
     /** Global tool call handler */
     onToolCall?: (name: string, args: any) => Promise<string>;
+
+    /** Tool call lifecycle handler with node metadata */
+    onToolCallEvent?: (event: ToolCallEventWithNode) => void;
 
     /** Pluggable long-term memory adapter */
     memory?: MemoryAdapter;
@@ -318,7 +328,7 @@ interface TokenUsageDetails extends TokenUsage {
 ## Error Handling
 
 ```typescript
-import { ExecutionError } from '@or3/workflow-core';
+import { ExecutionError } from 'or3-workflow-core';
 
 const result = await adapter.execute(workflow, input, callbacks);
 
@@ -358,7 +368,7 @@ See [Human-in-the-Loop](./hitl.md) for details.
 ## With Context Compaction
 
 ```typescript
-import { ApproximateTokenCounter } from '@or3/workflow-core';
+import { ApproximateTokenCounter } from 'or3-workflow-core';
 
 const adapter = new OpenRouterExecutionAdapter(client, {
     tokenCounter: new ApproximateTokenCounter(),
@@ -377,7 +387,7 @@ See [Context Compaction](./compaction.md) for details.
 ## With Memory
 
 ```typescript
-import { InMemoryAdapter } from '@or3/workflow-core';
+import { InMemoryAdapter } from 'or3-workflow-core';
 
 const adapter = new OpenRouterExecutionAdapter(client, {
     memory: new InMemoryAdapter(),

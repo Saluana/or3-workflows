@@ -1,7 +1,7 @@
 import {
     useWorkflowStorage as useCoreStorage,
-} from '@or3/workflow-vue';
-import { LocalStorageAdapter, type WorkflowData } from '@or3/workflow-core';
+} from 'or3-workflow-vue';
+import { LocalStorageAdapter, type WorkflowData } from 'or3-workflow-core';
 
 export type SavedWorkflow = WorkflowData & { id: string };
 

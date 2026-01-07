@@ -9,7 +9,7 @@ Parallel nodes split execution into multiple concurrent paths, then merge result
 ## Import
 
 ```typescript
-import { ParallelNodeExtension } from '@or3/workflow-core';
+import { ParallelNodeExtension } from 'or3-workflow-core';
 ```
 
 ## Configuration

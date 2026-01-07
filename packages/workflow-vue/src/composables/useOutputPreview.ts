@@ -7,7 +7,7 @@ import {
     watch,
     onScopeDispose,
 } from 'vue';
-import { WorkflowEditor, OutputNodeData } from '@or3/workflow-core';
+import { WorkflowEditor, OutputNodeData } from 'or3-workflow-core';
 import { useUpstreamResolver } from './useUpstreamResolver';
 import { useExecutionCache } from './useExecutionCache';
 

@@ -19,7 +19,7 @@ import {
     buildSummarizationPrompt,
     createSummaryMessage,
     estimateTokenUsage,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 ```
 
 ## Overview
@@ -34,7 +34,7 @@ Long conversations can exceed model context limits. Context compaction:
 ## Setup
 
 ```typescript
-import { OpenRouterExecutionAdapter, ApproximateTokenCounter } from '@or3/workflow-core';
+import { OpenRouterExecutionAdapter, ApproximateTokenCounter } from 'or3-workflow-core';
 
 const adapter = new OpenRouterExecutionAdapter(client, {
     tokenCounter: new ApproximateTokenCounter(),
@@ -197,7 +197,7 @@ counter.setLimit('another-model', 32000);
 Implement `TokenCounter` for accurate counting:
 
 ```typescript
-import { TokenCounter } from '@or3/workflow-core';
+import { TokenCounter } from 'or3-workflow-core';
 import { encoding_for_model } from 'tiktoken';
 
 class TiktokenCounter implements TokenCounter {
@@ -239,7 +239,7 @@ interface TokenCounter {
 Pre-configured limits for popular models:
 
 ```typescript
-import { MODEL_CONTEXT_LIMITS } from '@or3/workflow-core';
+import { MODEL_CONTEXT_LIMITS } from 'or3-workflow-core';
 
 console.log(MODEL_CONTEXT_LIMITS['openai/gpt-4o']); // 128000
 console.log(MODEL_CONTEXT_LIMITS['anthropic/claude-3.5-sonnet']); // 200000
@@ -298,7 +298,7 @@ Total: 60,000 tokens ✓
 Count tokens in a message array:
 
 ```typescript
-import { countMessageTokens, ApproximateTokenCounter } from '@or3/workflow-core';
+import { countMessageTokens, ApproximateTokenCounter } from 'or3-workflow-core';
 
 const counter = new ApproximateTokenCounter();
 const tokens = countMessageTokens(messages, counter);
@@ -309,7 +309,7 @@ const tokens = countMessageTokens(messages, counter);
 Calculate the compaction threshold for a model:
 
 ```typescript
-import { calculateThreshold } from '@or3/workflow-core';
+import { calculateThreshold } from 'or3-workflow-core';
 
 const threshold = calculateThreshold(compactionConfig, 'openai/gpt-4o', counter);
 // Returns modelLimit - 10000 for 'auto', or the specified threshold
@@ -320,7 +320,7 @@ const threshold = calculateThreshold(compactionConfig, 'openai/gpt-4o', counter)
 Split messages into preserved and to-compact:
 
 ```typescript
-import { splitMessagesForCompaction } from '@or3/workflow-core';
+import { splitMessagesForCompaction } from 'or3-workflow-core';
 
 const { toPreserve, toCompact } = splitMessagesForCompaction(
     messages,
@@ -333,7 +333,7 @@ const { toPreserve, toCompact } = splitMessagesForCompaction(
 Format messages for summarization prompt:
 
 ```typescript
-import { formatMessagesForSummary } from '@or3/workflow-core';
+import { formatMessagesForSummary } from 'or3-workflow-core';
 
 const formatted = formatMessagesForSummary(messages);
 // "User: Hello\n\nAssistant: Hi there!\n\n..."
@@ -344,7 +344,7 @@ const formatted = formatMessagesForSummary(messages);
 Build the summarization prompt:
 
 ```typescript
-import { buildSummarizationPrompt } from '@or3/workflow-core';
+import { buildSummarizationPrompt } from 'or3-workflow-core';
 
 const prompt = buildSummarizationPrompt(messages, compactionConfig);
 ```
@@ -354,7 +354,7 @@ const prompt = buildSummarizationPrompt(messages, compactionConfig);
 Create a summary system message:
 
 ```typescript
-import { createSummaryMessage } from '@or3/workflow-core';
+import { createSummaryMessage } from 'or3-workflow-core';
 
 const summaryMessage = createSummaryMessage(summaryText);
 // { role: 'system', content: '[Previous conversation summary]: ...' }
@@ -365,7 +365,7 @@ const summaryMessage = createSummaryMessage(summaryText);
 Estimate token usage for an LLM request:
 
 ```typescript
-import { estimateTokenUsage } from '@or3/workflow-core';
+import { estimateTokenUsage } from 'or3-workflow-core';
 
 const usage = estimateTokenUsage({
     model: 'openai/gpt-4o',
@@ -384,7 +384,7 @@ console.log(usage.remainingBeforeCompaction);
 ## Default Summarize Prompt
 
 ```typescript
-import { DEFAULT_SUMMARIZE_PROMPT } from '@or3/workflow-core';
+import { DEFAULT_SUMMARIZE_PROMPT } from 'or3-workflow-core';
 
 // The default prompt:
 const prompt = `Summarize the following conversation history concisely, preserving key information, decisions, and context that would be important for continuing the conversation:

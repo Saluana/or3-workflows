@@ -45,7 +45,7 @@ interface WorkflowSummary {
 Simple browser localStorage storage:
 
 ```typescript
-import { LocalStorageAdapter } from '@or3/workflow-core';
+import { LocalStorageAdapter } from 'or3-workflow-core';
 
 const storage = new LocalStorageAdapter();
 
@@ -95,7 +95,7 @@ storage.clearAutosave();
 Larger storage with better performance:
 
 ```typescript
-import { IndexedDBAdapter } from '@or3/workflow-core';
+import { IndexedDBAdapter } from 'or3-workflow-core';
 
 const storage = new IndexedDBAdapter();
 
@@ -129,7 +129,7 @@ import type {
     StorageAdapter,
     WorkflowData,
     WorkflowSummary,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 export class APIStorageAdapter implements StorageAdapter {
     constructor(private baseUrl: string, private token: string) {}
@@ -195,7 +195,7 @@ import type {
     StorageAdapter,
     WorkflowData,
     WorkflowSummary,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 export class SupabaseStorageAdapter implements StorageAdapter {
     private client;
@@ -266,8 +266,8 @@ export class SupabaseStorageAdapter implements StorageAdapter {
 ## Usage with Vue
 
 ```typescript
-import { useWorkflowStorage } from '@or3/workflow-vue';
-import { LocalStorageAdapter } from '@or3/workflow-core';
+import { useWorkflowStorage } from 'or3-workflow-vue';
+import { LocalStorageAdapter } from 'or3-workflow-core';
 
 const storage = new LocalStorageAdapter();
 const {

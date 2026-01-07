@@ -40,14 +40,14 @@ TipTap-style extension system for custom node types.
 ┌─────────────────────────────────────────────────────────┐
 │                     Your Application                      │
 ├─────────────────────────────────────────────────────────┤
-│                    @or3/workflow-vue                      │
+│                    or3-workflow-vue                      │
 │  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐ │
 │  │ Composables │ │ Components  │ │     Theming         │ │
 │  │ useEditor   │ │ Canvas      │ │   CSS Variables     │ │
 │  │ useState    │ │ NodePalette │ │   Dark/Light        │ │
 │  └─────────────┘ └─────────────┘ └─────────────────────┘ │
 ├─────────────────────────────────────────────────────────┤
-│                    @or3/workflow-core                     │
+│                    or3-workflow-core                     │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌─────────────┐ │
 │  │ Editor   │ │ Commands │ │ History  │ │ Validation  │ │
 │  ├──────────┤ ├──────────┤ ├──────────┤ ├─────────────┤ │
@@ -60,15 +60,15 @@ TipTap-style extension system for custom node types.
 
 | Package              | Description                                                               |
 | -------------------- | ------------------------------------------------------------------------- |
-| `@or3/workflow-core` | Framework-agnostic core: editor, commands, history, validation, execution |
-| `@or3/workflow-vue`  | Vue 3 components: canvas, nodes, inspector, palette                       |
+| `or3-workflow-core` | Framework-agnostic core: editor, commands, history, validation, execution |
+| `or3-workflow-vue`  | Vue 3 components: canvas, nodes, inspector, palette                       |
 
 ## TipTap-Style Design
 
 Inspired by [TipTap](https://tiptap.dev), or3-workflows uses a composable extension architecture:
 
 ```typescript
-import { WorkflowEditor, StarterKit } from '@or3/workflow-core';
+import { WorkflowEditor, StarterKit } from 'or3-workflow-core';
 
 // Use the StarterKit with all built-in nodes
 const editor = new WorkflowEditor({

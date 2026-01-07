@@ -9,7 +9,7 @@ Tool nodes call registered functions/tools and pass results to the next node. Us
 ## Import
 
 ```typescript
-import { ToolNodeExtension, toolRegistry } from '@or3/workflow-core';
+import { ToolNodeExtension, toolRegistry } from 'or3-workflow-core';
 ```
 
 ## Configuration
@@ -38,7 +38,7 @@ interface ToolNodeData {
 ## Registering Tools
 
 ```typescript
-import { toolRegistry } from '@or3/workflow-core';
+import { toolRegistry } from 'or3-workflow-core';
 
 toolRegistry.register({
     name: 'search_web',

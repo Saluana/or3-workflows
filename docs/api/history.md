@@ -5,7 +5,7 @@ The history system provides undo/redo functionality using snapshot-based state m
 ## Import
 
 ```typescript
-import { WorkflowEditor } from '@or3/workflow-core';
+import { WorkflowEditor } from 'or3-workflow-core';
 
 const editor = new WorkflowEditor({
     /* ... */

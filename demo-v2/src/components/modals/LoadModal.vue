@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { WorkflowSummary } from '@or3/workflow-core';
+import type { WorkflowSummary } from 'or3-workflow-core';
 
 defineProps<{
     show: boolean;

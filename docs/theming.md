@@ -11,7 +11,7 @@ or3-workflows uses CSS custom properties (variables) for theming. Override these
 The default theme is a dark, premium glassmorphism design:
 
 ```css
-@import '@or3/workflow-vue/style.css';
+@import 'or3-workflow-vue/style.css';
 ```
 
 ## CSS Variables

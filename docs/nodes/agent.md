@@ -9,7 +9,7 @@ Agent nodes are the core building blocks of AI workflows. They process input usi
 ## Import
 
 ```typescript
-import { AgentNodeExtension } from '@or3/workflow-core';
+import { AgentNodeExtension } from 'or3-workflow-core';
 ```
 
 ## Configuration
@@ -219,7 +219,7 @@ When `hitl` is selected, the agent pauses for human approval to continue.
 Enable function calling:
 
 ```typescript
-import { toolRegistry } from '@or3/workflow-core';
+import { toolRegistry } from 'or3-workflow-core';
 
 // Register a tool
 toolRegistry.register({

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue';
-import type { TokenUsageDetails } from '@or3/workflow-core';
+import type { TokenUsageDetails } from 'or3-workflow-core';
 import type { ChatMessage, BranchStream } from '../composables';
 
 const props = defineProps<{

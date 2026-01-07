@@ -15,7 +15,7 @@ import {
     classifyFromStatus,
     extractRateLimitInfo,
     DEFAULT_SKIP_ON,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 ```
 
 ## Error Codes
@@ -29,6 +29,7 @@ type ErrorCode =
     | 'RATE_LIMIT' // 429 rate limit exceeded
     | 'AUTH' // 401/403 authentication errors
     | 'VALIDATION' // 4xx client errors
+    | 'EXTENSION_VALIDATION_ERROR' // Extension-specific validation failures
     | 'NETWORK' // Network connectivity issues
     | 'UNKNOWN'; // Unclassified errors
 ```
@@ -142,7 +143,7 @@ errorHandling: {
 Errors are automatically classified from HTTP status codes or message content:
 
 ```typescript
-import { classifyError, classifyFromStatus } from '@or3/workflow-core';
+import { classifyError, classifyFromStatus } from 'or3-workflow-core';
 
 // Classify from status code (preferred)
 const codeFromStatus = classifyFromStatus(429); // 'RATE_LIMIT'
@@ -156,15 +157,15 @@ const codeFromMessage = classifyError(new Error('rate limit exceeded'));
 
 ### Error Type Mapping
 
-| Status Code | Error Code    | Retryable |
-| ----------- | ------------- | --------- |
-| 429         | `RATE_LIMIT`  | Yes       |
-| 408, 504    | `TIMEOUT`     | Yes       |
-| 5xx         | `LLM_ERROR`   | Yes       |
-| 401, 403    | `AUTH`        | No        |
-| 4xx (other) | `VALIDATION`  | No        |
-| Network     | `NETWORK`     | Yes       |
-| Other       | `UNKNOWN`     | No        |
+| Status Code | Error Code   | Retryable |
+| ----------- | ------------ | --------- |
+| 429         | `RATE_LIMIT` | Yes       |
+| 408, 504    | `TIMEOUT`    | Yes       |
+| 5xx         | `LLM_ERROR`  | Yes       |
+| 401, 403    | `AUTH`       | No        |
+| 4xx (other) | `VALIDATION` | No        |
+| Network     | `NETWORK`    | Yes       |
+| Other       | `UNKNOWN`    | No        |
 
 ## ExecutionError
 
@@ -197,7 +198,11 @@ class ExecutionError extends Error {
     isRetryable(skipOn?: ErrorCode[]): boolean;
 
     /** Get suggested retry delay (uses retryAfter if available) */
-    getSuggestedDelay(baseDelay: number, attempt: number, maxDelay?: number): number;
+    getSuggestedDelay(
+        baseDelay: number,
+        attempt: number,
+        maxDelay?: number
+    ): number;
 }
 
 interface RetryInfo {
@@ -225,7 +230,7 @@ interface RateLimitInfo {
 Use `createExecutionError` to create structured errors from any thrown value:
 
 ```typescript
-import { createExecutionError } from '@or3/workflow-core';
+import { createExecutionError } from 'or3-workflow-core';
 
 try {
     await callLLM();
@@ -250,7 +255,7 @@ try {
 Extract rate limit information from response headers:
 
 ```typescript
-import { extractRateLimitInfo } from '@or3/workflow-core';
+import { extractRateLimitInfo } from 'or3-workflow-core';
 
 const rateLimitInfo = extractRateLimitInfo(error);
 // Returns: { limit: 100, remaining: 0, resetAt: '...', retryAfter: 60 }
@@ -341,13 +346,18 @@ try {
     const result = await adapter.execute(workflow, input, callbacks);
 } catch (error) {
     if (error instanceof ExecutionError) {
-        console.error(`Node ${error.nodeId} (${error.nodeType}) failed:`, error.message);
+        console.error(
+            `Node ${error.nodeId} (${error.nodeType}) failed:`,
+            error.message
+        );
         console.error(`Code: ${error.code}`);
         console.error(`Status: ${error.statusCode}`);
         console.error(`Retryable: ${error.isRetryable()}`);
 
         if (error.retry) {
-            console.error(`Attempts: ${error.retry.attempts}/${error.retry.maxAttempts}`);
+            console.error(
+                `Attempts: ${error.retry.attempts}/${error.retry.maxAttempts}`
+            );
             console.error('Retry history:', error.retry.history);
         }
 
@@ -374,10 +384,15 @@ const callbacks: ExecutionCallbacks = {
 
         // Log with full context
         if (error instanceof ExecutionError) {
-            console.error(`[${error.code}] Node ${nodeId} failed:`, error.message);
+            console.error(
+                `[${error.code}] Node ${nodeId} failed:`,
+                error.message
+            );
 
             if (error.rateLimit?.retryAfter) {
-                console.log(`Rate limited, retry after ${error.rateLimit.retryAfter}s`);
+                console.log(
+                    `Rate limited, retry after ${error.rateLimit.retryAfter}s`
+                );
             }
         }
 
@@ -445,7 +460,12 @@ retry: {
 ```typescript
 // Always connect error branches to handler nodes
 edges: [
-    { id: 'error-edge', source: 'risky', target: 'fallback', sourceHandle: 'error' },
+    {
+        id: 'error-edge',
+        source: 'risky',
+        target: 'fallback',
+        sourceHandle: 'error',
+    },
 ];
 ```
 

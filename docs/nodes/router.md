@@ -9,7 +9,7 @@ Router nodes use an LLM to classify input and route execution to different branc
 ## Import
 
 ```typescript
-import { RouterNodeExtension } from '@or3/workflow-core';
+import { RouterNodeExtension } from 'or3-workflow-core';
 ```
 
 ## Configuration

@@ -10,7 +10,7 @@ import {
     AgentNodeExtension,
     createConfigurableExtension,
     makeConfigurable,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 ```
 
 ## Extension Interface
@@ -100,7 +100,7 @@ interface NodeExtension {
 The easiest way to use all built-in extensions:
 
 ```typescript
-import { WorkflowEditor, StarterKit } from '@or3/workflow-core';
+import { WorkflowEditor, StarterKit } from 'or3-workflow-core';
 
 const editor = new WorkflowEditor({
     extensions: StarterKit.configure(),
@@ -115,7 +115,7 @@ import {
     StartNodeExtension,
     AgentNodeExtension,
     RouterNodeExtension,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 const editor = new WorkflowEditor({
     extensions: [StartNodeExtension, AgentNodeExtension, RouterNodeExtension],
@@ -191,7 +191,7 @@ const NotificationExtension: Extension = {
 Use `createConfigurableExtension` for extensions with options:
 
 ```typescript
-import { createConfigurableExtension } from '@or3/workflow-core';
+import { createConfigurableExtension } from 'or3-workflow-core';
 
 interface NotificationOptions {
     defaultChannel?: 'email' | 'slack' | 'sms';
@@ -227,7 +227,7 @@ const editor = new WorkflowEditor({
 ### Making Existing Extensions Configurable
 
 ```typescript
-import { makeConfigurable } from '@or3/workflow-core';
+import { makeConfigurable } from 'or3-workflow-core';
 
 const ConfigurableExtension = makeConfigurable(MyExtension, {
     defaultOption: 'value',
@@ -533,7 +533,7 @@ import {
     isAgentNodeData,
     isRouterNodeData,
     isOutputNodeData,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 if (isAgentNodeData(node.data)) {
     console.log(node.data.model); // Type-safe access

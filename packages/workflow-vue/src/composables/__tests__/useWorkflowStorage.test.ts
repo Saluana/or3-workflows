@@ -4,7 +4,7 @@ import type {
     StorageAdapter,
     WorkflowData,
     WorkflowSummary,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 // Mock Adapter
 const mockAdapter: StorageAdapter = {

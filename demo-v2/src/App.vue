@@ -8,8 +8,8 @@ import {
     type NodeData,
     type TokenUsageDetails,
     validateWorkflow,
-} from '@or3/workflow-core';
-import { useEditor, createExecutionState } from '@or3/workflow-vue';
+} from 'or3-workflow-core';
+import { useEditor, createExecutionState } from 'or3-workflow-vue';
 
 // Local composables
 import {
@@ -19,7 +19,7 @@ import {
     type ChatMessage,
     type BranchStream,
 } from './composables';
-import type { WorkflowSummary } from '@or3/workflow-core';
+import type { WorkflowSummary } from 'or3-workflow-core';
 
 // Local components
 import {
@@ -110,7 +110,7 @@ const workflowName = ref('My Workflow');
 const workflowDescription = ref('');
 
 // HITL (Human-in-the-Loop) state
-import type { HITLRequest, HITLResponse } from '@or3/workflow-core';
+import type { HITLRequest, HITLResponse } from 'or3-workflow-core';
 const showHITLModal = ref(false);
 const pendingHITLRequest = ref<HITLRequest | null>(null);
 const hitlUserInput = ref('');

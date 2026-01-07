@@ -5,7 +5,7 @@ The command system handles all state mutations to the workflow. Commands automat
 ## Import
 
 ```typescript
-import { WorkflowEditor } from '@or3/workflow-core';
+import { WorkflowEditor } from 'or3-workflow-core';
 
 const editor = new WorkflowEditor({
     /* ... */

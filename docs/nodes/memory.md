@@ -1,5 +1,8 @@
 # Memory Node
 
+> [!NOTE]
+> The Memory Node is currently in development and will be available in a future update. The `MemoryAdapter` interface and `InMemoryAdapter` are already available for use in custom extensions or via `ExecutionOptions`.
+
 Query and store information in vector memory.
 
 ## Overview
@@ -9,7 +12,7 @@ Memory nodes integrate with vector databases for RAG (Retrieval-Augmented Genera
 ## Import
 
 ```typescript
-import { MemoryNodeExtension, InMemoryAdapter } from '@or3/workflow-core';
+import { MemoryNodeExtension, InMemoryAdapter } from 'or3-workflow-core';
 ```
 
 ## Configuration
@@ -51,7 +54,7 @@ Provide a memory adapter to the execution adapter:
 import {
     OpenRouterExecutionAdapter,
     InMemoryAdapter,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 const memoryAdapter = new InMemoryAdapter();
 
@@ -127,7 +130,7 @@ editor.commands.createNode(
 Simple in-memory storage for development:
 
 ```typescript
-import { InMemoryAdapter } from '@or3/workflow-core';
+import { InMemoryAdapter } from 'or3-workflow-core';
 
 const adapter = new InMemoryAdapter({
     similarity: 'cosine', // or 'euclidean'

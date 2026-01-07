@@ -15,7 +15,7 @@ import {
 import type { KeyFilter } from '@vueuse/core';
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
-import { WorkflowEditor } from '@or3/workflow-core';
+import { WorkflowEditor } from 'or3-workflow-core';
 import StartNode from './nodes/StartNode.vue';
 import AgentNode from './nodes/AgentNode.vue';
 import RouterNode from './nodes/RouterNode.vue';

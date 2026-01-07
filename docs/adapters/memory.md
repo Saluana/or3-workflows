@@ -353,7 +353,7 @@ import type {
     MemoryContent,
     SearchOptions,
     MemoryResult,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 import type { EmbeddingProvider } from './embedding-provider';
 import type { IdGenerator } from './id-generator';
 
@@ -444,7 +444,7 @@ import type {
     MemoryContent,
     SearchOptions,
     MemoryResult,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 import type { IdGenerator } from './id-generator';
 
 export class ChromaMemoryAdapter implements MemoryAdapter {
@@ -523,7 +523,7 @@ import type {
     MemoryContent,
     SearchOptions,
     MemoryResult,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 import type { EmbeddingProvider } from './embedding-provider';
 import type { IdGenerator } from './id-generator';
 
@@ -642,7 +642,7 @@ $$;
 Memory adapters are used with Memory Nodes in workflows:
 
 ```typescript
-import { WorkflowEditor, StarterKit } from '@or3/workflow-core';
+import { WorkflowEditor, StarterKit } from 'or3-workflow-core';
 import { PineconeMemoryAdapter } from './adapters/pinecone';
 import {
     OpenAIEmbeddingProvider,
@@ -683,7 +683,7 @@ editor.commands.addNode({
 ### During Execution
 
 ```typescript
-import { OpenRouterExecutionAdapter } from '@or3/workflow-core';
+import { OpenRouterExecutionAdapter } from 'or3-workflow-core';
 
 const executor = new OpenRouterExecutionAdapter({
     apiKey: process.env.OPENROUTER_API_KEY,
@@ -704,7 +704,7 @@ For testing and development. The `InMemoryAdapter` provides a feature-rich imple
 ### Basic Usage
 
 ```typescript
-import { InMemoryAdapter } from '@or3/workflow-core';
+import { InMemoryAdapter } from 'or3-workflow-core';
 
 const memory = new InMemoryAdapter();
 
@@ -759,7 +759,7 @@ import type {
     MemoryContent,
     SearchOptions,
     MemoryResult,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 export class InMemoryAdapter implements MemoryAdapter {
     private memories: Map<string, MemoryContent & { id: string }> = new Map();

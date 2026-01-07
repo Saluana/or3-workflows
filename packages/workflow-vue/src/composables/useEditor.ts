@@ -3,7 +3,7 @@ import {
     createWorkflowEditor,
     WorkflowEditor,
     EditorOptions,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 /**
  * Composable for creating and managing a WorkflowEditor instance.

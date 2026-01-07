@@ -5,7 +5,7 @@ Validate workflows before execution to catch configuration errors and potential 
 ## Import
 
 ```typescript
-import { validateWorkflow, type ValidationContext } from '@or3/workflow-core';
+import { validateWorkflow, type ValidationContext } from 'or3-workflow-core';
 ```
 
 ## Basic Usage
@@ -27,7 +27,7 @@ if (result.warnings.length > 0) {
 For deeper validation (e.g., subflow resolution, port validation), pass a `ValidationContext`:
 
 ```typescript
-import { validateWorkflow, extensionRegistry } from '@or3/workflow-core';
+import { validateWorkflow, extensionRegistry } from 'or3-workflow-core';
 
 const context: ValidationContext = {
     subflowRegistry: mySubflowRegistry,
@@ -326,8 +326,8 @@ const MyExtension: NodeExtension = {
 ```vue
 <script setup lang="ts">
 import { computed } from 'vue';
-import { validateWorkflow } from '@or3/workflow-core';
-import { useEditor } from '@or3/workflow-vue';
+import { validateWorkflow } from 'or3-workflow-core';
+import { useEditor } from 'or3-workflow-vue';
 
 const editor = useEditor();
 

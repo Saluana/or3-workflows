@@ -5,7 +5,7 @@ The `WorkflowEditor` is the central state manager for your workflow. It manages 
 ## Import
 
 ```typescript
-import { WorkflowEditor, createWorkflowEditor } from '@or3/workflow-core';
+import { WorkflowEditor, createWorkflowEditor } from 'or3-workflow-core';
 ```
 
 ## Creating an Editor
@@ -308,7 +308,7 @@ interface WorkflowEdge {
 Use the `useEditor` composable for reactive Vue integration:
 
 ```typescript
-import { useEditor } from '@or3/workflow-vue';
+import { useEditor } from 'or3-workflow-vue';
 
 const editor = useEditor({
     extensions: StarterKit.configure(),

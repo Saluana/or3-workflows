@@ -4,7 +4,7 @@ import {
     WorkflowNode,
     WorkflowEdge,
     ParallelNodeData,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 export interface UpstreamSource {
     id: string;

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useWorkflowExecution } from '../useWorkflowExecution';
-import type { ExecutionAdapter, WorkflowData, ExecutionInput, ExecutionResult } from '@or3/workflow-core';
+import type { ExecutionAdapter, WorkflowData, ExecutionInput, ExecutionResult } from 'or3-workflow-core';
 
 // Mock Adapter
 const mockAdapter: ExecutionAdapter = {

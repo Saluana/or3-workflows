@@ -9,7 +9,7 @@ Every workflow must have exactly one Start node. It receives the initial input a
 ## Import
 
 ```typescript
-import { StartNodeExtension } from '@or3/workflow-core';
+import { StartNodeExtension } from 'or3-workflow-core';
 ```
 
 ## Configuration

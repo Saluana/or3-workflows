@@ -1,6 +1,6 @@
 # demo-headless
 
-Headless demo runner for **@or3/workflow-core** workflows.
+Headless demo runner for **or3-workflow-core** workflows.
 
 This workspace provides a Bun-based CLI that loads a workflow from a JSON or TypeScript file and executes it using the `OpenRouterExecutionAdapter`.
 

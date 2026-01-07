@@ -4,7 +4,7 @@ Pre-built Vue 3 components for workflow visualization and interaction.
 
 ## Overview
 
-The `@or3/workflow-vue` package provides ready-to-use components for building workflow editors.
+The `or3-workflow-vue` package provides ready-to-use components for building workflow editors.
 
 ## WorkflowCanvas
 
@@ -12,9 +12,9 @@ The main canvas component that renders nodes and edges:
 
 ```vue
 <script setup lang="ts">
-import { WorkflowCanvas } from '@or3/workflow-vue';
-import { useEditor } from '@or3/workflow-vue';
-import { StarterKit } from '@or3/workflow-core';
+import { WorkflowCanvas } from 'or3-workflow-vue';
+import { useEditor } from 'or3-workflow-vue';
+import { StarterKit } from 'or3-workflow-core';
 
 const { editor } = useEditor({
     extensions: [StarterKit.configure()],
@@ -79,7 +79,7 @@ Draggable palette of available node types:
 
 ```vue
 <script setup lang="ts">
-import { NodePalette } from '@or3/workflow-vue';
+import { NodePalette } from 'or3-workflow-vue';
 
 const nodeTypes = [
     { type: 'agent', label: 'Agent', icon: '🤖' },
@@ -144,7 +144,7 @@ Property editor for selected nodes:
 
 ```vue
 <script setup lang="ts">
-import { NodeInspector } from '@or3/workflow-vue';
+import { NodeInspector } from 'or3-workflow-vue';
 
 const selectedNode = computed(() => editor.value?.getSelectedNode());
 </script>
@@ -188,7 +188,7 @@ Zoom and fit controls:
 
 ```vue
 <script setup lang="ts">
-import { Controls } from '@or3/workflow-vue';
+import { Controls } from 'or3-workflow-vue';
 </script>
 
 <template>
@@ -220,7 +220,7 @@ Overview minimap of the workflow:
 
 ```vue
 <script setup lang="ts">
-import { MiniMap } from '@or3/workflow-vue';
+import { MiniMap } from 'or3-workflow-vue';
 </script>
 
 <template>
@@ -267,8 +267,8 @@ Chat interface for workflow execution:
 
 ```vue
 <script setup lang="ts">
-import { ChatPanel } from '@or3/workflow-vue';
-import { useWorkflowExecution } from '@or3/workflow-vue';
+import { ChatPanel } from 'or3-workflow-vue';
+import { useWorkflowExecution } from 'or3-workflow-vue';
 
 const { execute, messages, isExecuting, hitlRequest, respondToHitl } =
     useWorkflowExecution(editor.value!, executor);
@@ -329,7 +329,7 @@ Display validation errors on the canvas:
 
 ```vue
 <script setup lang="ts">
-import { ValidationOverlay } from '@or3/workflow-vue';
+import { ValidationOverlay } from 'or3-workflow-vue';
 
 const errors = computed(() => editor.value?.getValidationErrors() ?? []);
 </script>
@@ -355,7 +355,7 @@ Inline edge label editor:
 
 ```vue
 <script setup lang="ts">
-import { EdgeLabelEditor } from '@or3/workflow-vue';
+import { EdgeLabelEditor } from 'or3-workflow-vue';
 
 const editingEdge = ref<string | null>(null);
 </script>
@@ -381,7 +381,7 @@ Built-in node components for each type:
 
 ```vue
 <script setup lang="ts">
-import { AgentNode } from '@or3/workflow-vue';
+import { AgentNode } from 'or3-workflow-vue';
 </script>
 
 <template>
@@ -401,7 +401,7 @@ Create custom node types:
 ```vue
 <!-- CustomNode.vue -->
 <script setup lang="ts">
-import { NodeWrapper } from '@or3/workflow-vue';
+import { NodeWrapper } from 'or3-workflow-vue';
 
 const props = defineProps<{
     id: string;
@@ -447,7 +447,7 @@ const props = defineProps<{
 Register with editor:
 
 ```typescript
-import { WorkflowEditor, Extension } from '@or3/workflow-core';
+import { WorkflowEditor, Extension } from 'or3-workflow-core';
 import CustomNode from './CustomNode.vue';
 
 const CustomNodeExtension = Extension.create({
@@ -480,7 +480,7 @@ import {
     ChatPanel,
     Controls,
     MiniMap,
-} from '@or3/workflow-vue';
+} from 'or3-workflow-vue';
 </script>
 
 <template>

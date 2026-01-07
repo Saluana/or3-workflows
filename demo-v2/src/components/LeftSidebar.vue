@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { WorkflowEditor } from '@or3/workflow-core';
-import { NodePalette, NodeInspector } from '@or3/workflow-vue';
+import type { WorkflowEditor } from 'or3-workflow-core';
+import { NodePalette, NodeInspector } from 'or3-workflow-vue';
 
 // Props interface
 interface Props {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { HITLRequest, HITLResponse } from '@or3/workflow-core';
+import type { HITLRequest, HITLResponse } from 'or3-workflow-core';
 
 defineProps<{
     show: boolean;

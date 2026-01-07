@@ -6,7 +6,7 @@ import {
     type ValidationError,
     type ValidationResult,
     type ValidationWarning,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 const props = defineProps<{
     editor: WorkflowEditor;

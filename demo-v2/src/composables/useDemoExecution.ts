@@ -1,5 +1,5 @@
 import { ref } from 'vue';
-import { useWorkflowExecution as useCoreExecution } from '@or3/workflow-vue';
+import { useWorkflowExecution as useCoreExecution } from 'or3-workflow-vue';
 import {
     OpenRouterExecutionAdapter,
     toolRegistry,
@@ -11,7 +11,7 @@ import {
     type CompactionResult,
     type SubflowRegistry,
     type TokenUsageDetails,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 /** Live streaming state for a parallel branch */
 export interface BranchStream {

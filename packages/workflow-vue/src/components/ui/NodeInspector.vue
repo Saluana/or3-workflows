@@ -12,7 +12,7 @@ import {
     registerDefaultModels,
     migrateOutputNodeData,
     type OutputNodeData,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 import OutputModeSelector from './output/OutputModeSelector.vue';
 import OutputSourcePicker from './output/OutputSourcePicker.vue';
 import OutputPreview from './output/OutputPreview.vue';

@@ -66,7 +66,7 @@ export {
     isParallelNodeData,
     isStartNodeData,
     isOutputNodeData,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 // Re-export vue-flow types for convenience
 export type { Edge, Node, Connection } from '@vue-flow/core';

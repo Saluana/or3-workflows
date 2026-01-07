@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue';
-import { NodeData, WorkflowEditor } from '@or3/workflow-core';
+import { NodeData, WorkflowEditor } from 'or3-workflow-core';
 import IconAgent from '../icons/IconAgent.vue';
 import IconRouter from '../icons/IconRouter.vue';
 import IconParallel from '../icons/IconParallel.vue';

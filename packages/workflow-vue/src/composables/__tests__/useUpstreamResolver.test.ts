@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ref } from 'vue';
 import { useUpstreamResolver } from '../useUpstreamResolver';
-import { WorkflowEditor, WorkflowNode, WorkflowEdge } from '@or3/workflow-core';
+import { WorkflowEditor, WorkflowNode, WorkflowEdge } from 'or3-workflow-core';
 
 // Mock WorkflowEditor
 const createMockEditor = (nodes: WorkflowNode[], edges: WorkflowEdge[]) => {

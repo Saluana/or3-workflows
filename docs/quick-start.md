@@ -5,7 +5,7 @@ Build your first workflow in 5 minutes.
 ## 1. Setup the Editor
 
 ```typescript
-import { WorkflowEditor, StarterKit } from '@or3/workflow-core';
+import { WorkflowEditor, StarterKit } from 'or3-workflow-core';
 
 const editor = new WorkflowEditor({
     extensions: StarterKit.configure(),
@@ -46,7 +46,7 @@ import {
     NodePalette,
     NodeInspector,
     useWorkflowEditor,
-} from '@or3/workflow-vue';
+} from 'or3-workflow-vue';
 
 const editor = useWorkflowEditor();
 </script>
@@ -70,7 +70,7 @@ const editor = useWorkflowEditor();
 ## 4. Execute the Workflow
 
 ```typescript
-import { OpenRouterExecutionAdapter } from '@or3/workflow-core';
+import { OpenRouterExecutionAdapter } from 'or3-workflow-core';
 import OpenRouter from '@openrouter/sdk';
 
 const client = new OpenRouter({ apiKey: 'your-api-key' });
@@ -101,7 +101,7 @@ console.log('Final output:', result.output);
 ## 5. Save and Load
 
 ```typescript
-import { LocalStorageAdapter } from '@or3/workflow-core';
+import { LocalStorageAdapter } from 'or3-workflow-core';
 
 const storage = new LocalStorageAdapter();
 
@@ -127,9 +127,9 @@ import {
     useWorkflowEditor,
     useWorkflowExecution,
     useWorkflowStorage,
-} from '@or3/workflow-vue';
+} from 'or3-workflow-vue';
 import OpenRouter from '@openrouter/sdk';
-import { LocalStorageAdapter, StarterKit, OpenRouterExecutionAdapter } from '@or3/workflow-core';
+import { LocalStorageAdapter, StarterKit, OpenRouterExecutionAdapter } from 'or3-workflow-core';
 
 // Editor setup
 const editor = useWorkflowEditor({

@@ -15,7 +15,7 @@ import {
     type OutputFormat,
     interpolateTemplate,
     formatOutput,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 ```
 
 ## Configuration
@@ -141,7 +141,7 @@ Format as markdown:
 Replace placeholders in a template:
 
 ```typescript
-import { interpolateTemplate } from '@or3/workflow-core';
+import { interpolateTemplate } from 'or3-workflow-core';
 
 const result = interpolateTemplate(
     'Hello {{name}}, your order {{orderId}} is ready.',
@@ -158,7 +158,7 @@ const result = interpolateTemplate(
 Format content based on output node config:
 
 ```typescript
-import { formatOutput } from '@or3/workflow-core';
+import { formatOutput } from 'or3-workflow-core';
 
 const result = formatOutput(inputContent, nodeData, context);
 ```
@@ -168,7 +168,7 @@ const result = formatOutput(inputContent, nodeData, context);
 Get placeholders from a template:
 
 ```typescript
-import { extractTemplatePlaceholders } from '@or3/workflow-core';
+import { extractTemplatePlaceholders } from 'or3-workflow-core';
 
 const placeholders = extractTemplatePlaceholders('{{name}} - {{email}}');
 // ['name', 'email']
@@ -350,7 +350,7 @@ Support Team`,
 ## Type Guard
 
 ```typescript
-import { isOutputNodeData } from '@or3/workflow-core';
+import { isOutputNodeData } from 'or3-workflow-core';
 
 if (isOutputNodeData(node.data)) {
     console.log(node.data.format); // Type-safe access

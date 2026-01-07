@@ -7,7 +7,7 @@ import type {
     ExecutionResult,
     ExecutionCallbacks,
     NodeStatus,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 export interface WorkflowExecutionState {
     isRunning: boolean;

@@ -9,7 +9,7 @@ While Loop nodes enable iterative workflows—repeat a set of nodes until a cond
 ## Import
 
 ```typescript
-import { WhileLoopExtension } from '@or3/workflow-core';
+import { WhileLoopExtension } from 'or3-workflow-core';
 ```
 
 ## Configuration
@@ -19,7 +19,10 @@ interface WhileLoopNodeData {
     /** Display label */
     label: string;
 
-    /** Condition prompt for LLM evaluation */
+    /** Loop mode: 'condition' (LLM based) or 'fixed' (runs maxIterations) */
+    loopMode: 'condition' | 'fixed';
+
+    /** Condition prompt for LLM evaluation (only for 'condition' mode) */
     conditionPrompt: string;
 
     /** Model for condition evaluation */
@@ -30,6 +33,18 @@ interface WhileLoopNodeData {
 
     /** Behavior when max iterations is reached */
     onMaxIterations: 'error' | 'warning' | 'continue';
+
+    /** Instructions to prepend to each iteration's input */
+    loopPrompt?: string;
+
+    /** Whether to include all previous iteration outputs in context */
+    includePreviousOutputs?: boolean;
+
+    /** Whether to include [Iteration X of Y] metadata in prompt */
+    includeIterationContext?: boolean;
+
+    /** Which output to return: 'last' (default), 'first', or 'all' (concatenated) */
+    outputMode?: 'last' | 'first' | 'all';
 
     /** Name of a custom evaluator function (registered in ExecutionOptions) */
     customEvaluator?: string;
@@ -51,7 +66,7 @@ editor.commands.createNode(
     'whileLoop',
     {
         label: 'Refine Until Good',
-        model: 'openai/gpt-4o-mini',
+        conditionModel: 'openai/gpt-4o-mini',
         conditionPrompt: `Evaluate if this response meets quality standards.
   
 Requirements:
@@ -170,7 +185,7 @@ editor.commands.createNode(
 );
 
 // Connect
-editor.commands.createEdge(loopId, bodyId, 'body');  // Loop body output
+editor.commands.createEdge(loopId, bodyId, 'body'); // Loop body output
 editor.commands.createEdge(loopId, 'output', 'done'); // Exit output
 editor.commands.createEdge(bodyId, loopId); // Feedback loop to input
 ```
@@ -187,18 +202,19 @@ Prevent infinite loops:
 ```
 
 When max is reached:
-- `error`: Throws an error
-- `warning`: Logs a warning and exits normally
-- `continue`: Silently exits without warning
+
+-   `error`: Throws an error
+-   `warning`: Logs a warning and exits normally
+-   `continue`: Silently exits without warning
 
 ## Validation
 
-| Code                      | Type    | Description             |
-| ------------------------- | ------- | ----------------------- |
-| `MISSING_CONDITION_PROMPT`| Error   | No condition prompt     |
-| `INVALID_MAX_ITERATIONS`  | Error   | Max iterations <= 0     |
-| `MISSING_BODY`            | Warning | Body port not connected |
-| `MISSING_EXIT`            | Warning | Done port not connected |
+| Code                       | Type    | Description             |
+| -------------------------- | ------- | ----------------------- |
+| `MISSING_CONDITION_PROMPT` | Error   | No condition prompt     |
+| `INVALID_MAX_ITERATIONS`   | Error   | Max iterations <= 0     |
+| `MISSING_BODY`             | Warning | Body port not connected |
+| `MISSING_EXIT`             | Warning | Done port not connected |
 
 ## StarterKit Configuration
 

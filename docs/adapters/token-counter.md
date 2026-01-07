@@ -33,7 +33,7 @@ interface Message {
 Fast approximation (4 characters ≈ 1 token):
 
 ```typescript
-import { SimpleTokenCounter } from '@or3/workflow-core';
+import { SimpleTokenCounter } from 'or3-workflow-core';
 
 const counter = new SimpleTokenCounter();
 
@@ -48,7 +48,7 @@ Good for development and testing, but not accurate enough for production.
 Accurate OpenAI-compatible counting using tiktoken:
 
 ```typescript
-import { TiktokenCounter } from '@or3/workflow-core';
+import { TiktokenCounter } from 'or3-workflow-core';
 
 const counter = new TiktokenCounter({
     model: 'gpt-4', // Uses cl100k_base encoding
@@ -73,7 +73,7 @@ const counter = new TiktokenCounter({
 
 ```typescript
 import Anthropic from '@anthropic-ai/sdk';
-import type { TokenCounterAdapter, Message } from '@or3/workflow-core';
+import type { TokenCounterAdapter, Message } from 'or3-workflow-core';
 
 export class ClaudeTokenCounter implements TokenCounterAdapter {
     private anthropic: Anthropic;
@@ -123,7 +123,7 @@ export class ClaudeTokenCounter implements TokenCounterAdapter {
 Wrap any counter with caching for performance:
 
 ```typescript
-import type { TokenCounterAdapter, Message } from '@or3/workflow-core';
+import type { TokenCounterAdapter, Message } from 'or3-workflow-core';
 
 export class CachedTokenCounter implements TokenCounterAdapter {
     private cache = new Map<string, number>();
@@ -191,8 +191,8 @@ export class CachedTokenCounter implements TokenCounterAdapter {
 Route to appropriate counter based on model:
 
 ```typescript
-import type { TokenCounterAdapter, Message } from '@or3/workflow-core';
-import { TiktokenCounter } from '@or3/workflow-core';
+import type { TokenCounterAdapter, Message } from 'or3-workflow-core';
+import { TiktokenCounter } from 'or3-workflow-core';
 import { ClaudeTokenCounter } from './claude-counter';
 
 export class MultiModelTokenCounter implements TokenCounterAdapter {
@@ -264,7 +264,7 @@ Token counters enable automatic context compaction:
 import {
     OpenRouterExecutionAdapter,
     TiktokenCounter,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 const tokenCounter = new TiktokenCounter({ model: 'gpt-4' });
 

@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import type { Edge } from '@vue-flow/core';
-import type { WorkflowEditor } from '@or3/workflow-core';
+import type { WorkflowEditor } from 'or3-workflow-core';
 import {
     WorkflowCanvas,
     EdgeLabelEditor,
     ValidationOverlay,
-} from '@or3/workflow-vue';
+} from 'or3-workflow-vue';
 
 // Props interface
 interface Props {
