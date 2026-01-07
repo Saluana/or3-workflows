@@ -11,7 +11,9 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5174,
+    host: '0.0.0.0',
+    port: 5000,
+    allowedHosts: true,
   },
   optimizeDeps: {
     include: ['@vue-flow/core', '@vue-flow/background', '@vue-flow/controls'],

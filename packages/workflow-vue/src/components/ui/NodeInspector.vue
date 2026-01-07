@@ -1,10 +1,28 @@
 <script setup lang="ts">
 import { ref, computed, watch, watchEffect } from 'vue';
-import { WorkflowEditor, WorkflowNode } from '@or3/workflow-core';
+import {
+    WorkflowEditor,
+    WorkflowNode,
+    type NodeErrorConfig,
+    type NodeRetryConfig,
+    type ErrorCode,
+    type HITLConfig,
+    type HITLMode,
+    modelRegistry,
+    registerDefaultModels,
+    migrateOutputNodeData,
+    type OutputNodeData,
+} from 'or3-workflow-core';
+import OutputModeSelector from './output/OutputModeSelector.vue';
+import OutputSourcePicker from './output/OutputSourcePicker.vue';
+import OutputPreview from './output/OutputPreview.vue';
+import { useOutputPreview } from '../../composables/useOutputPreview';
+import { useUpstreamResolver } from '../../composables/useUpstreamResolver';
 
 // Type guard for configurable node data
 interface ConfigurableNodeData {
     label: string;
+    description?: string;
     prompt?: string;
     model?: string;
     tools?: string[];
@@ -28,6 +46,10 @@ function getToolsArray(data: unknown): string[] {
 
 const props = defineProps<{
     editor: WorkflowEditor;
+    availableTools?: ToolOption[];
+    availableSubflows?: SubflowOption[];
+    subflowListLoading?: boolean;
+    subflowListError?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -36,58 +58,55 @@ const emit = defineEmits<{
 }>();
 
 const selectedNode = ref<WorkflowNode | null>(null);
-const activeTab = ref<'prompt' | 'model' | 'tools'>('prompt');
+const activeTab = ref<
+    | 'prompt'
+    | 'model'
+    | 'tools'
+    | 'errors'
+    | 'hitl'
+    | 'subflow'
+    | 'output'
+    | 'routes'
+    | 'branches'
+>('prompt');
 
-// Available models
-const availableModels = [
-    { id: 'openai/gpt-4o', name: 'GPT-4o', provider: 'OpenAI' },
-    { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini', provider: 'OpenAI' },
-    { id: 'openai/gpt-4-turbo', name: 'GPT-4 Turbo', provider: 'OpenAI' },
-    {
-        id: 'anthropic/claude-3.5-sonnet',
-        name: 'Claude 3.5 Sonnet',
-        provider: 'Anthropic',
-    },
-    {
-        id: 'anthropic/claude-3-opus',
-        name: 'Claude 3 Opus',
-        provider: 'Anthropic',
-    },
-    {
-        id: 'anthropic/claude-3-haiku',
-        name: 'Claude 3 Haiku',
-        provider: 'Anthropic',
-    },
-    { id: 'google/gemini-pro-1.5', name: 'Gemini Pro 1.5', provider: 'Google' },
-    {
-        id: 'google/gemini-flash-1.5',
-        name: 'Gemini Flash 1.5',
-        provider: 'Google',
-    },
-    {
-        id: 'meta-llama/llama-3.1-70b-instruct',
-        name: 'Llama 3.1 70B',
-        provider: 'Meta',
-    },
-    {
-        id: 'meta-llama/llama-3.1-8b-instruct',
-        name: 'Llama 3.1 8B',
-        provider: 'Meta',
-    },
-    {
-        id: 'mistralai/mistral-large',
-        name: 'Mistral Large',
-        provider: 'Mistral',
-    },
-    {
-        id: 'mistralai/mixtral-8x7b-instruct',
-        name: 'Mixtral 8x7B',
-        provider: 'Mistral',
-    },
-];
+// Prefer host-provided tools; fall back to built-in demo list if none supplied
+const availableTools = computed<ToolOption[]>(() => {
+    return props.availableTools ?? defaultAvailableTools;
+});
 
-// Available tools
-const availableTools = [
+const availableSubflows = computed<SubflowOption[]>(() => {
+    return props.availableSubflows ?? [];
+});
+
+// Available models from registry
+// Register defaults if registry is empty
+if (modelRegistry.size === 0) {
+    registerDefaultModels();
+}
+
+const availableModels = computed(() => {
+    return modelRegistry.getAllInfo().map((m) => ({
+        id: m.id,
+        name: m.name,
+        provider: m.provider,
+    }));
+});
+
+interface ToolOption {
+    id: string;
+    name: string;
+    description?: string;
+}
+
+interface SubflowOption {
+    id: string;
+    name: string;
+    description?: string;
+}
+
+// Available tools (fallback when host doesn't provide a list)
+const defaultAvailableTools: ToolOption[] = [
     {
         id: 'web_search',
         name: 'Web Search',
@@ -125,10 +144,23 @@ const updateSelection = () => {
     if (selected.length === 1) {
         const node =
             props.editor.getNodes().find((n) => n.id === selected[0]) || null;
+
+        const previousId = selectedNode.value?.id;
         selectedNode.value = node;
+
         // Sync tools from node data using type guard
         if (node) {
             selectedTools.value = getToolsArray(node.data);
+
+            // Only reset tab if selection changed
+            if (previousId !== node.id) {
+                activeTab.value =
+                    node.type === 'output'
+                        ? 'output'
+                        : node.type === 'parallel'
+                        ? 'branches'
+                        : 'prompt';
+            }
         }
     } else {
         selectedNode.value = null;
@@ -149,6 +181,11 @@ watch(
 
 // Use watchEffect for proper subscription cleanup on editor prop change
 watchEffect((onCleanup) => {
+    if (props.editor.isDestroyed()) {
+        selectedNode.value = null;
+        selectedTools.value = [];
+        return;
+    }
     updateSelection();
     const unsub1 = props.editor.on('selectionUpdate', updateSelection);
     const unsub2 = props.editor.on('update', updateSelection);
@@ -162,18 +199,388 @@ watchEffect((onCleanup) => {
 const isAgentNode = computed(() => selectedNode.value?.type === 'agent');
 const isRouterNode = computed(() => selectedNode.value?.type === 'router');
 const isParallelNode = computed(() => selectedNode.value?.type === 'parallel');
+const isWhileNode = computed(() => selectedNode.value?.type === 'whileLoop');
 const isStartNode = computed(() => selectedNode.value?.type === 'start');
+const isSubflowNode = computed(() => selectedNode.value?.type === 'subflow');
+const isOutputNode = computed(() => selectedNode.value?.type === 'output');
 const canDelete = computed(
     () => selectedNode.value && selectedNode.value.type !== 'start'
 );
 const isConfigurable = computed(
-    () => isAgentNode.value || isRouterNode.value || isParallelNode.value
+    () =>
+        isAgentNode.value ||
+        isRouterNode.value ||
+        isParallelNode.value ||
+        isWhileNode.value ||
+        isSubflowNode.value ||
+        isOutputNode.value
 );
+const hasErrorHandling = computed(
+    () => isAgentNode.value || isRouterNode.value
+);
+const hasHITL = computed(() => isAgentNode.value || isRouterNode.value);
 
 const nodeData = computed<ConfigurableNodeData>(() => {
     const data = selectedNode.value?.data;
     return isConfigurableData(data) ? data : { label: 'Unknown' };
 });
+
+const whileData = computed(() => {
+    const data = selectedNode.value?.data as any;
+    return data || {};
+});
+
+const advancedOutputExpanded = ref(false);
+
+const outputData = computed<OutputNodeData>(() => {
+    const data = selectedNode.value?.data;
+    if (!data) return {} as OutputNodeData;
+    return migrateOutputNodeData(data);
+});
+
+// Reactive node ID for upstream resolver
+const selectedNodeId = computed(() => selectedNode.value?.id || '');
+
+// Upstream resolver - now reactive to editor updates and node selection changes
+const upstreamGroups = useUpstreamResolver(
+    computed(() => props.editor),
+    selectedNodeId
+);
+
+// Preview
+const previewData = useOutputPreview(
+    computed(() => props.editor),
+    outputData,
+    selectedNodeId
+);
+
+// Update handlers
+const updateOutputMode = (mode: 'combine' | 'synthesis') => {
+    if (!selectedNode.value) return;
+    props.editor.commands.updateNodeData(selectedNode.value.id, { mode });
+};
+
+const updateOutputSources = (sources: string[]) => {
+    if (!selectedNode.value) return;
+    props.editor.commands.updateNodeData(selectedNode.value.id, { sources });
+};
+
+const updateIntroText = (e: Event) => {
+    if (!selectedNode.value) return;
+    const value = (e.target as HTMLTextAreaElement).value;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        introText: value,
+    });
+};
+
+const updateOutroText = (e: Event) => {
+    if (!selectedNode.value) return;
+    const value = (e.target as HTMLTextAreaElement).value;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        outroText: value,
+    });
+};
+
+const updateSynthesisPrompt = (e: Event) => {
+    if (!selectedNode.value) return;
+    const value = (e.target as HTMLTextAreaElement).value;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        synthesis: { ...outputData.value.synthesis, prompt: value },
+    });
+};
+
+const updateSynthesisModel = (e: Event) => {
+    if (!selectedNode.value) return;
+    const value = (e.target as HTMLSelectElement).value;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        synthesis: { ...outputData.value.synthesis, model: value },
+    });
+};
+
+const toggleRawTemplate = () => {
+    if (!selectedNode.value) return;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        useRawTemplate: !outputData.value.useRawTemplate,
+    });
+};
+
+const toggleIncludeMetadata = () => {
+    if (!selectedNode.value) return;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        includeMetadata: !outputData.value.includeMetadata,
+    });
+};
+
+const updateOutputTemplate = (e: Event) => {
+    if (!selectedNode.value) return;
+    const value = (e.target as HTMLTextAreaElement).value;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        template: value,
+    });
+};
+
+// Normalize output format to markdown (text) and clear legacy schema
+watch(
+    () => ({
+        fmt: outputData.value.format,
+        nodeId: selectedNode.value?.id,
+    }),
+    ({ fmt, nodeId }) => {
+        if (!nodeId) return;
+        if (fmt && fmt !== 'markdown') {
+            props.editor.commands.updateNodeData(nodeId, {
+                format: 'markdown',
+                schema: undefined,
+            });
+        }
+    },
+    { immediate: true }
+);
+const subflowData = computed(() => {
+    const data = selectedNode.value?.data as any;
+    return {
+        subflowId: data?.subflowId ?? '',
+        inputMappings: data?.inputMappings ?? {},
+        shareSession: data?.shareSession ?? true,
+    };
+});
+
+const subflowOptions = computed(() => {
+    const options = [...availableSubflows.value];
+    const currentId = subflowData.value.subflowId;
+    if (currentId && !options.some((option) => option.id === currentId)) {
+        options.unshift({
+            id: currentId,
+            name: 'Custom ID',
+            description: 'Not in your workflow list.',
+        });
+    }
+    return options;
+});
+
+const selectedSubflow = computed(() => {
+    const currentId = subflowData.value.subflowId;
+    if (!currentId) return null;
+    return (
+        subflowOptions.value.find((option) => option.id === currentId) || null
+    );
+});
+
+const showManualSubflowInput = ref(false);
+
+watch(
+    () => [subflowData.value.subflowId, availableSubflows.value.length],
+    ([subflowId]) => {
+        if (!subflowId) return;
+        if (!availableSubflows.value.some((option) => option.id === subflowId)) {
+            showManualSubflowInput.value = true;
+        }
+    },
+    { immediate: true }
+);
+
+const routerData = computed(() => {
+    const data = selectedNode.value?.data as any;
+    return {
+        routes: Array.isArray(data?.routes) ? data.routes : [],
+    };
+});
+
+// Parallel node data
+interface BranchConfig {
+    id: string;
+    label: string;
+    model?: string;
+    prompt?: string;
+    tools?: string[];
+}
+
+const parallelData = computed(() => {
+    const data = selectedNode.value?.data as any;
+    return {
+        branches: Array.isArray(data?.branches) ? data.branches : [],
+        mergeModel: data?.model || '',
+        mergePrompt: data?.prompt || '',
+        mergeEnabled: data?.mergeEnabled,
+    };
+});
+
+const addBranch = () => {
+    if (!selectedNode.value) return;
+    const branches = [...parallelData.value.branches];
+    const id = `branch-${Date.now()}`;
+    branches.push({ id, label: `Branch ${branches.length + 1}` });
+    props.editor.commands.updateNodeData(selectedNode.value.id, { branches });
+};
+
+const removeBranch = (branchId: string) => {
+    if (!selectedNode.value) return;
+    const nodeId = selectedNode.value.id;
+
+    // First, delete any edges connected to this branch's output handle
+    const edges = props.editor.getEdges();
+    const edgesToDelete = edges.filter(
+        (edge) => edge.source === nodeId && edge.sourceHandle === branchId
+    );
+    for (const edge of edgesToDelete) {
+        props.editor.commands.deleteEdge(edge.id);
+    }
+
+    // Then update the branches array
+    const branches = parallelData.value.branches.filter(
+        (b: BranchConfig) => b.id !== branchId
+    );
+    props.editor.commands.updateNodeData(nodeId, { branches });
+};
+
+const updateBranchLabel = (branchId: string, label: string) => {
+    if (!selectedNode.value) return;
+    const branches = parallelData.value.branches.map((b: BranchConfig) =>
+        b.id === branchId ? { ...b, label } : b
+    );
+    props.editor.commands.updateNodeData(selectedNode.value.id, { branches });
+};
+
+const updateBranchModel = (branchId: string, model: string) => {
+    if (!selectedNode.value) return;
+    const branches = parallelData.value.branches.map((b: BranchConfig) =>
+        b.id === branchId ? { ...b, model: model || undefined } : b
+    );
+    props.editor.commands.updateNodeData(selectedNode.value.id, { branches });
+};
+
+const updateBranchPrompt = (branchId: string, prompt: string) => {
+    if (!selectedNode.value) return;
+    const branches = parallelData.value.branches.map((b: BranchConfig) =>
+        b.id === branchId ? { ...b, prompt: prompt || undefined } : b
+    );
+    props.editor.commands.updateNodeData(selectedNode.value.id, { branches });
+};
+
+const updateBranchTools = (branchId: string, tools: string[]) => {
+    if (!selectedNode.value) return;
+    const branches = parallelData.value.branches.map((b: BranchConfig) =>
+        b.id === branchId ? { ...b, tools } : b
+    );
+    props.editor.commands.updateNodeData(selectedNode.value.id, { branches });
+};
+
+const toggleBranchTool = (branchId: string, toolId: string) => {
+    const branch = parallelData.value.branches.find(
+        (b: BranchConfig) => b.id === branchId
+    );
+    if (!branch) return;
+
+    const currentTools = branch.tools || [];
+    const idx = currentTools.indexOf(toolId);
+    let newTools: string[];
+
+    if (idx === -1) {
+        newTools = [...currentTools, toolId];
+    } else {
+        newTools = [...currentTools];
+        newTools.splice(idx, 1);
+    }
+
+    updateBranchTools(branchId, newTools);
+};
+
+// Track which branch is expanded for editing
+const expandedBranchId = ref<string | null>(null);
+
+const toggleBranchExpanded = (branchId: string) => {
+    expandedBranchId.value =
+        expandedBranchId.value === branchId ? null : branchId;
+};
+
+const addRoute = () => {
+    if (!selectedNode.value) return;
+    const routes = [...routerData.value.routes];
+    const id = `route-${Date.now()}`;
+    routes.push({ id, label: `Route ${routes.length + 1}` });
+    props.editor.commands.updateNodeData(selectedNode.value.id, { routes });
+};
+
+const removeRoute = (routeId: string) => {
+    if (!selectedNode.value) return;
+    const nodeId = selectedNode.value.id;
+
+    // First, delete any edges connected to this route's output handle
+    const edges = props.editor.getEdges();
+    const edgesToDelete = edges.filter(
+        (edge) => edge.source === nodeId && edge.sourceHandle === routeId
+    );
+    for (const edge of edgesToDelete) {
+        props.editor.commands.deleteEdge(edge.id);
+    }
+
+    // Then update the routes array
+    const routes = routerData.value.routes.filter((r: any) => r.id !== routeId);
+    props.editor.commands.updateNodeData(nodeId, { routes });
+};
+
+const updateRouteLabel = (routeId: string, label: string) => {
+    if (!selectedNode.value) return;
+    const routes = routerData.value.routes.map((r: any) =>
+        r.id === routeId ? { ...r, label } : r
+    );
+    props.editor.commands.updateNodeData(selectedNode.value.id, { routes });
+};
+
+const errorHandling = computed<NodeErrorConfig>(() => {
+    const data = selectedNode.value?.data as
+        | { errorHandling?: NodeErrorConfig }
+        | undefined;
+    return data?.errorHandling ?? { mode: 'stop' };
+});
+
+const retryConfig = computed<NodeRetryConfig>(() => {
+    const retry = errorHandling.value.retry;
+    return {
+        maxRetries: retry?.maxRetries ?? 0,
+        baseDelay: retry?.baseDelay ?? 1000,
+        maxDelay: retry?.maxDelay,
+        retryOn: retry?.retryOn ?? [],
+        skipOn: retry?.skipOn,
+    };
+});
+
+const hitlConfig = computed<HITLConfig>(() => {
+    const data = selectedNode.value?.data as { hitl?: HITLConfig } | undefined;
+    return data?.hitl ?? { enabled: false, mode: 'approval' };
+});
+
+const hitlModes: Array<{ id: HITLMode; label: string; description: string }> = [
+    {
+        id: 'approval',
+        label: 'Approval',
+        description: 'Pause before execution for approve/reject',
+    },
+    {
+        id: 'input',
+        label: 'Input',
+        description: 'Collect human input before execution',
+    },
+    {
+        id: 'review',
+        label: 'Review',
+        description: 'Pause after execution to review output',
+    },
+];
+
+const hitlDefaultActions = [
+    { id: 'approve', label: 'Approve' },
+    { id: 'reject', label: 'Reject' },
+    { id: 'skip', label: 'Skip' },
+];
+
+const errorCodes: { id: ErrorCode; label: string }[] = [
+    { id: 'RATE_LIMIT', label: 'Rate Limit' },
+    { id: 'TIMEOUT', label: 'Timeout' },
+    { id: 'NETWORK', label: 'Network' },
+    { id: 'LLM_ERROR', label: 'LLM Error' },
+    { id: 'VALIDATION', label: 'Validation' },
+];
 
 // Update handlers with debounce
 let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -191,15 +598,21 @@ const updateLabel = (event: Event) => {
     debouncedUpdate('label', (event.target as HTMLInputElement).value);
 };
 
+const updateDescription = (event: Event) => {
+    debouncedUpdate('description', (event.target as HTMLTextAreaElement).value);
+};
+
 const updateModel = (event: Event) => {
     const value = (event.target as HTMLSelectElement).value;
     props.editor.commands.updateNodeData(selectedNode.value!.id, {
-        model: value,
+        ...(isWhileNode.value ? { conditionModel: value } : { model: value }),
     });
 };
 
 const updatePrompt = (event: Event) => {
-    debouncedUpdate('prompt', (event.target as HTMLTextAreaElement).value);
+    const value = (event.target as HTMLTextAreaElement).value;
+    const field = isWhileNode.value ? 'conditionPrompt' : 'prompt';
+    debouncedUpdate(field, value);
 };
 
 // Toggle tool selection
@@ -216,11 +629,198 @@ const toggleTool = (toolId: string) => {
     });
 };
 
+const updateErrorHandling = (partial: Partial<NodeErrorConfig>) => {
+    if (!selectedNode.value) return;
+    const current = errorHandling.value;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        errorHandling: {
+            ...current,
+            ...partial,
+        },
+    });
+};
+
+const updateRetryConfig = (changes: Partial<NodeRetryConfig>) => {
+    updateErrorHandling({
+        retry: {
+            ...retryConfig.value,
+            ...changes,
+        },
+    });
+};
+
+const updateErrorMode = (mode: NodeErrorConfig['mode']) => {
+    updateErrorHandling({ mode });
+};
+
+const toggleRetryOn = (code: ErrorCode) => {
+    const current = retryConfig.value.retryOn || [];
+    const updated = current.includes(code)
+        ? current.filter((c) => c !== code)
+        : [...current, code];
+    updateRetryConfig({ retryOn: updated });
+};
+
+const onRetryNumberChange = (
+    field: 'maxRetries' | 'baseDelay' | 'maxDelay',
+    event: Event
+) => {
+    const value = Number((event.target as HTMLInputElement).value);
+    updateRetryConfig({
+        [field]: Number.isFinite(value) ? value : undefined,
+    } as Partial<NodeRetryConfig>);
+};
+
+const updateMaxIterations = (event: Event) => {
+    const value = Number((event.target as HTMLInputElement).value);
+    debouncedUpdate('maxIterations', Number.isFinite(value) ? value : 1);
+};
+
+const updateOnMaxBehavior = (event: Event) => {
+    debouncedUpdate(
+        'onMaxIterations',
+        (event.target as HTMLSelectElement).value
+    );
+};
+
+const updateCustomEvaluator = (event: Event) => {
+    debouncedUpdate(
+        'customEvaluator',
+        (event.target as HTMLInputElement).value
+    );
+};
+
+// Loop mode handlers
+const updateLoopMode = (event: Event) => {
+    debouncedUpdate('loopMode', (event.target as HTMLSelectElement).value);
+};
+
+const setLoopOutputMode = (mode: 'last' | 'accumulate') => {
+    if (!selectedNode.value) return;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        outputMode: mode,
+    });
+};
+
+const toggleIncludePreviousOutputs = () => {
+    if (!selectedNode.value) return;
+    const current = whileData.value.includePreviousOutputs !== false; // default true
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        includePreviousOutputs: !current,
+    });
+};
+
+const toggleIncludeIterationContext = () => {
+    if (!selectedNode.value) return;
+    const current = whileData.value.includeIterationContext !== false; // default true
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        includeIterationContext: !current,
+    });
+};
+
+const updateLoopPrompt = (event: Event) => {
+    debouncedUpdate('loopPrompt', (event.target as HTMLTextAreaElement).value);
+};
+
+// HITL update handlers
+const updateHITL = (partial: Partial<HITLConfig>) => {
+    if (!selectedNode.value) return;
+    const current = hitlConfig.value;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        hitl: {
+            ...current,
+            ...partial,
+        },
+    });
+};
+
+const toggleHITLEnabled = () => {
+    updateHITL({ enabled: !hitlConfig.value.enabled });
+};
+
+const updateHITLMode = (mode: HITLMode) => {
+    updateHITL({ mode });
+};
+
+const updateHITLPrompt = (event: Event) => {
+    if (!selectedNode.value) return;
+    const value = (event.target as HTMLTextAreaElement).value;
+    if (debounceTimeout) clearTimeout(debounceTimeout);
+    debounceTimeout = setTimeout(() => {
+        updateHITL({ prompt: value });
+    }, 200);
+};
+
+const updateHITLTimeout = (event: Event) => {
+    const value = Number((event.target as HTMLInputElement).value);
+    updateHITL({
+        timeout: Number.isFinite(value) && value > 0 ? value : undefined,
+    });
+};
+
+const updateHITLDefaultAction = (event: Event) => {
+    const value = (event.target as HTMLSelectElement)
+        .value as HITLConfig['defaultAction'];
+    updateHITL({ defaultAction: value });
+};
+
+// Subflow update handlers
+const setSubflowId = (value: string) => {
+    debouncedUpdate('subflowId', value);
+};
+
+const updateSubflowIdInput = (event: Event) => {
+    setSubflowId((event.target as HTMLInputElement).value);
+};
+
+const updateSubflowIdSelect = (event: Event) => {
+    const value = (event.target as HTMLSelectElement).value;
+    setSubflowId(value);
+    if (value && availableSubflows.value.some((option) => option.id === value)) {
+        showManualSubflowInput.value = false;
+    }
+};
+
+const toggleManualSubflowInput = () => {
+    showManualSubflowInput.value = !showManualSubflowInput.value;
+};
+
+const toggleShareSession = () => {
+    if (!selectedNode.value) return;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        shareSession: !subflowData.value.shareSession,
+    });
+};
+
+const updateInputMapping = (inputId: string, value: string) => {
+    if (!selectedNode.value) return;
+    const current = subflowData.value.inputMappings || {};
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        inputMappings: {
+            ...current,
+            [inputId]: value,
+        },
+    });
+};
+
+const removeInputMapping = (inputId: string) => {
+    if (!selectedNode.value) return;
+    const current = { ...subflowData.value.inputMappings };
+    delete current[inputId];
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        inputMappings: current,
+    });
+};
+
 const handleDelete = () => {
     if (!selectedNode.value || !canDelete.value) return;
-    if (confirm(`Delete "${nodeData.value.label}"?`)) {
-        props.editor.commands.deleteNode(selectedNode.value.id);
-        emit('delete', selectedNode.value.id);
+    const nodeId = selectedNode.value.id;
+    const nodeLabel = nodeData.value.label;
+    if (confirm(`Delete "${nodeLabel}"?`)) {
+        // Clear selection first to prevent accessing deleted node
+        selectedNode.value = null;
+        props.editor.commands.deleteNode(nodeId);
+        emit('delete', nodeId);
     }
 };
 </script>
@@ -315,12 +915,43 @@ const handleDelete = () => {
             </button>
         </div>
 
-        <!-- Tabs for Agent nodes -->
-        <div v-if="isConfigurable" class="tabs">
+        <!-- Description field - helps router understand what this node does -->
+        <div v-if="isConfigurable" class="description-section">
+            <label class="description-label">
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                >
+                    <path
+                        d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                    ></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                    <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+                Description
+                <span class="description-hint"
+                    >(used by router for decisions)</span
+                >
+            </label>
+            <textarea
+                class="description-textarea"
+                :value="nodeData.description || ''"
+                placeholder="Describe what this node does... e.g., 'Handles complex math problems and coding questions'"
+                @input="updateDescription"
+            ></textarea>
+        </div>
+
+        <!-- Tabs for Agent/Router/Parallel nodes -->
+        <div v-if="isConfigurable || hasErrorHandling" class="tabs">
             <button
                 class="tab"
                 :class="{ active: activeTab === 'prompt' }"
                 @click="activeTab = 'prompt'"
+                v-if="isConfigurable && !isOutputNode && !isParallelNode"
             >
                 <svg
                     viewBox="0 0 24 24"
@@ -332,12 +963,19 @@ const handleDelete = () => {
                     <circle cx="12" cy="5" r="2"></circle>
                     <path d="M12 7v4"></path>
                 </svg>
-                {{ isRouterNode ? 'Instructions' : 'Prompt' }}
+                {{
+                    isRouterNode
+                        ? 'Instructions'
+                        : isWhileNode
+                        ? 'Condition'
+                        : 'Instructions'
+                }}
             </button>
             <button
                 class="tab"
                 :class="{ active: activeTab === 'model' }"
                 @click="activeTab = 'model'"
+                v-if="isConfigurable && !isOutputNode && !isParallelNode"
             >
                 <svg
                     viewBox="0 0 24 24"
@@ -366,6 +1004,46 @@ const handleDelete = () => {
                 Model
             </button>
             <button
+                v-if="isRouterNode"
+                class="tab"
+                :class="{ active: activeTab === 'routes' }"
+                @click="activeTab = 'routes'"
+            >
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                >
+                    <path d="M9 18l6-6-6-6"></path>
+                </svg>
+                Routes
+                <span class="tool-count">{{ routerData.routes.length }}</span>
+            </button>
+            <button
+                v-if="isParallelNode"
+                class="tab"
+                :class="{ active: activeTab === 'branches' }"
+                @click="activeTab = 'branches'"
+            >
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                >
+                    <circle cx="18" cy="18" r="3"></circle>
+                    <circle cx="6" cy="6" r="3"></circle>
+                    <circle cx="18" cy="6" r="3"></circle>
+                    <path d="M6 9v12"></path>
+                    <path d="M18 9v6"></path>
+                </svg>
+                Branches
+                <span class="tool-count">{{
+                    parallelData.branches.length
+                }}</span>
+            </button>
+            <button
                 v-if="isAgentNode"
                 class="tab"
                 :class="{ active: activeTab === 'tools' }"
@@ -386,50 +1064,383 @@ const handleDelete = () => {
                     selectedTools.length
                 }}</span>
             </button>
+            <button
+                v-if="hasErrorHandling"
+                class="tab"
+                :class="{ active: activeTab === 'errors' }"
+                @click="activeTab = 'errors'"
+            >
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                >
+                    <path
+                        d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                    ></path>
+                    <line x1="12" y1="9" x2="12" y2="13"></line>
+                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+                Errors
+            </button>
+            <button
+                v-if="hasHITL"
+                class="tab"
+                :class="{ active: activeTab === 'hitl' }"
+                @click="activeTab = 'hitl'"
+            >
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                >
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+                HITL
+                <span v-if="hitlConfig.enabled" class="hitl-badge">ON</span>
+            </button>
+            <button
+                v-if="isSubflowNode"
+                class="tab"
+                :class="{ active: activeTab === 'subflow' }"
+                @click="activeTab = 'subflow'"
+            >
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                >
+                    <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+                    <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+                    <rect x="8.5" y="14" width="7" height="7" rx="1"></rect>
+                    <path d="M6.5 10v2a2 2 0 002 2h1"></path>
+                    <path d="M17.5 10v2a2 2 0 01-2 2h-1"></path>
+                </svg>
+                Subflow
+            </button>
+            <button
+                v-if="isOutputNode"
+                class="tab"
+                :class="{ active: activeTab === 'output' }"
+                @click="activeTab = 'output'"
+            >
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                >
+                    <path
+                        d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"
+                    ></path>
+                    <line x1="4" y1="22" x2="4" y2="15"></line>
+                </svg>
+                Output
+            </button>
         </div>
 
         <!-- Tab Content -->
-        <div v-if="isConfigurable" class="tab-content">
+        <div
+            v-if="
+                isConfigurable ||
+                hasErrorHandling ||
+                hasHITL ||
+                isSubflowNode ||
+                isOutputNode
+            "
+            class="tab-content"
+        >
             <!-- Prompt Tab -->
-            <div v-if="activeTab === 'prompt'" class="prompt-tab">
-                <label class="field-label">
-                    {{
-                        isRouterNode
-                            ? 'Routing Instructions'
-                            : isParallelNode
-                            ? 'Merge Prompt'
-                            : 'System Prompt'
-                    }}
-                </label>
-                <textarea
-                    :value="nodeData.prompt || ''"
-                    class="prompt-textarea"
-                    :placeholder="
-                        isRouterNode
-                            ? 'Instructions for routing decisions...\n\nExample:\nRoute to Technical if the user mentions bugs, errors, or technical issues.\nRoute to Sales for pricing or product inquiries.'
-                            : isParallelNode
-                            ? 'Instructions for merging parallel outputs...'
-                            : 'Enter the system prompt for this agent...\n\nExample:\nYou are a helpful technical support specialist. Help users troubleshoot issues with their software.'
-                    "
-                    @input="updatePrompt"
-                ></textarea>
-                <p class="field-hint">
-                    {{
-                        isRouterNode
-                            ? 'These instructions help the router decide which branch to take. Edge labels are used to make decisions.'
-                            : isParallelNode
-                            ? 'This prompt is used to merge/summarize outputs from all parallel branches.'
-                            : "This prompt defines the agent's behavior and personality."
-                    }}
-                </p>
+            <div
+                v-if="
+                    activeTab === 'prompt' &&
+                    isConfigurable &&
+                    !isOutputNode &&
+                    !isParallelNode
+                "
+                class="prompt-tab"
+            >
+                <template v-if="isWhileNode">
+                    <!-- Loop Mode Selection -->
+                    <div class="field-group">
+                        <label class="field-label">Loop Strategy</label>
+                        <div class="mode-buttons">
+                            <button
+                                class="mode-button"
+                                :class="{
+                                    active: whileData.loopMode !== 'fixed',
+                                }"
+                                @click="
+                                    updateLoopMode({
+                                        target: { value: 'while' },
+                                    } as any)
+                                "
+                            >
+                                Smart Loop (AI)
+                            </button>
+                            <button
+                                class="mode-button"
+                                :class="{
+                                    active: whileData.loopMode === 'fixed',
+                                }"
+                                @click="
+                                    updateLoopMode({
+                                        target: { value: 'fixed' },
+                                    } as any)
+                                "
+                            >
+                                Fixed Count
+                            </button>
+                        </div>
+                        <p class="field-hint">
+                            {{
+                                whileData.loopMode === 'fixed'
+                                    ? 'Runs exactly N times. Good for batch processing.'
+                                    : 'AI evaluates results to decide when to stop.'
+                            }}
+                        </p>
+                    </div>
+
+                    <!-- Condition Prompt (only for while mode) -->
+                    <template v-if="whileData.loopMode !== 'fixed'">
+                        <div class="field-group">
+                            <label class="field-label">Stop Condition</label>
+                            <textarea
+                                :value="whileData.conditionPrompt || ''"
+                                class="prompt-textarea condition-prompt"
+                                placeholder='Example: "If the summary is concise and covers all points, respond DONE. Otherwise respond CONTINUE."'
+                                @input="updatePrompt"
+                                rows="4"
+                            ></textarea>
+                        </div>
+                    </template>
+
+                    <div class="grid loop-grid">
+                        <div class="field-group">
+                            <label class="field-label">{{
+                                whileData.loopMode === 'fixed'
+                                    ? 'Run Count'
+                                    : 'Max Limit'
+                            }}</label>
+                            <input
+                                type="number"
+                                min="1"
+                                class="text-input"
+                                :value="whileData.maxIterations ?? 10"
+                                @input="updateMaxIterations"
+                            />
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">On Limit Reached</label>
+                            <select
+                                class="model-select"
+                                :value="whileData.onMaxIterations || 'warning'"
+                                @change="updateOnMaxBehavior"
+                            >
+                                <option value="warning">
+                                    Warn &amp; Continue
+                                </option>
+                                <option value="continue">
+                                    Silent Continue
+                                </option>
+                                <option value="error">Stop with Error</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Loop Instructions -->
+                    <div
+                        class="field-group"
+                        style="margin-top: var(--or3-spacing-md)"
+                    >
+                        <label class="field-label">Loop Instructions</label>
+                        <textarea
+                            :value="whileData.loopPrompt || ''"
+                            class="prompt-textarea loop-prompt"
+                            placeholder='Tell the AI what to do each time.
+
+Example: "Improve this text, making it clearer and more engaging."'
+                            @input="updateLoopPrompt"
+                            rows="3"
+                        ></textarea>
+                        <p class="field-hint">
+                            These instructions are added to the input at the
+                            start of each run.
+                        </p>
+                    </div>
+
+                    <!-- Output Configuration -->
+                    <div
+                        class="field-group"
+                        style="margin-top: var(--or3-spacing-lg)"
+                    >
+                        <label class="field-label">Output Handling</label>
+                        <div class="mode-buttons">
+                            <button
+                                class="mode-button"
+                                :class="{
+                                    active:
+                                        (whileData.outputMode || 'last') ===
+                                        'last',
+                                }"
+                                @click="setLoopOutputMode('last')"
+                            >
+                                Last Result Only
+                            </button>
+                            <button
+                                class="mode-button"
+                                :class="{
+                                    active:
+                                        whileData.outputMode === 'accumulate',
+                                }"
+                                @click="setLoopOutputMode('accumulate')"
+                            >
+                                Collect All
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="section-divider"></div>
+
+                    <label class="field-label section-title"
+                        >Context Visibility</label
+                    >
+                    <p class="section-subtitle">
+                        Choose what information is available to nodes inside the
+                        loop.
+                    </p>
+
+                    <div class="toggle-group">
+                        <label
+                            class="tool-item"
+                            :class="{
+                                enabled:
+                                    whileData.includePreviousOutputs !== false,
+                            }"
+                        >
+                            <input
+                                type="checkbox"
+                                :checked="
+                                    whileData.includePreviousOutputs !== false
+                                "
+                                @change="toggleIncludePreviousOutputs"
+                            />
+                            <div class="tool-info">
+                                <span class="tool-name"
+                                    >Previous Iterations</span
+                                >
+                                <span class="tool-description"
+                                    >Let the AI see results from earlier
+                                    runs</span
+                                >
+                            </div>
+                        </label>
+
+                        <label
+                            class="tool-item"
+                            :class="{
+                                enabled:
+                                    whileData.includeIterationContext !== false,
+                            }"
+                        >
+                            <input
+                                type="checkbox"
+                                :checked="
+                                    whileData.includeIterationContext !== false
+                                "
+                                @change="toggleIncludeIterationContext"
+                            />
+                            <div class="tool-info">
+                                <span class="tool-name">Loop Counter</span>
+                                <span class="tool-description"
+                                    >Show current iteration number (1/10)</span
+                                >
+                            </div>
+                        </label>
+                    </div>
+
+                    <!-- Advanced (Custom Evaluator) -->
+                    <template v-if="whileData.loopMode !== 'fixed'">
+                        <div class="section-divider"></div>
+                        <details class="advanced-section">
+                            <summary class="advanced-toggle">
+                                Advanced: Custom Evaluator
+                            </summary>
+                            <div class="advanced-content">
+                                <div class="field-group">
+                                    <label class="field-label"
+                                        >Function Name</label
+                                    >
+                                    <input
+                                        type="text"
+                                        class="text-input"
+                                        :value="whileData.customEvaluator || ''"
+                                        placeholder="e.g. checkQualityScore"
+                                        @input="updateCustomEvaluator"
+                                    />
+                                    <p class="field-hint">
+                                        Bypass AI evaluation and use a
+                                        registered function to decide when to
+                                        stop.
+                                    </p>
+                                </div>
+                            </div>
+                        </details>
+                    </template>
+                </template>
+                <template v-else>
+                    <label class="field-label">
+                        {{
+                            isRouterNode
+                                ? 'Routing Instructions'
+                                : isParallelNode
+                                ? 'Merge Instructions'
+                                : 'Instructions'
+                        }}
+                    </label>
+                    <textarea
+                        :value="nodeData.prompt || ''"
+                        class="prompt-textarea"
+                        :placeholder="
+                            isRouterNode
+                                ? 'Instructions for routing decisions...\n\nExample:\nRoute to Technical if the user mentions bugs, errors, or technical issues.\nRoute to Sales for pricing or product inquiries.'
+                                : isParallelNode
+                                ? 'Instructions for merging parallel outputs...'
+                                : 'Enter the system prompt for this agent...\n\nExample:\nYou are a helpful technical support specialist. Help users troubleshoot issues with their software.'
+                        "
+                        @input="updatePrompt"
+                    ></textarea>
+                    <p class="field-hint">
+                        {{
+                            isRouterNode
+                                ? 'These instructions help the router decide which branch to take. Edge labels are used to make decisions.'
+                                : isParallelNode
+                                ? 'This prompt is used to merge/summarize outputs from all parallel branches.'
+                                : "This prompt defines the agent's behavior and personality."
+                        }}
+                    </p>
+                </template>
             </div>
 
             <!-- Model Tab -->
-            <div v-if="activeTab === 'model'" class="model-tab">
-                <label class="field-label">Select Model</label>
+            <div
+                v-if="activeTab === 'model' && !isParallelNode"
+                class="model-tab"
+            >
+                <label class="field-label">
+                    {{ isWhileNode ? 'Condition Model' : 'Select Model' }}
+                </label>
                 <select
                     class="model-select"
-                    :value="nodeData.model || 'openai/gpt-4o-mini'"
+                    :value="
+                        isWhileNode
+                            ? whileData.conditionModel || 'z-ai/glm-4.6:exacto'
+                            : nodeData.model || 'z-ai/glm-4.6:exacto'
+                    "
                     @change="updateModel"
                 >
                     <option
@@ -442,74 +1453,863 @@ const handleDelete = () => {
                 </select>
                 <div class="model-id">
                     <span class="model-id-label">Model ID:</span>
-                    <code>{{ nodeData.model || 'openai/gpt-4o-mini' }}</code>
+                    <code>
+                        {{
+                            isWhileNode
+                                ? whileData.conditionModel ||
+                                  'z-ai/glm-4.6:exacto'
+                                : nodeData.model || 'z-ai/glm-4.6:exacto'
+                        }}
+                    </code>
                 </div>
             </div>
 
-            <!-- Tools Tab -->
-            <div v-if="activeTab === 'tools' && isAgentNode" class="tools-tab">
-                <label class="field-label">Available Tools</label>
+            <!-- Routes Tab -->
+            <div
+                v-if="activeTab === 'routes' && isRouterNode"
+                class="routes-tab"
+            >
+                <div class="routes-header">
+                    <label class="field-label">Defined Routes</label>
+                    <button class="add-btn with-label" @click="addRoute">
+                        <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                        Add Route
+                    </button>
+                </div>
                 <p class="field-hint">
-                    Select which tools this agent can use during execution.
+                    Define the possible routes for this node. Each route creates
+                    an output handle.
                 </p>
 
-                <div class="tools-list">
-                    <label
-                        v-for="tool in availableTools"
-                        :key="tool.id"
-                        class="tool-item"
-                        :class="{ enabled: selectedTools.includes(tool.id) }"
+                <div class="routes-list">
+                    <div
+                        v-for="route in routerData.routes"
+                        :key="route.id"
+                        class="route-item"
                     >
-                        <input
-                            type="checkbox"
-                            :checked="selectedTools.includes(tool.id)"
-                            @change="toggleTool(tool.id)"
-                        />
-                        <div class="tool-info">
-                            <span class="tool-name">{{ tool.name }}</span>
-                            <span class="tool-description">{{
-                                tool.description
-                            }}</span>
+                        <div class="route-inputs">
+                            <input
+                                type="text"
+                                class="text-input route-label"
+                                :value="route.label"
+                                @input="(e) => updateRouteLabel(route.id, (e.target as HTMLInputElement).value)"
+                                placeholder="Route Label"
+                            />
+                            <code class="route-id">{{ route.id }}</code>
                         </div>
-                    </label>
-                </div>
-
-                <div v-if="selectedTools.length > 0" class="selected-tools">
-                    <label class="field-label"
-                        >Enabled Tools ({{ selectedTools.length }})</label
-                    >
-                    <div class="tool-chips">
-                        <span
-                            v-for="toolId in selectedTools"
-                            :key="toolId"
-                            class="tool-chip"
+                        <button
+                            class="delete-btn"
+                            @click="removeRoute(route.id)"
+                            title="Remove route"
                         >
-                            {{
-                                availableTools.find((t) => t.id === toolId)
-                                    ?.name
-                            }}
-                            <button
-                                class="chip-remove"
-                                @click="toggleTool(toolId)"
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
                             >
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Branches Tab (Parallel Node) -->
+            <div
+                v-if="activeTab === 'branches' && isParallelNode"
+                class="branches-tab"
+            >
+                <div class="branches-header">
+                    <label class="field-label">Parallel Branches</label>
+                    <button
+                        class="add-btn"
+                        @click="addBranch"
+                        aria-label="Add Branch"
+                    >
+                        <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                    </button>
+                </div>
+                <p class="field-hint">
+                    Each branch runs in parallel. Connect nodes to each branch's
+                    output handle. Optionally set a model and system prompt per
+                    branch.
+                </p>
+
+                <div class="branches-list">
+                    <div
+                        v-for="branch in parallelData.branches"
+                        :key="branch.id"
+                        class="branch-item"
+                        :class="{ expanded: expandedBranchId === branch.id }"
+                    >
+                        <div
+                            class="branch-header"
+                            @click="toggleBranchExpanded(branch.id)"
+                        >
+                            <div class="branch-inputs">
+                                <input
+                                    type="text"
+                                    class="text-input branch-label"
+                                    :value="branch.label"
+                                    @input="(e) => updateBranchLabel(branch.id, (e.target as HTMLInputElement).value)"
+                                    @click.stop
+                                    placeholder="Branch Label"
+                                />
+                                <div class="branch-badges">
+                                    <span
+                                        v-if="branch.model"
+                                        class="branch-badge model"
+                                    >
+                                        {{ branch.model.split('/').pop() }}
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="branch-actions">
                                 <svg
+                                    class="expand-icon"
+                                    :class="{
+                                        rotated: expandedBranchId === branch.id,
+                                    }"
                                     viewBox="0 0 24 24"
                                     fill="none"
                                     stroke="currentColor"
                                     stroke-width="2"
                                 >
-                                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                    <polyline
+                                        points="6 9 12 15 18 9"
+                                    ></polyline>
                                 </svg>
+                                <button
+                                    class="delete-btn"
+                                    @click.stop="removeBranch(branch.id)"
+                                    title="Remove branch"
+                                >
+                                    <svg
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                    >
+                                        <line
+                                            x1="18"
+                                            y1="6"
+                                            x2="6"
+                                            y2="18"
+                                        ></line>
+                                        <line
+                                            x1="6"
+                                            y1="6"
+                                            x2="18"
+                                            y2="18"
+                                        ></line>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div
+                            v-if="expandedBranchId === branch.id"
+                            class="branch-config"
+                        >
+                            <div class="branch-field">
+                                <label class="field-label-sm"
+                                    >Model (optional)</label
+                                >
+                                <select
+                                    class="model-select-sm"
+                                    :value="branch.model || ''"
+                                    @change="(e) => updateBranchModel(branch.id, (e.target as HTMLSelectElement).value)"
+                                >
+                                    <option value="">Use default</option>
+                                    <option
+                                        v-for="m in availableModels"
+                                        :key="m.id"
+                                        :value="m.id"
+                                    >
+                                        {{ m.name }}
+                                    </option>
+                                </select>
+                            </div>
+                            <div class="branch-field">
+                                <label class="field-label-sm"
+                                    >System Prompt (optional)</label
+                                >
+                                <textarea
+                                    class="prompt-textarea-sm"
+                                    :value="branch.prompt || ''"
+                                    @input="(e) => updateBranchPrompt(branch.id, (e.target as HTMLTextAreaElement).value)"
+                                    placeholder="Override system prompt for this branch..."
+                                    rows="3"
+                                ></textarea>
+                            </div>
+                            <div
+                                v-if="availableTools.length > 0"
+                                class="branch-field"
+                            >
+                                <label class="field-label-sm"
+                                    >Tools (optional)</label
+                                >
+                                <div class="branch-tools">
+                                    <label
+                                        v-for="tool in availableTools"
+                                        :key="tool.id"
+                                        class="branch-tool-item"
+                                        :class="{
+                                            enabled: (
+                                                branch.tools || []
+                                            ).includes(tool.id),
+                                        }"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            :checked="
+                                                (branch.tools || []).includes(
+                                                    tool.id
+                                                )
+                                            "
+                                            @change="
+                                                toggleBranchTool(
+                                                    branch.id,
+                                                    tool.id
+                                                )
+                                            "
+                                        />
+                                        <span class="tool-name-sm">{{
+                                            tool.name
+                                        }}</span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Merge Configuration -->
+                <div class="merge-section">
+                    <div class="merge-header">
+                        <label class="field-label">Merge Configuration</label>
+                        <div class="toggle-label">
+                            <input
+                                type="checkbox"
+                                :checked="parallelData.mergeEnabled !== false"
+                                @change="(e) => props.editor.commands.updateNodeData(selectedNode!.id, { mergeEnabled: (e.target as HTMLInputElement).checked } as any)"
+                            />
+                            <span class="toggle-text">Enable Merge</span>
+                        </div>
+                    </div>
+
+                    <template v-if="parallelData.mergeEnabled !== false">
+                        <p class="field-hint">
+                            After all branches complete, results are merged
+                            using this prompt.
+                        </p>
+                        <div class="merge-field">
+                            <label class="field-label-sm">Merge Model</label>
+                            <select
+                                class="model-select"
+                                :value="
+                                    parallelData.mergeModel ||
+                                    'z-ai/glm-4.6:exacto'
+                                "
+                                @change="(e) => props.editor.commands.updateNodeData(selectedNode!.id, { model: (e.target as HTMLSelectElement).value })"
+                            >
+                                <option
+                                    v-for="m in availableModels"
+                                    :key="m.id"
+                                    :value="m.id"
+                                >
+                                    {{ m.name }} ({{ m.provider }})
+                                </option>
+                            </select>
+                        </div>
+                        <div class="merge-field">
+                            <label class="field-label-sm">Merge Prompt</label>
+                            <textarea
+                                class="prompt-textarea"
+                                :value="parallelData.mergePrompt"
+                                @input="(e) => debouncedUpdate('prompt', (e.target as HTMLTextAreaElement).value)"
+                                placeholder="Instructions for merging branch outputs..."
+                                rows="4"
+                            ></textarea>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Tools Tab -->
+            <div v-if="activeTab === 'tools' && isAgentNode" class="tools-tab">
+                <template v-if="availableTools.length > 0">
+                    <label class="field-label">Available Tools</label>
+                    <p class="field-hint">
+                        Select which tools this agent can use during execution.
+                    </p>
+
+                    <div class="tools-list">
+                        <label
+                            v-for="tool in availableTools"
+                            :key="tool.id"
+                            class="tool-item"
+                            :class="{
+                                enabled: selectedTools.includes(tool.id),
+                            }"
+                        >
+                            <input
+                                type="checkbox"
+                                :checked="selectedTools.includes(tool.id)"
+                                @change="toggleTool(tool.id)"
+                            />
+                            <div class="tool-info">
+                                <span class="tool-name">{{ tool.name }}</span>
+                                <span class="tool-description">{{
+                                    tool.description
+                                }}</span>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div v-if="selectedTools.length > 0" class="selected-tools">
+                        <label class="field-label"
+                            >Enabled Tools ({{ selectedTools.length }})</label
+                        >
+                        <div class="tool-chips">
+                            <span
+                                v-for="toolId in selectedTools"
+                                :key="toolId"
+                                class="tool-chip"
+                            >
+                                {{
+                                    availableTools.find((t) => t.id === toolId)
+                                        ?.name
+                                }}
+                                <button
+                                    class="chip-remove"
+                                    @click="toggleTool(toolId)"
+                                >
+                                    <svg
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                    >
+                                        <line
+                                            x1="18"
+                                            y1="6"
+                                            x2="6"
+                                            y2="18"
+                                        ></line>
+                                        <line
+                                            x1="6"
+                                            y1="6"
+                                            x2="18"
+                                            y2="18"
+                                        ></line>
+                                    </svg>
+                                </button>
+                            </span>
+                        </div>
+                    </div>
+                </template>
+                <div v-else class="tools-empty">
+                    <label class="field-label">Available Tools</label>
+                    <p class="field-hint">
+                        No tools are registered. Add tools in or3-chat to enable
+                        selections here.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Error Handling Tab -->
+            <div
+                v-if="activeTab === 'errors' && hasErrorHandling"
+                class="errors-tab"
+            >
+                <label class="field-label">Error handling mode</label>
+                <div class="mode-buttons">
+                    <button
+                        class="mode-button"
+                        :class="{ active: errorHandling.mode === 'stop' }"
+                        @click="updateErrorMode('stop')"
+                    >
+                        Stop on error
+                    </button>
+                    <button
+                        class="mode-button"
+                        :class="{ active: errorHandling.mode === 'continue' }"
+                        @click="updateErrorMode('continue')"
+                    >
+                        Continue
+                    </button>
+                    <button
+                        class="mode-button"
+                        :class="{ active: errorHandling.mode === 'branch' }"
+                        @click="updateErrorMode('branch')"
+                    >
+                        Branch to error
+                    </button>
+                </div>
+
+                <div class="retry-grid">
+                    <div class="field-group">
+                        <label class="field-label">Max retries</label>
+                        <input
+                            type="number"
+                            min="0"
+                            class="text-input"
+                            :value="retryConfig.maxRetries"
+                            @input="onRetryNumberChange('maxRetries', $event)"
+                        />
+                    </div>
+                    <div class="field-group">
+                        <label class="field-label">Base delay (ms)</label>
+                        <input
+                            type="number"
+                            min="0"
+                            class="text-input"
+                            :value="retryConfig.baseDelay"
+                            @input="onRetryNumberChange('baseDelay', $event)"
+                        />
+                    </div>
+                    <div class="field-group">
+                        <label class="field-label">Max delay (ms)</label>
+                        <input
+                            type="number"
+                            min="0"
+                            class="text-input"
+                            :value="retryConfig.maxDelay ?? ''"
+                            @input="onRetryNumberChange('maxDelay', $event)"
+                        />
+                    </div>
+                </div>
+
+                <div class="checkbox-group">
+                    <label class="field-label">Retry on codes</label>
+                    <div class="checkboxes">
+                        <label
+                            v-for="code in errorCodes"
+                            :key="code.id"
+                            class="checkbox-item"
+                        >
+                            <input
+                                type="checkbox"
+                                :checked="
+                                    (retryConfig.retryOn || []).includes(
+                                        code.id
+                                    )
+                                "
+                                @change="toggleRetryOn(code.id)"
+                            />
+                            <span>{{ code.label }}</span>
+                        </label>
+                    </div>
+                </div>
+
+                <p class="field-hint">
+                    Branch mode sends errors to the "error" handle if connected.
+                    Continue mode logs the error and moves forward.
+                </p>
+            </div>
+
+            <!-- HITL Tab -->
+            <div v-if="activeTab === 'hitl' && hasHITL" class="hitl-tab">
+                <div class="hitl-toggle">
+                    <label class="toggle-label">
+                        <input
+                            type="checkbox"
+                            :checked="hitlConfig.enabled"
+                            @change="toggleHITLEnabled"
+                        />
+                        <span class="toggle-text">Enable Human Review</span>
+                    </label>
+                    <p class="field-hint" style="margin-top: 4px">
+                        Pause execution for human approval, input, or review.
+                    </p>
+                </div>
+
+                <template v-if="hitlConfig.enabled">
+                    <div class="hitl-section">
+                        <label class="field-label">Review Mode</label>
+                        <div class="mode-buttons">
+                            <button
+                                v-for="mode in hitlModes"
+                                :key="mode.id"
+                                class="mode-button hitl-mode"
+                                :class="{ active: hitlConfig.mode === mode.id }"
+                                @click="updateHITLMode(mode.id)"
+                                :title="mode.description"
+                            >
+                                {{ mode.label }}
                             </button>
-                        </span>
+                        </div>
+                        <p class="field-hint">
+                            {{
+                                hitlModes.find((m) => m.id === hitlConfig.mode)
+                                    ?.description
+                            }}
+                        </p>
+                    </div>
+
+                    <div class="hitl-section">
+                        <label class="field-label">Prompt</label>
+                        <textarea
+                            :value="hitlConfig.prompt || ''"
+                            class="prompt-textarea hitl-prompt"
+                            placeholder="Message to show the reviewer..."
+                            @input="updateHITLPrompt"
+                        ></textarea>
+                    </div>
+
+                    <div class="hitl-grid">
+                        <div class="field-group">
+                            <label class="field-label">Timeout (ms)</label>
+                            <input
+                                type="number"
+                                min="0"
+                                class="text-input"
+                                :value="hitlConfig.timeout || ''"
+                                placeholder="No timeout"
+                                @input="updateHITLTimeout"
+                            />
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">Default Action</label>
+                            <select
+                                class="model-select"
+                                :value="hitlConfig.defaultAction || 'reject'"
+                                @change="updateHITLDefaultAction"
+                            >
+                                <option
+                                    v-for="action in hitlDefaultActions"
+                                    :key="action.id"
+                                    :value="action.id"
+                                >
+                                    {{ action.label }}
+                                </option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <p class="field-hint">
+                        When timeout is set, the default action is taken
+                        automatically. Connect the "Rejected" handle to route
+                        rejected items.
+                    </p>
+                </template>
+            </div>
+
+            <!-- Subflow Tab -->
+            <div
+                v-if="activeTab === 'subflow' && isSubflowNode"
+                class="subflow-tab"
+            >
+                <div class="field-group">
+                    <label class="field-label">Subflow</label>
+                    <select
+                        class="model-select"
+                        :value="subflowData.subflowId"
+                        :disabled="subflowListLoading"
+                        @change="updateSubflowIdSelect"
+                    >
+                        <option value="">
+                            {{
+                                subflowListLoading
+                                    ? 'Loading workflows...'
+                                    : 'Select a workflow...'
+                            }}
+                        </option>
+                        <option
+                            v-for="option in subflowOptions"
+                            :key="option.id"
+                            :value="option.id"
+                        >
+                            {{ option.name }} ({{ option.id }})
+                        </option>
+                    </select>
+                    <p v-if="subflowListLoading" class="field-hint">
+                        Loading available workflows...
+                    </p>
+                    <p v-else-if="subflowListError" class="field-hint">
+                        Unable to load workflows. You can still enter a subflow
+                        ID manually.
+                    </p>
+                    <p
+                        v-else-if="availableSubflows.length === 0"
+                        class="field-hint"
+                    >
+                        No workflows found yet. Create one in the Workflows tab
+                        or enter an ID manually.
+                    </p>
+                    <p v-else class="field-hint">
+                        {{
+                            selectedSubflow?.description ||
+                            'Choose a workflow to run inside this node.'
+                        }}
+                    </p>
+                    <div v-if="subflowData.subflowId" class="model-id">
+                        <span class="model-id-label">Workflow ID:</span>
+                        <code>{{ subflowData.subflowId }}</code>
+                    </div>
+                    <button
+                        class="subflow-manual-toggle"
+                        type="button"
+                        @click="toggleManualSubflowInput"
+                    >
+                        {{
+                            showManualSubflowInput
+                                ? 'Hide manual entry'
+                                : 'Enter ID manually'
+                        }}
+                    </button>
+                </div>
+
+                <div v-if="showManualSubflowInput" class="field-group">
+                    <label class="field-label">Subflow ID</label>
+                    <input
+                        type="text"
+                        class="text-input"
+                        :value="subflowData.subflowId"
+                        placeholder="e.g., email-composer"
+                        @input="updateSubflowIdInput"
+                    />
+                    <p class="field-hint">
+                        Use this only if the workflow isn't listed.
+                    </p>
+                </div>
+
+                <div class="subflow-toggle">
+                    <label class="toggle-label">
+                        <input
+                            type="checkbox"
+                            :checked="subflowData.shareSession"
+                            @change="toggleShareSession"
+                        />
+                        <span class="toggle-text">Share Session</span>
+                    </label>
+                    <p class="field-hint" style="margin-top: 4px">
+                        When enabled, the subflow shares conversation history
+                        with the parent workflow.
+                    </p>
+                </div>
+
+                <div
+                    class="input-mappings-section"
+                    v-if="Object.keys(subflowData.inputMappings).length > 0"
+                >
+                    <label class="field-label">Input Mappings</label>
+                    <div class="mappings-list">
+                        <div
+                            v-for="(value, key) in subflowData.inputMappings"
+                            :key="key"
+                            class="mapping-item"
+                        >
+                            <span class="mapping-key">{{ key }}</span>
+                            <input
+                                type="text"
+                                class="text-input mapping-value"
+                                :value="String(value)"
+                                @input="(e) => updateInputMapping(String(key), (e.target as HTMLInputElement).value)"
+                            />
+                            <button
+                                class="remove-mapping-btn"
+                                @click="removeInputMapping(String(key))"
+                                title="Remove mapping"
+                            >
+                                ×
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="info-box">
+                    <p><strong>Expressions:</strong></p>
+                    <ul class="expression-hints">
+                        <li>
+                            <code v-pre>{{ output }}</code> - Current
+                            input/output
+                        </li>
+                        <li>
+                            <code v-pre>{{ outputs.nodeId }}</code> - Output
+                            from a specific node
+                        </li>
+                        <li><code>"literal"</code> - Static value</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Output Tab -->
+            <div
+                v-if="activeTab === 'output' && isOutputNode"
+                class="output-tab"
+            >
+                <!-- Mode Selection -->
+                <OutputModeSelector
+                    :modelValue="outputData.mode || 'combine'"
+                    @update:modelValue="updateOutputMode"
+                />
+
+                <!-- Source Selection -->
+                <OutputSourcePicker
+                    :modelValue="outputData.sources || []"
+                    :availableGroups="upstreamGroups"
+                    @update:modelValue="updateOutputSources"
+                />
+
+                <!-- Synthesis Configuration -->
+                <div
+                    v-if="outputData.mode === 'synthesis'"
+                    class="synthesis-config"
+                >
+                    <div class="field-group">
+                        <label class="field-label">Synthesis Model</label>
+                        <select
+                            class="model-select"
+                            :value="
+                                outputData.synthesis?.model ||
+                                'z-ai/glm-4.6:exacto'
+                            "
+                            @change="updateSynthesisModel"
+                        >
+                            <option
+                                v-for="m in availableModels"
+                                :key="m.id"
+                                :value="m.id"
+                            >
+                                {{ m.name }} ({{ m.provider }})
+                            </option>
+                        </select>
+                    </div>
+
+                    <div class="field-group">
+                        <label class="field-label">Synthesis Prompt</label>
+                        <textarea
+                            class="prompt-textarea"
+                            :value="outputData.synthesis?.prompt || ''"
+                            placeholder="Instructions for synthesizing the final output..."
+                            rows="4"
+                            @input="updateSynthesisPrompt"
+                        ></textarea>
+                    </div>
+                </div>
+
+                <!-- Intro/Outro -->
+                <div class="field-group">
+                    <label class="field-label">Introduction</label>
+                    <textarea
+                        class="text-input"
+                        :value="outputData.introText || ''"
+                        placeholder="Optional text to prepend..."
+                        rows="2"
+                        @input="updateIntroText"
+                    ></textarea>
+                </div>
+
+                <div class="field-group">
+                    <label class="field-label">Conclusion</label>
+                    <textarea
+                        class="text-input"
+                        :value="outputData.outroText || ''"
+                        placeholder="Optional text to append..."
+                        rows="2"
+                        @input="updateOutroText"
+                    ></textarea>
+                </div>
+
+                <!-- Preview -->
+                <OutputPreview :previewData="previewData" />
+
+                <!-- Advanced Settings -->
+                <div class="advanced-settings">
+                    <button
+                        class="advanced-toggle"
+                        @click="
+                            advancedOutputExpanded = !advancedOutputExpanded
+                        "
+                    >
+                        <svg
+                            class="expand-icon"
+                            :class="{ rotated: advancedOutputExpanded }"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                        Advanced Settings
+                    </button>
+
+                    <div v-if="advancedOutputExpanded" class="advanced-content">
+                        <div class="toggle-group">
+                            <label class="tool-item">
+                                <input
+                                    type="checkbox"
+                                    :checked="outputData.useRawTemplate"
+                                    @change="toggleRawTemplate"
+                                />
+                                <div class="tool-info">
+                                    <span class="tool-name"
+                                        >Use Raw Template</span
+                                    >
+                                    <span class="tool-description"
+                                        >Override all settings with a custom
+                                        template</span
+                                    >
+                                </div>
+                            </label>
+
+                            <label class="tool-item">
+                                <input
+                                    type="checkbox"
+                                    :checked="outputData.includeMetadata"
+                                    @change="toggleIncludeMetadata"
+                                />
+                                <div class="tool-info">
+                                    <span class="tool-name"
+                                        >Include Metadata</span
+                                    >
+                                    <span class="tool-description"
+                                        >Add execution stats to output</span
+                                    >
+                                </div>
+                            </label>
+                        </div>
+
+                        <div
+                            v-if="outputData.useRawTemplate"
+                            class="field-group"
+                        >
+                            <label class="field-label">Raw Template</label>
+                            <textarea
+                                class="textarea-input"
+                                :value="outputData.template"
+                                :placeholder="'e.g., Final result: {{outputs.nodeId}}'"
+                                @input="updateOutputTemplate"
+                                rows="4"
+                            ></textarea>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
 
         <!-- Start node (minimal) -->
-        <div v-else-if="isStartNode" class="inspector-content">
+        <div v-if="isStartNode" class="inspector-content">
             <div class="info-box">
                 The Start node is the entry point for workflow execution.
                 Connect it to other nodes to define your workflow.
@@ -520,16 +2320,7 @@ const handleDelete = () => {
     <!-- Empty state -->
     <div class="node-inspector empty" v-else>
         <div class="empty-icon">
-            <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-            >
-                <circle cx="12" cy="12" r="10"></circle>
-                <line x1="12" y1="8" x2="12" y2="12"></line>
-                <line x1="12" y1="16" x2="12.01" y2="16"></line>
-            </svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24"><!-- Icon from Tabler Icons by Paweł Kuna - https://github.com/tabler/tabler-icons/blob/master/LICENSE --><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m12 18l-2-4l-7-3.5a.55.55 0 0 1 0-1L21 3l-3.14 8.697M17.001 19a2 2 0 1 0 4 0a2 2 0 1 0-4 0m2-3.5V17m0 4v1.5m3.031-5.25l-1.299.75m-3.463 2l-1.3.75m0-3.5l1.3.75m3.463 2l1.3.75"/></svg>
         </div>
         <p>Select a node to edit its properties</p>
     </div>
@@ -569,6 +2360,7 @@ const handleDelete = () => {
     display: flex;
     align-items: center;
     gap: var(--or3-spacing-sm, 8px);
+    padding: var(--or3-spacing-md, 16px);
     padding-bottom: var(--or3-spacing-md, 16px);
     border-bottom: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
     margin-bottom: var(--or3-spacing-md, 16px);
@@ -653,11 +2445,65 @@ const handleDelete = () => {
     height: 16px;
 }
 
+/* Description Section */
+.description-section {
+    padding: 0 var(--or3-spacing-md, 16px) var(--or3-spacing-md, 16px);
+    margin-bottom: var(--or3-spacing-sm, 8px);
+}
+
+.description-label {
+    display: flex;
+    align-items: center;
+    gap: var(--or3-spacing-xs, 4px);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.7));
+    margin-bottom: var(--or3-spacing-xs, 4px);
+}
+
+.description-label svg {
+    width: 14px;
+    height: 14px;
+    opacity: 0.6;
+}
+
+.description-hint {
+    font-weight: 400;
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+    font-size: 11px;
+}
+
+.description-textarea {
+    width: 100%;
+    min-height: 60px;
+    max-height: 100px;
+    padding: var(--or3-spacing-sm, 8px);
+    background: var(--or3-color-surface, rgba(255, 255, 255, 0.03));
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--or3-radius-sm, 6px);
+    font-size: 13px;
+    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
+    resize: vertical;
+    font-family: inherit;
+    line-height: 1.5;
+}
+
+.description-textarea::placeholder {
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.3));
+}
+
+.description-textarea:focus {
+    outline: none;
+    border-color: var(--or3-color-accent, #3b82f6);
+    background: var(--or3-color-surface-hover, rgba(255, 255, 255, 0.05));
+}
+
 /* Tabs */
 .tabs {
     display: flex;
+    flex-wrap: wrap;
     gap: var(--or3-spacing-xs, 4px);
-    padding-bottom: var(--or3-spacing-md, 16px);
+    padding: 0 var(--or3-spacing-md, 16px) var(--or3-spacing-md, 16px);
     border-bottom: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
     margin-bottom: var(--or3-spacing-md, 16px);
 }
@@ -669,7 +2515,7 @@ const handleDelete = () => {
     padding: var(--or3-spacing-xs, 4px) var(--or3-spacing-sm, 8px);
     font-size: 12px;
     font-weight: 500;
-    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+    color: var(--or3-color-text-muted, #64748b);
     border-radius: var(--or3-radius-sm, 6px);
     transition: all 0.15s ease;
 }
@@ -680,13 +2526,14 @@ const handleDelete = () => {
 }
 
 .tab:hover {
-    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
-    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.03));
+    color: var(--or3-color-text-primary, #0f172a);
+    background: var(--or3-color-surface-hover, rgba(15, 23, 42, 0.06));
 }
 
 .tab.active {
-    color: var(--or3-color-accent, #8b5cf6);
-    background: var(--or3-color-accent-muted, rgba(139, 92, 246, 0.2));
+    color: var(--or3-color-text-primary, #0f172a);
+    background: var(--or3-color-accent-muted, rgba(37, 99, 235, 0.14));
+    box-shadow: inset 0 0 0 1px var(--or3-color-accent, #2563eb);
 }
 
 .tool-count {
@@ -703,6 +2550,34 @@ const handleDelete = () => {
 .tab-content {
     flex: 1;
     overflow-y: auto;
+    padding: 0;
+}
+
+.tab-content > div {
+    padding: 0 var(--or3-spacing-md, 16px) var(--or3-spacing-md, 16px);
+}
+
+.tab-content::-webkit-scrollbar {
+    width: 6px;
+}
+
+.tab-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.tab-content::-webkit-scrollbar-thumb {
+    background: var(--or3-color-border, rgba(255, 255, 255, 0.15));
+    border-radius: 3px;
+}
+
+.tab-content::-webkit-scrollbar-thumb:hover {
+    background: var(--or3-color-text-muted, rgba(255, 255, 255, 0.25));
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: var(--or3-spacing-sm, 8px);
 }
 
 .field-label {
@@ -852,6 +2727,85 @@ const handleDelete = () => {
     font-weight: 500;
 }
 
+/* Errors Tab */
+.errors-tab {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-md, 16px);
+}
+
+.mode-buttons {
+    display: flex;
+    gap: var(--or3-spacing-xs, 4px);
+    flex-wrap: wrap;
+}
+
+.mode-button {
+    padding: 6px 10px;
+    border-radius: var(--or3-radius-sm, 6px);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.03));
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.mode-button.active {
+    border-color: var(--or3-color-warning, #f59e0b);
+    color: var(--or3-color-warning, #f59e0b);
+    background: color-mix(
+        in srgb,
+        var(--or3-color-warning, #f59e0b) 12%,
+        transparent
+    );
+}
+
+.retry-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: var(--or3-spacing-sm, 8px);
+}
+
+.field-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-xs, 4px);
+}
+
+.text-input {
+    width: 100%;
+    padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 12px);
+    background: var(--or3-color-bg-tertiary, #1a1a24);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--or3-radius-md, 10px);
+    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
+    font-size: 13px;
+}
+
+.text-input:focus {
+    outline: none;
+    border-color: var(--or3-color-warning, #f59e0b);
+}
+
+.checkbox-group .checkboxes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--or3-spacing-xs, 4px);
+}
+
+.checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--or3-color-bg-tertiary, #1a1a24);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--or3-radius-sm, 6px);
+    font-size: 12px;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+}
+
 .chip-remove {
     display: flex;
     align-items: center;
@@ -878,6 +2832,43 @@ const handleDelete = () => {
     padding-top: var(--or3-spacing-md, 16px);
 }
 
+.branch-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.branch-tool-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    background: var(--or3-color-bg-tertiary, #1a1a24);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.branch-tool-item:hover {
+    border-color: var(--or3-color-border-hover, rgba(255, 255, 255, 0.15));
+}
+
+.branch-tool-item.enabled {
+    border-color: var(--or3-color-accent, #8b5cf6);
+    background: var(--or3-color-accent-muted, rgba(139, 92, 246, 0.1));
+}
+
+.branch-tool-item input {
+    margin: 0;
+}
+
+.tool-name-sm {
+    font-size: 11px;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.7));
+}
+
 .info-box {
     padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 16px);
     background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.03));
@@ -885,5 +2876,851 @@ const handleDelete = () => {
     font-size: 12px;
     color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
     line-height: 1.5;
+}
+
+/* HITL Tab */
+.hitl-tab {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-md, 16px);
+}
+
+.hitl-toggle {
+    padding: var(--or3-spacing-md, 16px);
+    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.03));
+    border-radius: var(--or3-radius-md, 10px);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+}
+
+.toggle-label {
+    display: flex;
+    align-items: center;
+    gap: var(--or3-spacing-sm, 8px);
+    cursor: pointer;
+}
+
+.toggle-label input[type='checkbox'] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--or3-color-info, #3b82f6);
+}
+
+.toggle-text {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
+}
+
+.hitl-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-sm, 8px);
+}
+
+.hitl-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: var(--or3-spacing-sm, 8px);
+}
+
+.hitl-prompt {
+    min-height: 80px;
+}
+
+.hitl-badge {
+    background: var(--or3-color-info, #3b82f6);
+    color: white;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 5px;
+    border-radius: 4px;
+    margin-left: 4px;
+}
+
+.mode-button.hitl-mode.active {
+    border-color: var(--or3-color-info, #3b82f6);
+    color: var(--or3-color-info, #3b82f6);
+    background: color-mix(
+        in srgb,
+        var(--or3-color-info, #3b82f6) 12%,
+        transparent
+    );
+}
+
+/* Subflow Tab */
+.subflow-tab {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-md, 16px);
+}
+
+.subflow-toggle {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-xs, 4px);
+}
+
+.subflow-manual-toggle {
+    align-self: flex-start;
+    margin-top: var(--or3-spacing-xs, 4px);
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--or3-color-info, #3b82f6);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.subflow-manual-toggle:hover {
+    text-decoration: underline;
+}
+
+.input-mappings-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-sm, 8px);
+}
+
+.mappings-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-xs, 4px);
+}
+
+.mapping-item {
+    display: flex;
+    align-items: center;
+    gap: var(--or3-spacing-sm, 8px);
+    background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
+    padding: 8px 10px;
+    border-radius: var(--or3-radius-sm, 6px);
+}
+
+.mapping-key {
+    font-family: monospace;
+    font-size: 12px;
+    color: var(--or3-color-secondary, #64748b);
+    min-width: 80px;
+}
+
+.mapping-value {
+    flex: 1;
+}
+
+.remove-mapping-btn {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+.remove-mapping-btn:hover {
+    background: var(--or3-color-error, #ef4444);
+    color: white;
+}
+
+.expression-hints {
+    margin: 8px 0 0;
+    padding-left: 16px;
+    font-size: 12px;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+}
+
+.expression-hints li {
+    margin-bottom: 4px;
+}
+
+.expression-hints code {
+    font-family: monospace;
+    background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+
+.output-tab {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-md, 16px);
+}
+
+.pill-display {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 12px;
+    border-radius: var(--or3-radius-sm, 6px);
+    background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
+    font-weight: 600;
+    color: var(--or3-color-text, rgba(255, 255, 255, 0.95));
+    width: fit-content;
+}
+
+.output-toggle {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-xs, 4px);
+}
+
+.output-advanced {
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.1));
+    border-radius: var(--or3-radius-md, 8px);
+    overflow: hidden;
+}
+
+.output-advanced-body {
+    padding: 12px;
+    border-top: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.1));
+    background: var(--or3-color-bg-primary, rgba(0, 0, 0, 0.08));
+}
+
+/* Schema Editor */
+.schema-section {
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.1));
+    border-radius: var(--or3-radius-md, 8px);
+    overflow: hidden;
+}
+
+.schema-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
+    border: none;
+    color: var(--or3-color-text, rgba(255, 255, 255, 0.95));
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s;
+}
+
+.schema-toggle:hover {
+    background: var(--or3-color-bg-tertiary, rgba(255, 255, 255, 0.08));
+}
+
+.toggle-chevron {
+    width: 16px;
+    height: 16px;
+    transition: transform 0.2s ease;
+}
+
+.toggle-chevron.expanded {
+    transform: rotate(90deg);
+}
+
+.schema-badge {
+    margin-left: auto;
+    background: var(--or3-color-success, #22c55e);
+    color: white;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.schema-editor {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border-top: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.1));
+}
+
+.schema-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.toolbar-label {
+    font-size: 11px;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+    margin-right: 4px;
+}
+
+.toolbar-spacer {
+    flex: 1;
+}
+
+.preset-btn {
+    padding: 4px 8px;
+    background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.1));
+    border-radius: 4px;
+    color: var(--or3-color-text, rgba(255, 255, 255, 0.95));
+    font-family: monospace;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.preset-btn:hover {
+    background: var(--or3-color-bg-tertiary, rgba(255, 255, 255, 0.1));
+    border-color: var(--or3-color-accent, #8b5cf6);
+}
+
+.action-btn {
+    padding: 4px 10px;
+    background: transparent;
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.1));
+    border-radius: 4px;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.action-btn:hover {
+    background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
+    color: var(--or3-color-text, rgba(255, 255, 255, 0.95));
+}
+
+.action-btn.danger:hover {
+    background: color-mix(
+        in srgb,
+        var(--or3-color-error, #ef4444) 15%,
+        transparent
+    );
+    border-color: var(--or3-color-error, #ef4444);
+    color: var(--or3-color-error, #ef4444);
+}
+
+.schema-textarea {
+    width: 100%;
+    min-height: 120px;
+    padding: 10px;
+    background: var(--or3-color-bg-primary, rgba(0, 0, 0, 0.3));
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.1));
+    border-radius: var(--or3-radius-sm, 6px);
+    color: var(--or3-color-text, rgba(255, 255, 255, 0.95));
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    resize: vertical;
+    transition: border-color 0.15s;
+}
+
+.schema-textarea:focus {
+    outline: none;
+    border-color: var(--or3-color-accent, #8b5cf6);
+}
+
+.schema-textarea.has-error {
+    border-color: var(--or3-color-error, #ef4444);
+}
+
+.schema-textarea::placeholder {
+    color: var(--or3-color-text-tertiary, rgba(255, 255, 255, 0.5));
+}
+
+.schema-error {
+    margin: 0;
+    padding: 8px 10px;
+    background: color-mix(
+        in srgb,
+        var(--or3-color-error, #ef4444) 12%,
+        transparent
+    );
+    border-radius: var(--or3-radius-sm, 6px);
+    color: var(--or3-color-error, #ef4444);
+    font-size: 12px;
+}
+
+.schema-editor .field-hint a {
+    color: var(--or3-color-accent, #8b5cf6);
+    text-decoration: none;
+}
+
+.schema-editor .field-hint a:hover {
+    text-decoration: underline;
+}
+
+/* Routes Tab */
+.routes-tab {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-md, 16px);
+}
+
+.routes-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.add-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: var(--or3-color-primary, #6366f1);
+    color: white;
+    border: none;
+    border-radius: var(--or3-radius-sm, 6px);
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.add-btn:hover {
+    background: var(--or3-color-primary-hover, #4f46e5);
+}
+
+.add-btn svg {
+    width: 14px;
+    height: 14px;
+}
+
+.add-btn.with-label {
+    width: auto;
+    height: auto;
+    padding: 6px 10px;
+    gap: 6px;
+    white-space: nowrap;
+    font-size: 12px;
+    line-height: 1;
+}
+
+.add-btn.with-label svg {
+    width: 12px;
+    height: 12px;
+}
+
+.routes-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-sm, 8px);
+}
+
+.route-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--or3-radius-md, 8px);
+}
+
+.route-inputs {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.route-label {
+    font-weight: 500;
+}
+
+.route-id {
+    font-size: 10px;
+    font-family: monospace;
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+}
+
+.delete-btn {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.delete-btn:hover {
+    background: var(--or3-color-error-bg, rgba(239, 68, 68, 0.1));
+    color: var(--or3-color-error, #ef4444);
+}
+
+.delete-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+/* Branches Tab (Parallel Node) */
+.branches-tab {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-lg, 20px);
+    padding-bottom: var(--or3-spacing-lg, 20px);
+}
+
+.branches-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--or3-spacing-md, 16px);
+}
+
+.branches-header .field-label {
+    margin-bottom: 0;
+}
+
+.branches-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-md, 12px);
+}
+
+.branch-item {
+    background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--or3-radius-lg, 10px);
+    overflow: hidden;
+    transition: border-color 0.15s;
+}
+
+.branch-item.expanded {
+    border-color: var(--or3-color-primary, #6366f1);
+}
+
+.branch-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    cursor: pointer;
+    transition: background 0.15s;
+    gap: var(--or3-spacing-sm, 8px);
+}
+
+.branch-header:hover {
+    background: var(--or3-color-bg-tertiary, rgba(255, 255, 255, 0.03));
+}
+
+.branch-inputs {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    min-width: 0;
+}
+
+.branch-label {
+    width: 100%;
+    min-width: 0;
+    font-weight: 500;
+    background: transparent;
+    border: 1px solid transparent;
+    padding: 2px 6px;
+    margin: 0 -6px;
+    border-radius: 4px;
+    transition: all 0.15s;
+    font-size: 13px;
+}
+
+.branch-label:hover {
+    background: var(--or3-color-bg-tertiary, rgba(255, 255, 255, 0.05));
+}
+
+.branch-label:focus {
+    background: var(--or3-color-bg-primary, #0a0a0f);
+    border-color: var(--or3-color-primary, #6366f1);
+    outline: none;
+}
+
+.branch-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.branch-badge {
+    padding: 3px 8px;
+    font-size: 10px;
+    font-weight: 600;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.branch-badge.model {
+    background: var(--or3-color-info-bg, rgba(59, 130, 246, 0.15));
+    color: var(--or3-color-info, #3b82f6);
+}
+
+.branch-badge.prompt {
+    background: var(--or3-color-success-bg, rgba(34, 197, 94, 0.15));
+    color: var(--or3-color-success, #22c55e);
+}
+
+.branch-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.expand-icon {
+    width: 16px;
+    height: 16px;
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+    transition: transform 0.2s;
+}
+
+.expand-icon.rotated {
+    transform: rotate(180deg);
+}
+
+.branch-config {
+    padding: var(--or3-spacing-md, 16px);
+    border-top: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    background: var(--or3-color-bg-tertiary, rgba(255, 255, 255, 0.02));
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-md, 16px);
+}
+
+.branch-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-xs, 6px);
+}
+
+.field-label-sm {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.model-select-sm {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--or3-color-bg-primary, #0a0a0f);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--or3-radius-sm, 6px);
+    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.92));
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+
+.model-select-sm:hover {
+    border-color: var(--or3-color-border-hover, rgba(255, 255, 255, 0.15));
+}
+
+.model-select-sm:focus {
+    outline: none;
+    border-color: var(--or3-color-primary, #6366f1);
+}
+
+.prompt-textarea-sm {
+    width: 100%;
+    padding: 12px;
+    background: var(--or3-color-bg-primary, #0a0a0f);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--or3-radius-sm, 6px);
+    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.92));
+    font-size: 13px;
+    font-family: inherit;
+    line-height: 1.5;
+    resize: vertical;
+    min-height: 80px;
+    transition: border-color 0.15s;
+}
+
+.prompt-textarea-sm:hover {
+    border-color: var(--or3-color-border-hover, rgba(255, 255, 255, 0.15));
+}
+
+.prompt-textarea-sm:focus {
+    outline: none;
+    border-color: var(--or3-color-primary, #6366f1);
+}
+
+.prompt-textarea-sm::placeholder {
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+}
+
+/* Merge Section */
+.merge-section {
+    margin-top: var(--or3-spacing-lg, 24px);
+    padding-top: var(--or3-spacing-lg, 24px);
+    border-top: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-sm, 8px);
+}
+
+.merge-section .field-label {
+    margin-bottom: var(--or3-spacing-xs, 4px);
+}
+
+.merge-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-xs, 6px);
+    margin-top: var(--or3-spacing-md, 12px);
+}
+
+/* Loop Settings */
+.loop-intro {
+    margin-bottom: var(--or3-spacing-md, 16px);
+    padding: var(--or3-spacing-md, 14px);
+    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.03));
+    border-radius: var(--or3-radius-md, 10px);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+}
+
+.intro-text {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.7));
+    margin: 0;
+}
+
+.condition-prompt {
+    min-height: 120px;
+}
+
+.loop-prompt {
+    min-height: 80px;
+}
+
+.loop-grid {
+    margin-top: var(--or3-spacing-md, 16px);
+}
+
+.section-divider {
+    height: 1px;
+    background: var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    margin: var(--or3-spacing-lg, 20px) 0 var(--or3-spacing-md, 16px);
+}
+
+.section-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
+    margin-bottom: var(--or3-spacing-xs, 4px);
+}
+
+.section-subtitle {
+    font-size: 12px;
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+    margin: 0 0 var(--or3-spacing-md, 14px);
+    line-height: 1.4;
+}
+
+.toggle-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-sm, 8px);
+}
+
+.toggle-row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-xs, 4px);
+}
+
+.toggle-row .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: var(--or3-spacing-sm, 8px);
+    cursor: pointer;
+}
+
+.toggle-row .toggle-label input[type='checkbox'] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--or3-color-info, #3b82f6);
+}
+
+.toggle-row .toggle-label .toggle-text {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
+}
+
+/* Advanced section */
+.advanced-section {
+    margin-top: var(--or3-spacing-sm, 8px);
+}
+
+.advanced-toggle {
+    font-size: 12px;
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
+    cursor: pointer;
+    padding: var(--or3-spacing-xs, 6px) 0;
+    user-select: none;
+}
+
+.advanced-toggle:hover {
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.7));
+}
+
+.advanced-content {
+    margin-top: var(--or3-spacing-md, 12px);
+}
+
+/* Output Tab */
+.output-tab {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-lg, 20px);
+}
+
+.synthesis-config {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-md, 16px);
+    padding: var(--or3-spacing-md, 16px);
+    background: var(--or3-color-bg-secondary, rgba(255, 255, 255, 0.05));
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    border-radius: var(--or3-radius-md, 8px);
+}
+
+.advanced-settings {
+    border-top: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    padding-top: var(--or3-spacing-md, 16px);
+}
+
+.advanced-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: none;
+    border: none;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 0;
+    transition: color 0.15s;
+}
+
+.advanced-toggle:hover {
+    color: var(--or3-color-text, rgba(255, 255, 255, 0.95));
+}
+
+.advanced-content {
+    margin-top: var(--or3-spacing-md, 16px);
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-md, 16px);
 }
 </style>

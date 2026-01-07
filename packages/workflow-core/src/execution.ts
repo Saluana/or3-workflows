@@ -1,33 +1,71 @@
 import type { OpenRouter } from '@openrouter/sdk';
 import type {
-  WorkflowData,
-  WorkflowNode,
-  WorkflowEdge,
-  ExecutionAdapter,
-  ExecutionCallbacks,
-  ExecutionResult,
-  ExecutionOptions,
-  ExecutionInput,
-  Attachment,
-  ChatMessage,
-  ModelCapabilities,
-  InputModality,
-  MessageContentPart,
-  AgentNodeData,
-  RouterNodeData,
-  ParallelNodeData,
-  RouteDefinition,
-  BranchDefinition,
-  ToolNodeData,
-  StreamAccumulatorCallbacks,
+    WorkflowData,
+    WorkflowNode,
+    WorkflowEdge,
+    ExecutionAdapter,
+    ExecutionCallbacks,
+    ExecutionResult,
+    ExecutionOptions,
+    ExecutionInput,
+    Attachment,
+    ModelCapabilities,
+    InputModality,
+    NodeExtension,
+    LLMProvider,
+    ExecutionContext,
+    ChatMessage,
+    TokenUsage,
+    TokenUsageDetails,
+    ValidationContext,
+    NodeExecutionMetadata,
 } from './types';
-import { toolRegistry } from './extensions/ToolNodeExtension';
+import {
+    AgentNodeExtension,
+    RouterNodeExtension,
+    ParallelNodeExtension,
+    WhileLoopExtension,
+    SubflowExtension,
+    OutputNodeExtension,
+    StartNodeExtension,
+} from './extensions';
+import { OpenRouterLLMProvider } from './providers/OpenRouterLLMProvider';
+import { InMemoryAdapter, type MemoryAdapter } from './memory';
+import { ExecutionSession, type Session } from './session';
+import {
+    createExecutionError,
+    ExecutionError,
+    type NodeErrorConfig,
+    type NodeRetryConfig,
+} from './errors';
+import {
+    type HITLConfig,
+    type HITLRequest,
+    type HITLResponse,
+    generateHITLRequestId,
+    getDefaultApprovalOptions,
+} from './hitl';
+import {
+    ApproximateTokenCounter,
+    countMessageTokens,
+    calculateThreshold,
+    splitMessagesForCompaction,
+    buildSummarizationPrompt,
+    createSummaryMessage,
+    type CompactionResult,
+    type TokenCounter,
+} from './compaction';
+import { validateWorkflow } from './validation';
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-/** Default model used when no model is specified */
+/**
+ * Default model used when no model is specified.
+ * This is a reliable, cost-effective model that works well for most use cases.
+ * Can be overridden via ExecutionOptions.defaultModel.
+ */
 const DEFAULT_MODEL = 'openai/gpt-4o-mini';
 
 /** Maximum retry attempts for API calls */
@@ -39,50 +77,220 @@ const DEFAULT_RETRY_DELAY_MS = 1000;
 /** Maximum iterations multiplier to prevent infinite loops */
 const MAX_ITERATIONS_MULTIPLIER = 3;
 
+/** Default error codes to skip retrying */
+const DEFAULT_SKIP_ON_RETRY: ReadonlyArray<import('./errors').ErrorCode> = [
+    'AUTH',
+    'VALIDATION',
+] as const;
+
 // ============================================================================
 // Types
 // ============================================================================
 
-/** Message format for OpenRouter API */
-interface ChatMessageParam {
-  role: 'system' | 'user' | 'assistant';
-  content: string | MessageContentPart[];
-}
-
-/** Streaming response chunk from OpenRouter */
-interface StreamChunk {
-  choices: Array<{
-    delta?: { content?: string };
-    message?: { content?: string | unknown[] };
-  }>;
-}
-
 /** Graph structure for workflow traversal */
 interface WorkflowGraph {
-  nodeMap: Map<string, WorkflowNode>;
-  children: Record<string, Array<{ nodeId: string; handleId?: string }>>;
-  parents: Record<string, string[]>;
-}
-
-/** Result from a parallel branch execution */
-interface BranchResult {
-  nodeId: string;
-  branchId?: string;
-  branchLabel: string;
-  output: string;
-  nextNodes: string[];
+    readonly nodeMap: ReadonlyMap<string, WorkflowNode>;
+    readonly children: Readonly<
+        Record<string, ReadonlyArray<{ nodeId: string; handleId?: string }>>
+    >;
+    readonly parents: Readonly<Record<string, ReadonlyArray<string>>>;
 }
 
 /** Internal execution state */
 interface InternalExecutionContext {
-  input: string;
-  currentInput: string;
-  originalInput: string;
-  attachments: Attachment[];
-  history: ChatMessage[];
-  outputs: Record<string, string>;
-  nodeChain: string[];
-  signal: AbortSignal;
+    readonly input: string;
+    currentInput: string;
+    readonly originalInput: string;
+    readonly attachments: Attachment[];
+    outputs: Record<string, string>;
+    nodeChain: string[];
+    readonly nodePath: string[];
+    readonly signal: AbortSignal;
+    readonly session: Session;
+    readonly memory: MemoryAdapter;
+    readonly workflowName: string;
+}
+
+const SUBFLOW_SCOPE_PREFIX = 'sf:';
+const SUBFLOW_SCOPE_SEPARATOR = '|';
+
+function scopeNodeId(nodeId: string, path?: string[]): string {
+    if (!path || path.length === 0) return nodeId;
+    const scoped = path
+        .map((segment) => `${SUBFLOW_SCOPE_PREFIX}${segment}`)
+        .join(SUBFLOW_SCOPE_SEPARATOR);
+    return `${scoped}${SUBFLOW_SCOPE_SEPARATOR}${nodeId}`;
+}
+
+function scopeMeta(
+    meta: NodeExecutionMetadata | undefined,
+    path: string[]
+): NodeExecutionMetadata | undefined {
+    if (!meta) return meta;
+    return {
+        ...meta,
+        id: meta.id ? scopeNodeId(meta.id, path) : meta.id,
+        path: [...path],
+    };
+}
+
+function scopeExecutionCallbacks(
+    callbacks: ExecutionCallbacks,
+    path: string[]
+): ExecutionCallbacks {
+    const scopeId = (nodeId: string) => scopeNodeId(nodeId, path);
+    return {
+        onNodeStart: (nodeId, meta) => {
+            callbacks.onNodeStart(scopeId(nodeId), scopeMeta(meta, path));
+        },
+        onNodeFinish: (nodeId, output, meta) => {
+            callbacks.onNodeFinish(
+                scopeId(nodeId),
+                output,
+                scopeMeta(meta, path)
+            );
+        },
+        onNodeError: (nodeId, error, meta) => {
+            callbacks.onNodeError(
+                scopeId(nodeId),
+                error,
+                scopeMeta(meta, path)
+            );
+        },
+        onToken: (nodeId, token) => {
+            callbacks.onToken(scopeId(nodeId), token);
+        },
+        onWorkflowToken: callbacks.onWorkflowToken
+            ? (token, meta) => {
+                  const nextMeta = meta
+                      ? { ...meta, nodeId: scopeId(meta.nodeId) }
+                      : meta;
+                  callbacks.onWorkflowToken?.(token, nextMeta as any);
+              }
+            : undefined,
+        onReasoning: callbacks.onReasoning
+            ? (nodeId, token) => {
+                  callbacks.onReasoning?.(scopeId(nodeId), token);
+              }
+            : undefined,
+        onRouteSelected: callbacks.onRouteSelected
+            ? (nodeId, routeId, meta) => {
+                  callbacks.onRouteSelected?.(
+                      scopeId(nodeId),
+                      routeId,
+                      scopeMeta(meta, path)
+                  );
+              }
+            : undefined,
+        onTokenUsage: callbacks.onTokenUsage
+            ? (nodeId, usage) => {
+                  callbacks.onTokenUsage?.(scopeId(nodeId), usage);
+              }
+            : undefined,
+        onContextCompacted: callbacks.onContextCompacted
+            ? (result) => {
+                  callbacks.onContextCompacted?.(result);
+              }
+            : undefined,
+        onBranchToken: callbacks.onBranchToken
+            ? (nodeId, branchId, branchLabel, token) => {
+                  callbacks.onBranchToken?.(
+                      scopeId(nodeId),
+                      branchId,
+                      branchLabel,
+                      token
+                  );
+              }
+            : undefined,
+        onBranchReasoning: callbacks.onBranchReasoning
+            ? (nodeId, branchId, branchLabel, token) => {
+                  callbacks.onBranchReasoning?.(
+                      scopeId(nodeId),
+                      branchId,
+                      branchLabel,
+                      token
+                  );
+              }
+            : undefined,
+        onBranchStart: callbacks.onBranchStart
+            ? (nodeId, branchId, branchLabel, meta) => {
+                  callbacks.onBranchStart?.(
+                      scopeId(nodeId),
+                      branchId,
+                      branchLabel,
+                      scopeMeta(meta, path)
+                  );
+              }
+            : undefined,
+        onBranchComplete: callbacks.onBranchComplete
+            ? (nodeId, branchId, branchLabel, output, meta) => {
+                  callbacks.onBranchComplete?.(
+                      scopeId(nodeId),
+                      branchId,
+                      branchLabel,
+                      output,
+                      scopeMeta(meta, path)
+                  );
+              }
+            : undefined,
+        onLoopIteration: callbacks.onLoopIteration
+            ? (nodeId, iteration, maxIterations, meta) => {
+                  callbacks.onLoopIteration?.(
+                      scopeId(nodeId),
+                      iteration,
+                      maxIterations,
+                      scopeMeta(meta, path)
+                  );
+              }
+            : undefined,
+        // Avoid propagating subflow completion to parent completion handlers.
+        onComplete: undefined,
+    };
+}
+
+function getNodeLabel(node: WorkflowNode | undefined): string | undefined {
+    if (!node) return undefined;
+    const maybe = (node.data as { label?: string } | undefined)?.label;
+    if (typeof maybe === 'string' && maybe.trim().length > 0) {
+        return maybe;
+    }
+    return node.id;
+}
+
+// ============================================================================
+// Extension Registry
+// ============================================================================
+
+/**
+ * Registry of all node type extensions.
+ * Used by execution and validation to look up node handlers.
+ */
+export const extensionRegistry = new Map<string, NodeExtension>([
+    ['agent', AgentNodeExtension],
+    ['router', RouterNodeExtension],
+    ['parallel', ParallelNodeExtension],
+    ['whileLoop', WhileLoopExtension],
+    ['subflow', SubflowExtension],
+    ['output', OutputNodeExtension],
+    ['start', StartNodeExtension],
+    ['condition', RouterNodeExtension], // Legacy alias
+]);
+
+/**
+ * Get an extension by node type.
+ * @param nodeType - The type of node (e.g., 'agent', 'router')
+ * @returns The extension or undefined if not found
+ */
+export function getExtension(nodeType: string): NodeExtension | undefined {
+    return extensionRegistry.get(nodeType);
+}
+
+/**
+ * Register a custom node extension.
+ * @param extension - The extension to register
+ */
+export function registerExtension(extension: NodeExtension): void {
+    extensionRegistry.set(extension.name, extension);
 }
 
 // ============================================================================
@@ -108,946 +316,1699 @@ interface InternalExecutionContext {
  * ```
  */
 export class OpenRouterExecutionAdapter implements ExecutionAdapter {
-  private client: OpenRouter;
-  private options: ExecutionOptions;
-  private abortController: AbortController | null = null;
-  private running = false;
-  private modelCapabilitiesCache: Map<string, ModelCapabilities | null> = new Map();
+    private provider: LLMProvider;
+    private options: ExecutionOptions;
+    private abortController: AbortController | null = null;
+    private running = false;
+    private memory: MemoryAdapter;
+    private tokenCounter: TokenCounter;
+    private tokenUsageEvents: Array<{
+        nodeId: string;
+        usage: TokenUsageDetails;
+    }> = [];
 
-  /**
-   * Create a new OpenRouterExecutionAdapter.
-   *
-   * @param client - An initialized OpenRouter SDK client instance.
-   *                 Must be created with a valid API key.
-   * @param options - Optional execution configuration.
-   * @throws {Error} If client is null or undefined.
-   *
-   * @example
-   * ```typescript
-   * const client = new OpenRouter({ apiKey: 'your-api-key' });
-   * const adapter = new OpenRouterExecutionAdapter(client);
-   * ```
-   */
-  constructor(client: OpenRouter, options: ExecutionOptions = {}) {
-    if (!client) {
-      throw new Error(
-        'OpenRouterExecutionAdapter requires an OpenRouter client instance. ' +
-        'Create one with: new OpenRouter({ apiKey: "your-api-key" })'
-      );
+    // Cache node type sets for O(1) lookups
+    private static readonly LLM_NODE_TYPES = new Set([
+        'agent',
+        'router',
+        'whileLoop',
+    ]);
+    private static readonly HITL_SUPPORTED_TYPES = new Set(['agent', 'router']);
+
+    /**
+     * Create a new OpenRouterExecutionAdapter.
+     *
+     * @param clientOrProvider - An OpenRouter client OR an LLMProvider instance.
+     * @param options - Optional execution configuration.
+     */
+    constructor(
+        clientOrProvider: OpenRouter | LLMProvider,
+        options: ExecutionOptions = {}
+    ) {
+        if (!clientOrProvider) {
+            throw new Error(
+                'OpenRouterExecutionAdapter requires an OpenRouter client or LLMProvider.'
+            );
+        }
+
+        if (this.isLLMProvider(clientOrProvider)) {
+            this.provider = clientOrProvider;
+        } else {
+            this.provider = new OpenRouterLLMProvider(clientOrProvider, {
+                debug: options.debug,
+            });
+        }
+
+        this.options = {
+            defaultModel: DEFAULT_MODEL,
+            maxRetries: DEFAULT_MAX_RETRIES,
+            retryDelayMs: DEFAULT_RETRY_DELAY_MS,
+            ...options,
+        };
+        this.memory = this.options.memory || new InMemoryAdapter();
+        this.tokenCounter =
+            this.options.tokenCounter || new ApproximateTokenCounter();
     }
-    
-    this.client = client;
-    this.options = {
-      defaultModel: DEFAULT_MODEL,
-      maxRetries: DEFAULT_MAX_RETRIES,
-      retryDelayMs: DEFAULT_RETRY_DELAY_MS,
-      ...options,
-    };
-  }
 
-  // ==========================================================================
-  // Public API
-  // ==========================================================================
-
-  /**
-   * Execute a workflow with the given input.
-   */
-  async execute(
-    workflow: WorkflowData,
-    input: ExecutionInput,
-    callbacks: ExecutionCallbacks
-  ): Promise<ExecutionResult> {
-    // Cancel any existing execution
-    if (this.abortController) {
-      this.abortController.abort();
+    private isLLMProvider(obj: unknown): obj is LLMProvider {
+        return (
+            obj !== null &&
+            typeof obj === 'object' &&
+            'chat' in obj &&
+            typeof obj.chat === 'function'
+        );
     }
-    this.abortController = new AbortController();
-    this.running = true;
 
-    const startTime = Date.now();
-    const nodeOutputs: Record<string, string> = {};
+    // ==========================================================================
+    // Public API
+    // ==========================================================================
 
-    try {
-      const graph = this.buildGraph(workflow.nodes, workflow.edges);
-      
-      // Find start node
-      const startNode = workflow.nodes.find(n => n.type === 'start');
-      if (!startNode) {
-        throw new Error('No start node found in workflow');
-      }
-
-      // Initialize execution context
-      const context: InternalExecutionContext = {
-        input: input.text,
-        currentInput: input.text,
-        originalInput: input.text,
-        attachments: input.attachments || [],
-        history: [],
-        outputs: {},
-        nodeChain: [],
-        signal: this.abortController.signal,
-      };
-
-      // BFS execution through the graph
-      const queue: string[] = [startNode.id];
-      const executed = new Set<string>();
-      const skipped = new Set<string>();
-      // Use configured maxIterations or calculate from node count
-      const maxIterations = this.options.maxIterations ?? 
-        (workflow.nodes.length * MAX_ITERATIONS_MULTIPLIER);
-      let iterations = 0;
-      let finalOutput = '';
-
-      // Helper to propagate skip status
-      const propagateSkip = (nodeId: string) => {
-        if (executed.has(nodeId)) return;
-
-        // Check if all parents are resolved (executed or skipped)
-        const parentIds = graph.parents[nodeId] || [];
-        const allParentsResolved = parentIds.every(p => executed.has(p));
-
-        if (allParentsResolved) {
-          executed.add(nodeId);
-          skipped.add(nodeId);
-          
-          // Propagate to children
-          const children = graph.children[nodeId] || [];
-          for (const child of children) {
-            propagateSkip(child.nodeId);
-          }
+    /**
+     * Execute a workflow with the given input.
+     */
+    async execute(
+        workflow: WorkflowData,
+        input: ExecutionInput,
+        callbacks: ExecutionCallbacks
+    ): Promise<ExecutionResult> {
+        // Cancel any existing execution
+        if (this.abortController) {
+            this.abortController.abort();
         }
-      };
+        this.abortController = new AbortController();
+        this.running = true;
+        this.tokenUsageEvents = [];
 
-      while (queue.length > 0 && iterations < maxIterations) {
-        iterations++;
-        const currentId = queue.shift()!;
+        const resumeFrom = this.options.resumeFrom;
 
-        // Check for cancellation
-        if (this.abortController.signal.aborted) {
-          throw new Error('Workflow cancelled');
+        const startTime = Date.now();
+        const nodeOutputs: Record<string, string> = resumeFrom?.nodeOutputs
+            ? { ...resumeFrom.nodeOutputs }
+            : {};
+        const executionOrder: string[] = resumeFrom?.executionOrder
+            ? [...resumeFrom.executionOrder]
+            : [];
+        let lastActiveNodeId: string | undefined = resumeFrom?.lastActiveNodeId;
+        let finalNodeId: string | undefined = resumeFrom?.finalNodeId;
+        let finalOutput = resumeFrom?.resumeInput || '';
+        let sessionMessages: ChatMessage[] = [];
+
+        // Preflight validation (enabled by default)
+        if (this.options.preflight !== false) {
+            const validationContext: ValidationContext = {
+                subflowRegistry: this.options.subflowRegistry,
+                defaultModel: this.options.defaultModel,
+                extensionRegistry,
+            };
+
+            const validation = validateWorkflow(
+                workflow.nodes,
+                workflow.edges,
+                validationContext,
+                { strictDataValidation: this.options.strictDataValidation }
+            );
+
+            if (!validation.isValid) {
+                const errorMessages = validation.errors
+                    .map(
+                        (e) =>
+                            `${e.code}: ${e.message}${
+                                e.nodeId ? ` (node: ${e.nodeId})` : ''
+                            }`
+                    )
+                    .join('; ');
+
+                const validationError = createExecutionError(
+                    new Error(`Workflow validation failed: ${errorMessages}`),
+                    '',
+                    '',
+                    undefined,
+                    1,
+                    1,
+                    []
+                );
+
+                callbacks.onNodeError('', validationError);
+
+                const result = this.buildExecutionResult(
+                    false,
+                    '',
+                    '',
+                    undefined,
+                    [],
+                    undefined,
+                    {},
+                    sessionMessages,
+                    startTime,
+                    validationError
+                );
+                callbacks.onComplete?.(result as any);
+                return result;
+            }
         }
 
-        // Skip if already executed
-        if (executed.has(currentId)) continue;
+        try {
+            const graph = this.buildGraph(workflow.nodes, workflow.edges);
 
-        // Check if all parents are executed (except for start node)
-        const parentIds = graph.parents[currentId] || [];
-        const allParentsExecuted = parentIds.every(p => executed.has(p));
+            // Find start node
+            const startNode = workflow.nodes.find((n) => n.type === 'start');
+            if (!startNode) {
+                throw new Error('No start node found in workflow');
+            }
 
-        if (!allParentsExecuted && currentId !== startNode.id) {
-          // If not all parents executed, check if we should wait or if we are stuck
-          // But since we only add to queue when parents complete, this case implies
-          // we were added by one parent but another is still pending.
-          // We should re-queue and wait.
-          queue.push(currentId);
-          continue;
+            // Initialize execution context
+            const session = new ExecutionSession(this.options.sessionId);
+            if (resumeFrom?.sessionMessages?.length) {
+                session.messages.push(...resumeFrom.sessionMessages);
+            } else {
+                session.addMessage({ role: 'user', content: input.text });
+            }
+
+            const context: InternalExecutionContext = {
+                input: input.text,
+                currentInput:
+                    resumeFrom?.resumeInput ||
+                    (resumeFrom?.lastActiveNodeId
+                        ? resumeFrom.nodeOutputs?.[resumeFrom.lastActiveNodeId]
+                        : input.text),
+                originalInput: input.text,
+                attachments: input.attachments || [],
+                outputs: { ...(resumeFrom?.nodeOutputs || {}) },
+                nodeChain: resumeFrom?.executionOrder
+                    ? [...resumeFrom.executionOrder]
+                    : [],
+                nodePath: this.options._subflowPath
+                    ? [...this.options._subflowPath]
+                    : [],
+                signal: this.abortController.signal,
+                session,
+                memory: this.memory,
+                workflowName: workflow.meta.name,
+            };
+
+            sessionMessages = context.session.messages;
+
+            // BFS execution through the graph
+            const rootNodeId = resumeFrom?.startNodeId ?? startNode.id;
+            const queue: string[] = [rootNodeId];
+            const executed = new Set<string>(
+                resumeFrom ? Object.keys(resumeFrom.nodeOutputs || {}) : []
+            );
+            // Ensure the resume target is re-run
+            if (resumeFrom) {
+                executed.delete(rootNodeId);
+            }
+            const skipped = new Set<string>();
+            // Per-node execution counter to prevent infinite loops
+            const nodeExecutionCount = new Map<string, number>();
+            const maxNodeExecutions = this.options.maxNodeExecutions ?? 100;
+            // Use configured maxIterations or calculate from node count
+            const maxIterations =
+                this.options.maxIterations ??
+                workflow.nodes.length * MAX_ITERATIONS_MULTIPLIER;
+            let iterations = 0;
+
+            // Helper to propagate skip status
+            const propagateSkip = (nodeId: string): void => {
+                if (executed.has(nodeId)) return;
+
+                // Check if all parents are resolved (executed or skipped)
+                const parentIds = graph.parents[nodeId];
+                if (!parentIds || parentIds.length === 0) {
+                    // No parents means this is unreachable from executed nodes
+                    return;
+                }
+
+                const allParentsResolved = parentIds.every((p) =>
+                    executed.has(p)
+                );
+
+                if (allParentsResolved) {
+                    executed.add(nodeId);
+                    skipped.add(nodeId);
+
+                    // Propagate to children
+                    const children = graph.children[nodeId];
+                    if (children) {
+                        for (const child of children) {
+                            propagateSkip(child.nodeId);
+                        }
+                    }
+                }
+            };
+
+            // DAG-level parallel execution: execute all ready nodes concurrently
+            // A node is "ready" when all its parents have been executed
+            while (queue.length > 0 && iterations < maxIterations) {
+                iterations++;
+
+                // Check for cancellation
+                if (this.abortController?.signal.aborted) {
+                    throw new Error('Workflow cancelled');
+                }
+
+                // Find all ready nodes (nodes whose parents are all executed)
+                const readyNodes: string[] = [];
+                const deferredNodes: string[] = [];
+                const readySet = new Set<string>();
+                const deferredSet = new Set<string>();
+
+                for (const nodeId of queue) {
+                    // Skip if already executed
+                    if (executed.has(nodeId)) continue;
+
+                    // Check if all parents are executed (except for start node)
+                    const parentIds = graph.parents[nodeId];
+                    const allParentsExecuted =
+                        !parentIds ||
+                        parentIds.length === 0 ||
+                        parentIds.every((p) => executed.has(p));
+
+                    if (allParentsExecuted || nodeId === rootNodeId) {
+                        if (!readySet.has(nodeId)) {
+                            readySet.add(nodeId);
+                            readyNodes.push(nodeId);
+                        }
+                    } else if (!deferredSet.has(nodeId)) {
+                        deferredSet.add(nodeId);
+                        deferredNodes.push(nodeId);
+                    }
+                }
+
+                // If no nodes are ready, we have a cycle or unreachable nodes
+                if (readyNodes.length === 0) {
+                    if (deferredNodes.length > 0) {
+                        // Re-queue deferred nodes and continue (might become ready later)
+                        queue.length = 0;
+                        queue.push(...deferredNodes);
+                        continue;
+                    }
+                    break; // No more nodes to execute
+                }
+
+                // Clear queue and add back deferred nodes
+                queue.length = 0;
+                queue.push(...deferredNodes);
+
+                // Mark all ready nodes as executing (prevents re-queueing during concurrent execution)
+                for (const nodeId of readyNodes) {
+                    executed.add(nodeId);
+
+                    // Track node execution count as circuit breaker
+                    const execCount = (nodeExecutionCount.get(nodeId) || 0) + 1;
+                    nodeExecutionCount.set(nodeId, execCount);
+
+                    // Check if this node has been executed too many times (circuit breaker)
+                    if (execCount > maxNodeExecutions) {
+                        throw new Error(
+                            `Node "${nodeId}" exceeded maximum executions (${maxNodeExecutions}). ` +
+                                'This likely indicates an infinite loop. Check your workflow for cycles.'
+                        );
+                    }
+                }
+
+                // Execute all ready nodes concurrently
+                const executeNode = async (
+                    nodeId: string
+                ): Promise<{
+                    nodeId: string;
+                    result: { output: string; nextNodes: string[] };
+                }> => {
+                    const result = await this.executeNodeWithErrorHandling(
+                        nodeId,
+                        context,
+                        graph,
+                        workflow.edges,
+                        callbacks
+                    );
+                    return { nodeId, result };
+                };
+
+                const results = await Promise.all(readyNodes.map(executeNode));
+
+                // Process results
+                for (const { nodeId, result } of results) {
+                    // Store output
+                    nodeOutputs[nodeId] = result.output;
+                    finalOutput = result.output;
+                    finalNodeId = nodeId;
+                    executionOrder.push(nodeId);
+                    lastActiveNodeId = nodeId;
+
+                    // Handle skipped nodes (children not in nextNodes) - except while loops which manage their own control flow
+                    const currentNode = graph.nodeMap.get(nodeId);
+                    if (currentNode?.type !== 'whileLoop') {
+                        const allChildren = graph.children[nodeId];
+                        if (allChildren) {
+                            for (const child of allChildren) {
+                                if (!result.nextNodes.includes(child.nodeId)) {
+                                    propagateSkip(child.nodeId);
+                                }
+                            }
+                        }
+                    }
+
+                    // Queue next nodes
+                    for (const nextId of result.nextNodes) {
+                        if (!executed.has(nextId) || nextId === nodeId) {
+                            queue.push(nextId);
+                        }
+                    }
+
+                    // Allow re-entry for loop nodes that intentionally re-queue themselves
+                    if (result.nextNodes.includes(nodeId)) {
+                        executed.delete(nodeId);
+                    }
+                }
+            }
+
+            if (iterations >= maxIterations) {
+                throw new Error(
+                    'Workflow execution exceeded maximum iterations - check for cycles'
+                );
+            }
+
+            if (finalOutput) {
+                const messages = context.session.messages;
+                const lastMessage = messages[messages.length - 1];
+                const shouldAddMessage =
+                    !lastMessage ||
+                    lastMessage.role !== 'assistant' ||
+                    lastMessage.content !== finalOutput;
+
+                if (shouldAddMessage) {
+                    context.session.addMessage({
+                        role: 'assistant',
+                        content: finalOutput,
+                    });
+                }
+            }
+
+            const result = this.buildExecutionResult(
+                true,
+                finalOutput,
+                finalOutput,
+                finalNodeId,
+                executionOrder,
+                lastActiveNodeId,
+                nodeOutputs,
+                context.session.messages,
+                startTime
+            );
+            callbacks.onComplete?.(result as any);
+            return result;
+        } catch (error) {
+            const err =
+                error instanceof Error ? error : new Error(String(error));
+            const result = this.buildExecutionResult(
+                false,
+                '',
+                '',
+                finalNodeId,
+                executionOrder,
+                lastActiveNodeId,
+                nodeOutputs,
+                sessionMessages,
+                startTime,
+                err
+            );
+            callbacks.onComplete?.(result as any);
+            return result;
+        } finally {
+            this.running = false;
+        }
+    }
+
+    /**
+     * Build an execution result object with common fields.
+     */
+    private buildExecutionResult(
+        success: boolean,
+        output: string,
+        finalOutput: string,
+        finalNodeId: string | undefined,
+        executionOrder: string[],
+        lastActiveNodeId: string | undefined,
+        nodeOutputs: Record<string, string>,
+        sessionMessages: ChatMessage[],
+        startTime: number,
+        error?: Error
+    ): ExecutionResult {
+        const usage = this.getTokenUsageSummary();
+        const tokenUsageDetails = this.tokenUsageEvents.map((entry) => ({
+            nodeId: entry.nodeId,
+            ...entry.usage,
+        }));
+        return {
+            success,
+            output,
+            finalOutput,
+            finalNodeId,
+            executionOrder,
+            lastActiveNodeId,
+            nodeOutputs,
+            sessionMessages: [...sessionMessages],
+            error,
+            duration: Date.now() - startTime,
+            usage,
+            tokenUsageDetails,
+        };
+    }
+
+    /**
+     * Stop the current execution.
+     */
+    stop(): void {
+        if (this.abortController) {
+            this.abortController.abort();
+            this.abortController = null;
+        }
+        this.running = false;
+        // Clear token usage events to prevent memory buildup
+        this.tokenUsageEvents = [];
+    }
+
+    /**
+     * Check if execution is currently running.
+     */
+    isRunning(): boolean {
+        return this.running;
+    }
+
+    /**
+     * Get model capabilities for a given model ID.
+     */
+    async getModelCapabilities(
+        modelId: string
+    ): Promise<ModelCapabilities | null> {
+        return this.provider.getModelCapabilities(modelId);
+    }
+
+    /**
+     * Check if a model supports a specific input modality.
+     *
+     * @param modelId - The model identifier.
+     * @param modality - The input modality to check ('text', 'image', 'audio', etc.).
+     * @returns True if the model supports the modality.
+     */
+    async supportsModality(
+        modelId: string,
+        modality: InputModality
+    ): Promise<boolean> {
+        const capabilities = await this.getModelCapabilities(modelId);
+        if (!capabilities) return modality === 'text'; // Default to text only
+        return capabilities.inputModalities.includes(modality);
+    }
+
+    // ==========================================================================
+    // Graph Building
+    // ==========================================================================
+
+    /**
+     * Build a graph structure from nodes and edges for traversal.
+     */
+    private buildGraph(
+        nodes: WorkflowNode[],
+        edges: WorkflowEdge[]
+    ): WorkflowGraph {
+        const nodeMap = new Map<string, WorkflowNode>();
+        const children: Record<
+            string,
+            Array<{ nodeId: string; handleId?: string }>
+        > = {};
+        const parents: Record<string, string[]> = {};
+
+        // First pass: build node map and initialize edge arrays
+        for (const node of nodes) {
+            nodeMap.set(node.id, node);
+            children[node.id] = [];
+            parents[node.id] = [];
         }
 
-        executed.add(currentId);
+        // Second pass: build edges (with validation)
+        for (const edge of edges) {
+            // Validate edge refers to existing nodes
+            if (!nodeMap.has(edge.source) || !nodeMap.has(edge.target)) {
+                if (this.options.debug) {
+                    console.warn(
+                        `Skipping edge ${edge.id}: references non-existent node (source: ${edge.source}, target: ${edge.target})`
+                    );
+                }
+                continue;
+            }
 
-        // Execute the node
-        const result = await this.executeNode(
-          currentId,
-          context,
-          graph,
-          workflow.edges,
-          callbacks
+            // These are guaranteed to exist after initialization loop
+            children[edge.source].push({
+                nodeId: edge.target,
+                handleId: edge.sourceHandle || undefined,
+            });
+            // Only add parent if not already present (handles multiple edges from same source)
+            if (!parents[edge.target].includes(edge.source)) {
+                parents[edge.target].push(edge.source);
+            }
+        }
+
+        return { nodeMap, children, parents };
+    }
+
+    // ==========================================================================
+    // Node Execution
+    // ==========================================================================
+
+    /**
+     * Execute a single node in the workflow.
+     */
+    private async executeNodeInternal(
+        nodeId: string,
+        context: InternalExecutionContext,
+        graph: WorkflowGraph,
+        edges: WorkflowEdge[],
+        callbacks: ExecutionCallbacks
+    ): Promise<{ output: string; nextNodes: string[] }> {
+        const node = graph.nodeMap.get(nodeId);
+        if (!node) return { output: '', nextNodes: [] };
+        const meta = {
+            id: nodeId,
+            label: getNodeLabel(node),
+            type: node?.type,
+            path: context.nodePath.length ? [...context.nodePath] : undefined,
+        } satisfies Partial<NodeExecutionMetadata>;
+
+        callbacks.onNodeStart(nodeId, meta);
+
+        // Look up extension
+        const extension = extensionRegistry.get(node.type);
+        if (!extension) {
+            throw new Error(`No extension found for node type: ${node.type}`);
+        }
+
+        if (!extension.execute) {
+            throw new Error(
+                `Extension for ${node.type} does not implement execute()`
+            );
+        }
+
+        // Apply context compaction for nodes that use LLM with history
+        let historyMessages = context.session.messages;
+        if (
+            OpenRouterExecutionAdapter.LLM_NODE_TYPES.has(node.type) &&
+            this.options.compaction
+        ) {
+            const nodeData = node.data as unknown as Record<string, unknown>;
+            const model =
+                (typeof nodeData.model === 'string' ? nodeData.model : null) ||
+                (typeof nodeData.conditionModel === 'string'
+                    ? nodeData.conditionModel
+                    : null) ||
+                this.options.defaultModel ||
+                DEFAULT_MODEL;
+            const compactionResult = await this.compactHistoryIfNeeded(
+                historyMessages,
+                model,
+                callbacks
+            );
+            historyMessages = compactionResult.messages;
+            // Update session messages if compacted
+            if (compactionResult.result?.compacted) {
+                context.session.messages.length = 0;
+                context.session.messages.push(...historyMessages);
+            }
+        }
+
+        // Construct ExecutionContext for extension
+        const executionContext: ExecutionContext = {
+            input: context.currentInput,
+            history: historyMessages,
+            memory: this.memory,
+            attachments: context.attachments,
+            outputs: context.outputs,
+            nodeChain: context.nodeChain,
+            signal: context.signal,
+            sessionId: context.session.id,
+            customEvaluators: this.options.customEvaluators,
+            debug: this.options.debug,
+            defaultModel: this.options.defaultModel,
+            subflowRegistry: this.options.subflowRegistry,
+            subflowDepth: this.options._subflowDepth ?? 0,
+            maxSubflowDepth: this.options.maxSubflowDepth ?? 10,
+            tools: this.options.tools,
+            maxToolIterations: this.options.maxToolIterations,
+            onMaxToolIterations: this.options.onMaxToolIterations,
+            onHITLRequest: this.options.onHITLRequest,
+            workflowName: context.workflowName,
+            tokenCounter: this.tokenCounter,
+            compaction: this.options.compaction,
+            onTokenUsage: (usage) => {
+                if (callbacks.onTokenUsage) {
+                    callbacks.onTokenUsage(nodeId, usage);
+                }
+                this.tokenUsageEvents.push({ nodeId, usage });
+            },
+
+            onToken: (token: string) => {
+                callbacks.onToken(nodeId, token);
+                const isLeaf = (graph.children[nodeId] || []).length === 0;
+                if (isLeaf && callbacks.onWorkflowToken) {
+                    callbacks.onWorkflowToken(token, {
+                        nodeId,
+                        nodeLabel: meta.label,
+                        nodeType: meta.type,
+                        isFinalNode: true,
+                    });
+                }
+            },
+
+            onReasoning: callbacks.onReasoning
+                ? (token: string) => {
+                      callbacks.onReasoning!(nodeId, token);
+                  }
+                : undefined,
+
+            // Branch streaming callbacks for parallel nodes
+            onBranchToken: callbacks.onBranchToken
+                ? (branchId: string, branchLabel: string, token: string) => {
+                      callbacks.onBranchToken!(
+                          nodeId,
+                          branchId,
+                          branchLabel,
+                          token
+                      );
+                  }
+                : undefined,
+            onBranchReasoning: callbacks.onBranchReasoning
+                ? (branchId: string, branchLabel: string, token: string) => {
+                      callbacks.onBranchReasoning!(
+                          nodeId,
+                          branchId,
+                          branchLabel,
+                          token
+                      );
+                  }
+                : undefined,
+            onBranchStart: callbacks.onBranchStart
+                ? (branchId: string, branchLabel: string) => {
+                      callbacks.onBranchStart!(
+                          nodeId,
+                          branchId,
+                          branchLabel,
+                          meta
+                      );
+                  }
+                : undefined,
+            onBranchComplete: callbacks.onBranchComplete
+                ? (branchId: string, branchLabel: string, output: string) => {
+                      callbacks.onBranchComplete!(
+                          nodeId,
+                          branchId,
+                          branchLabel,
+                          output,
+                          meta
+                      );
+                  }
+                : undefined,
+            onLoopIteration: callbacks.onLoopIteration
+                ? (iteration: number, maxIterations: number) => {
+                      callbacks.onLoopIteration!(
+                          nodeId,
+                          iteration,
+                          maxIterations,
+                          meta
+                      );
+                  }
+                : undefined,
+
+            getNode: (id: string) => graph.nodeMap.get(id),
+
+            getOutgoingEdges: (id: string, sourceHandle?: string) => {
+                const outgoing = edges.filter((e) => e.source === id);
+                if (sourceHandle) {
+                    // If looking for a specific handle, match edges with that handle
+                    // OR edges without a handle (which are considered default/output)
+                    return outgoing.filter(
+                        (e) =>
+                            e.sourceHandle === sourceHandle || !e.sourceHandle
+                    );
+                }
+                return outgoing;
+            },
+
+            onToolCall: this.options.onToolCall,
+            onToolCallEvent: this.options.onToolCallEvent
+                ? (event) => {
+                      this.options.onToolCallEvent?.({
+                          ...event,
+                          nodeId,
+                          nodeLabel: meta.label,
+                          nodeType: meta.type,
+                      });
+                  }
+                : undefined,
+
+            executeSubgraph: async (
+                startNodeId: string,
+                input: string,
+                options?: { nodeOverrides?: Record<string, any> }
+            ) => {
+                // Create isolated context for subgraph
+                const subContext: InternalExecutionContext = {
+                    ...context,
+                    currentInput: input,
+                    // inherit outputs/history/memory?
+                    // Usually subgraphs share context but operate on new input.
+                };
+
+                // Handle node overrides for subgraph execution
+                let subgraph = graph;
+                if (options?.nodeOverrides) {
+                    const modifiedNodeMap = new Map(graph.nodeMap);
+                    for (const [id, overrides] of Object.entries(
+                        options.nodeOverrides
+                    )) {
+                        const original = modifiedNodeMap.get(id);
+                        if (original) {
+                            modifiedNodeMap.set(id, {
+                                ...original,
+                                data: { ...original.data, ...overrides },
+                            });
+                        }
+                    }
+                    subgraph = { ...graph, nodeMap: modifiedNodeMap };
+                }
+
+                // Find the parent node that is calling executeSubgraph
+                // We need to mark parent nodes as "executed" so their children can run
+                // Start node is available via subgraph.nodeMap.get(startNodeId) if needed
+                const preExecuted = new Set<string>();
+
+                // Mark parent nodes of startNodeId as executed
+                const parents = subgraph.parents[startNodeId] || [];
+                for (const parentId of parents) {
+                    preExecuted.add(parentId);
+                }
+
+                const result = await this.executeSubgraph(
+                    startNodeId,
+                    subContext,
+                    subgraph,
+                    edges,
+                    callbacks,
+                    preExecuted
+                );
+                return { output: result.output };
+            },
+
+            executeWorkflow: async (
+                wf: WorkflowData,
+                input: ExecutionInput,
+                options?: Partial<ExecutionOptions>
+            ) => {
+                // Execute sub-workflow
+                // We need to instantiate a new adapter or reuse current?
+                // Reusing current is better to share state/cache/provider
+                // But options might differ.
+                // Creating a new adapter instance allows separate configuration.
+                // But we want to share memory if configured.
+
+                // For now, let's call `this.execute` recursively?
+                // `this.execute` resets state (abortController, etc) which breaks parent execution if running on same instance!
+                // `this.execute` calls `this.abortController = new AbortController()`.
+                // So we MUST create a NEW adapter instance or refactor `execute` to not reset if it's a child.
+                // Creating a new adapter is safer.
+
+                // NOTE: provider is shared.
+                // BUT provider in this class is LLMProvider. The constructor expects OpenRouter | LLMProvider.
+                // So we can pass `this.provider`.
+
+                const subflowPath = [...context.nodePath, nodeId];
+                const subflowCallbacks = scopeExecutionCallbacks(
+                    callbacks,
+                    subflowPath
+                );
+                const baseOnToolCallEvent =
+                    options?.onToolCallEvent ?? this.options.onToolCallEvent;
+                const baseOnHITLRequest =
+                    options?.onHITLRequest ?? this.options.onHITLRequest;
+
+                const subAdapter = new OpenRouterExecutionAdapter(
+                    this.provider,
+                    {
+                        ...this.options,
+                        ...options,
+                        // Pass subflow registry
+                        subflowRegistry: this.options.subflowRegistry,
+                        _subflowPath: subflowPath,
+                        onToolCallEvent: baseOnToolCallEvent
+                            ? (event) => {
+                                  baseOnToolCallEvent({
+                                      ...event,
+                                      nodeId: scopeNodeId(
+                                          event.nodeId,
+                                          subflowPath
+                                      ),
+                                  });
+                              }
+                            : undefined,
+                        onHITLRequest: baseOnHITLRequest
+                            ? (request) => {
+                                  return baseOnHITLRequest({
+                                      ...request,
+                                      nodeId: scopeNodeId(
+                                          request.nodeId,
+                                          subflowPath
+                                      ),
+                                  });
+                              }
+                            : undefined,
+                    }
+                );
+
+                return subAdapter.execute(wf, input, subflowCallbacks);
+            },
+        };
+
+        const result = await extension.execute(
+            executionContext,
+            node,
+            this.provider
         );
 
-        // Store output
-        nodeOutputs[currentId] = result.output;
-        finalOutput = result.output;
-
-        // Handle skipped nodes (children not in nextNodes)
-        const allChildren = graph.children[currentId] || [];
-        for (const child of allChildren) {
-          if (!result.nextNodes.includes(child.nodeId)) {
-            propagateSkip(child.nodeId);
-          }
+        // Handle metadata/side-effects
+        if (result.metadata?.selectedRoute) {
+            if (callbacks.onRouteSelected) {
+                callbacks.onRouteSelected(
+                    nodeId,
+                    result.metadata.selectedRoute,
+                    meta
+                );
+            }
         }
 
-        // Queue next nodes
-        for (const nextId of result.nextNodes) {
-          if (!executed.has(nextId)) {
-            queue.push(nextId);
-          }
+        // Store branch outputs with composite keys for Parallel Split nodes
+        // This allows Output nodes to reference individual branches via "parallelNodeId:branchId"
+        if (result.metadata?.branchOutputs) {
+            const branchOutputs = result.metadata.branchOutputs as Record<
+                string,
+                string
+            >;
+            for (const [branchId, branchOutput] of Object.entries(
+                branchOutputs
+            )) {
+                context.outputs[`${nodeId}:${branchId}`] = branchOutput;
+            }
         }
-        
-        // Also check children of skipped nodes - they might be ready now if they have multiple parents
-        // (e.g. merge node where one parent was skipped and one just finished)
-        // Actually, propagateSkip handles the recursive skipping.
-        // But if a merge node has one skipped parent and one active parent (nextId),
-        // nextId is added to queue. When nextId runs, it will add merge node to queue.
-        // When merge node runs, it checks allParentsExecuted.
-        // Since skipped parent is in executed set, it passes.
-        // So we just need to ensure that if a node was WAITING in the queue (re-queued),
-        // and its other parent just got skipped, it should be processed.
-        // But we don't keep waiting nodes in a separate list, we re-push to queue.
-        // So it will be checked again.
-      }
 
-      if (iterations >= maxIterations) {
-        throw new Error('Workflow execution exceeded maximum iterations - check for cycles');
-      }
+        // Update context
+        context.outputs[nodeId] = result.output;
+        if (!context.nodeChain.includes(nodeId)) {
+            context.nodeChain.push(nodeId);
+        }
+        context.currentInput = result.output;
 
-      return {
-        success: true,
-        output: finalOutput,
-        nodeOutputs,
-        duration: Date.now() - startTime,
-      };
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      return {
-        success: false,
-        output: '',
-        nodeOutputs,
-        error: err,
-        duration: Date.now() - startTime,
-      };
-    } finally {
-      this.running = false;
+        // Add assistant message for certain node types?
+        // AgentNode logic was: "context.session.addMessage({ role: 'assistant', content: output });"
+        // Should we move this to extension or keep it here?
+        // Ideally extension manages history?
+        // But `session` is internal.
+        // If `node.type === 'agent'`, add message?
+        if (node.type === 'agent') {
+            context.session.addMessage({
+                role: 'assistant',
+                content: result.output,
+            });
+        }
+
+        callbacks.onNodeFinish(nodeId, result.output, meta);
+        return { output: result.output, nextNodes: result.nextNodes };
     }
-  }
+    private getTokenUsageSummary(): TokenUsage | undefined {
+        if (this.tokenUsageEvents.length === 0) {
+            return undefined;
+        }
 
-  /**
-   * Stop the current execution.
-   */
-  stop(): void {
-    if (this.abortController) {
-      this.abortController.abort();
-      this.abortController = null;
-    }
-    this.running = false;
-  }
+        let promptTokens = 0;
+        let completionTokens = 0;
 
-  /**
-   * Check if execution is currently running.
-   */
-  isRunning(): boolean {
-    return this.running;
-  }
+        for (const entry of this.tokenUsageEvents) {
+            promptTokens += entry.usage.promptTokens;
+            completionTokens += entry.usage.completionTokens;
+        }
 
-  /**
-   * Get model capabilities for a given model ID.
-   * 
-   * Uses static capability detection based on known model patterns.
-   * The OpenRouter SDK does not expose a models API directly, so we infer
-   * capabilities from model naming conventions.
-   *
-   * @param modelId - The model identifier (e.g., 'openai/gpt-4o-mini').
-   * @returns Model capabilities or null if unknown.
-   */
-  async getModelCapabilities(modelId: string): Promise<ModelCapabilities | null> {
-    // Check cache first
-    if (this.modelCapabilitiesCache.has(modelId)) {
-      return this.modelCapabilitiesCache.get(modelId) || null;
+        return {
+            promptTokens,
+            completionTokens,
+            totalTokens: promptTokens + completionTokens,
+        };
     }
 
-    // Infer capabilities from model naming conventions
-    const capabilities = this.inferModelCapabilities(modelId);
-    this.modelCapabilitiesCache.set(modelId, capabilities);
-    return capabilities;
-  }
+    /**
+     * Execute a node with retry/error-handling semantics and HITL support.
+     */
+    private async executeNodeWithErrorHandling(
+        nodeId: string,
+        context: InternalExecutionContext,
+        graph: WorkflowGraph,
+        edges: WorkflowEdge[],
+        callbacks: ExecutionCallbacks
+    ): Promise<{ output: string; nextNodes: string[] }> {
+        const node = graph.nodeMap.get(nodeId);
+        if (!node) {
+            // Early return for missing node
+            return { output: '', nextNodes: [] };
+        }
 
-  /**
-   * Infer model capabilities from model ID patterns.
-   * @internal
-   */
-  private inferModelCapabilities(modelId: string): ModelCapabilities {
-    const lowerModelId = modelId.toLowerCase();
-    
-    // Default capabilities
-    const capabilities: ModelCapabilities = {
-      id: modelId,
-      name: modelId.split('/').pop() || modelId,
-      inputModalities: ['text'],
-      outputModalities: ['text'],
-      contextLength: 4096,
-      supportedParameters: ['temperature', 'max_tokens', 'top_p'],
-    };
+        const nodeLabel = getNodeLabel(node);
+        const meta = {
+            id: nodeId,
+            label: nodeLabel,
+            type: node.type,
+            path: context.nodePath.length ? [...context.nodePath] : undefined,
+        } satisfies Partial<NodeExecutionMetadata>;
 
-    // Vision models (GPT-4V, Claude 3, Gemini with vision)
-    const visionPatterns = [
-      'gpt-4o', 'gpt-4-vision', 'gpt-4-turbo',
-      'claude-3', 'claude-3.5',
-      'gemini-pro-vision', 'gemini-1.5', 'gemini-2',
-      'llava', 'vision',
-    ];
-    if (visionPatterns.some(p => lowerModelId.includes(p))) {
-      capabilities.inputModalities = ['text', 'image'];
+        const nodeData = node.data as unknown as Record<string, unknown>;
+        const errorConfig = nodeData?.errorHandling as
+            | NodeErrorConfig
+            | undefined;
+        const retryConfig = errorConfig?.retry;
+        const resolvedRetry: NodeRetryConfig | undefined =
+            retryConfig ??
+            (this.options.maxRetries !== undefined
+                ? {
+                      maxRetries: this.options.maxRetries,
+                      baseDelay:
+                          this.options.retryDelayMs || DEFAULT_RETRY_DELAY_MS,
+                  }
+                : undefined);
+        const errorEdge = edges.find(
+            (e) => e.source === nodeId && e.sourceHandle === 'error'
+        );
+
+        // Check if this node type supports HITL
+        const hitlConfig = nodeData?.hitl as HITLConfig | undefined;
+        const supportsHITL =
+            OpenRouterExecutionAdapter.HITL_SUPPORTED_TYPES.has(node.type);
+        const shouldUseHITL =
+            supportsHITL && hitlConfig?.enabled && this.options.onHITLRequest;
+
+        let lastError: ExecutionError | null = null;
+        const retryHistory: Array<{
+            attempt: number;
+            error: string;
+            timestamp: string;
+        }> = [];
+        const maxAttempts = (resolvedRetry?.maxRetries ?? 0) + 1;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                // Use HITL wrapper for supported nodes with HITL enabled
+                if (shouldUseHITL) {
+                    return await this.executeWithHITL(
+                        node,
+                        context,
+                        graph,
+                        edges,
+                        callbacks
+                    );
+                }
+                return await this.executeNodeInternal(
+                    nodeId,
+                    context,
+                    graph,
+                    edges,
+                    callbacks
+                );
+            } catch (error) {
+                const execError = createExecutionError(
+                    error,
+                    nodeId,
+                    node.type,
+                    nodeLabel,
+                    attempt,
+                    maxAttempts,
+                    retryHistory
+                );
+                lastError = execError;
+
+                const shouldRetry =
+                    attempt < maxAttempts &&
+                    this.shouldRetry(execError, resolvedRetry);
+                if (shouldRetry) {
+                    // Use suggested delay (respects retry-after header)
+                    const delay = execError.getSuggestedDelay(
+                        resolvedRetry?.baseDelay || DEFAULT_RETRY_DELAY_MS,
+                        attempt,
+                        resolvedRetry?.maxDelay || 30000
+                    );
+                    await this.sleep(delay);
+                    retryHistory.push({
+                        attempt,
+                        error: execError.message,
+                        timestamp: new Date().toISOString(),
+                    });
+                    continue;
+                }
+
+                const mode = errorConfig?.mode || 'stop';
+
+                if (mode === 'branch' && errorEdge) {
+                    context.outputs[`${nodeId}_error`] =
+                        this.serializeError(execError);
+                    callbacks.onNodeError(nodeId, execError, meta);
+                    return {
+                        output: '',
+                        nextNodes: [errorEdge.target],
+                    };
+                }
+
+                if (mode === 'continue') {
+                    callbacks.onNodeError(nodeId, execError, meta);
+                    return {
+                        output: '',
+                        nextNodes: this.getChildNodes(nodeId, edges),
+                    };
+                }
+
+                callbacks.onNodeError(nodeId, execError, meta);
+                throw execError;
+            }
+        }
+
+        // This should never be reached due to throw in loop above
+        if (!lastError) {
+            throw new Error('Unexpected: No error captured in retry loop');
+        }
+        throw lastError;
     }
 
-    // Audio models
-    const audioPatterns = ['whisper', 'audio', 'gpt-4o-audio'];
-    if (audioPatterns.some(p => lowerModelId.includes(p))) {
-      capabilities.inputModalities = [...capabilities.inputModalities, 'audio'];
+    // ==========================================================================
+    // Human-in-the-Loop (HITL)
+    // ==========================================================================
+
+    /**
+     * Execute a node with HITL (Human-in-the-Loop) support.
+     * Wraps executeNodeInternal with approval/input/review modes.
+     */
+    private async executeWithHITL(
+        node: WorkflowNode,
+        context: InternalExecutionContext,
+        graph: WorkflowGraph,
+        edges: WorkflowEdge[],
+        callbacks: ExecutionCallbacks
+    ): Promise<{ output: string; nextNodes: string[] }> {
+        const nodeData = node.data as unknown as Record<string, unknown>;
+        const hitlConfig = nodeData.hitl as HITLConfig | undefined;
+        const nodeLabel = getNodeLabel(node);
+        const meta = {
+            id: node.id,
+            label: nodeLabel,
+            type: node.type,
+            path: context.nodePath.length ? [...context.nodePath] : undefined,
+        } satisfies Partial<NodeExecutionMetadata>;
+
+        // No HITL configured or disabled, or no callback provided
+        if (!hitlConfig?.enabled || !this.options.onHITLRequest) {
+            return this.executeNodeInternal(
+                node.id,
+                context,
+                graph,
+                edges,
+                callbacks
+            );
+        }
+
+        const workflowName = context.session.id || 'Workflow';
+        const childEdges = graph.children[node.id];
+
+        // Get only default output handles (exclude error/rejected for skip routing)
+        const defaultChildNodeIds = childEdges
+            ? childEdges
+                  .filter(
+                      (c) =>
+                          !c.handleId ||
+                          (c.handleId !== 'error' && c.handleId !== 'rejected')
+                  )
+                  .map((c) => c.nodeId)
+            : [];
+
+        // Helper to handle reject action
+        const handleReject = (): { output: string; nextNodes: string[] } => {
+            const rejectEdge = edges.find(
+                (e) => e.source === node.id && e.sourceHandle === 'rejected'
+            );
+            if (rejectEdge) {
+                callbacks.onNodeFinish(node.id, 'HITL: Rejected', meta);
+                return { output: '', nextNodes: [rejectEdge.target] };
+            }
+            throw new Error('HITL: Request rejected');
+        };
+
+        // Helper to handle skip action - only routes through default output handles
+        const handleSkip = (): { output: string; nextNodes: string[] } => {
+            callbacks.onNodeFinish(node.id, 'HITL: Skipped', meta);
+            return {
+                output: context.currentInput,
+                nextNodes: defaultChildNodeIds,
+            };
+        };
+
+        // Helper to update context with response data
+        const updateContextWithData = (data: unknown): void => {
+            if (data) {
+                context.currentInput =
+                    typeof data === 'string' ? data : JSON.stringify(data);
+            }
+        };
+
+        switch (hitlConfig.mode) {
+            case 'approval': {
+                // Pause BEFORE execution for approval
+                const request = this.createHITLRequest(
+                    node,
+                    hitlConfig,
+                    context,
+                    workflowName,
+                    undefined
+                );
+                const response = await this.waitForHITL(request, hitlConfig);
+
+                if (response.action === 'reject') {
+                    return handleReject();
+                }
+
+                if (response.action === 'skip') {
+                    return handleSkip();
+                }
+
+                // Approved - execute with possibly modified input
+                updateContextWithData(response.data);
+                return this.executeNodeInternal(
+                    node.id,
+                    context,
+                    graph,
+                    edges,
+                    callbacks
+                );
+            }
+
+            case 'input': {
+                // Pause to collect human input
+                const request = this.createHITLRequest(
+                    node,
+                    hitlConfig,
+                    context,
+                    workflowName,
+                    undefined
+                );
+                const response = await this.waitForHITL(request, hitlConfig);
+
+                if (response.action === 'skip') {
+                    return handleSkip();
+                }
+
+                if (response.action === 'reject') {
+                    return handleReject();
+                }
+
+                // Use human input as node input
+                updateContextWithData(response.data);
+
+                return this.executeNodeInternal(
+                    node.id,
+                    context,
+                    graph,
+                    edges,
+                    callbacks
+                );
+            }
+
+            case 'review': {
+                // Execute first, then pause for review
+                const result = await this.executeNodeInternal(
+                    node.id,
+                    context,
+                    graph,
+                    edges,
+                    callbacks
+                );
+
+                const request = this.createHITLRequest(
+                    node,
+                    hitlConfig,
+                    context,
+                    workflowName,
+                    result.output
+                );
+                const response = await this.waitForHITL(request, hitlConfig);
+
+                if (response.action === 'reject') {
+                    // Route to rejection branch or re-execute
+                    const rejectEdge = edges.find(
+                        (e) =>
+                            e.source === node.id &&
+                            e.sourceHandle === 'rejected'
+                    );
+                    if (rejectEdge) {
+                        return {
+                            output: result.output,
+                            nextNodes: [rejectEdge.target],
+                        };
+                    }
+                    // Re-execute if no rejection branch
+                    return this.executeNodeInternal(
+                        node.id,
+                        context,
+                        graph,
+                        edges,
+                        callbacks
+                    );
+                }
+
+                if (response.action === 'modify' && response.data) {
+                    // Use modified output
+                    const modifiedOutput =
+                        typeof response.data === 'string'
+                            ? response.data
+                            : JSON.stringify(response.data);
+                    context.outputs[node.id] = modifiedOutput;
+                    context.currentInput = modifiedOutput;
+                    return {
+                        output: modifiedOutput,
+                        nextNodes: result.nextNodes,
+                    };
+                }
+
+                return result;
+            }
+
+            default:
+                return this.executeNodeInternal(
+                    node.id,
+                    context,
+                    graph,
+                    edges,
+                    callbacks
+                );
+        }
     }
 
-    // Large context models
-    const largeContextPatterns: Array<{ pattern: string; context: number }> = [
-      { pattern: 'claude-3', context: 200000 },
-      { pattern: 'claude-2.1', context: 200000 },
-      { pattern: 'gpt-4-turbo', context: 128000 },
-      { pattern: 'gpt-4o', context: 128000 },
-      { pattern: 'gemini-1.5-pro', context: 1000000 },
-      { pattern: 'gemini-1.5-flash', context: 1000000 },
-      { pattern: 'gemini-2', context: 1000000 },
-      { pattern: 'mistral-large', context: 128000 },
-      { pattern: 'command-r', context: 128000 },
-    ];
-    
-    for (const { pattern, context } of largeContextPatterns) {
-      if (lowerModelId.includes(pattern)) {
-        capabilities.contextLength = context;
-        break;
-      }
+    /**
+     * Create a HITL request object.
+     */
+    private createHITLRequest(
+        node: WorkflowNode,
+        config: HITLConfig,
+        context: InternalExecutionContext,
+        workflowName: string,
+        output?: string
+    ): HITLRequest {
+        const now = new Date();
+        const nodeData = node.data as unknown as Record<string, unknown>;
+        const nodeLabel =
+            typeof nodeData.label === 'string' ? nodeData.label : node.id;
+
+        const request: HITLRequest = {
+            id: generateHITLRequestId(),
+            nodeId: node.id,
+            nodeLabel,
+            mode: config.mode,
+            prompt:
+                config.prompt ||
+                this.getDefaultHITLPrompt(config.mode, nodeLabel),
+            context: {
+                input: context.currentInput,
+                output,
+                workflowName,
+                sessionId: context.session.id,
+            },
+            options:
+                config.options ||
+                (config.mode === 'approval'
+                    ? getDefaultApprovalOptions()
+                    : undefined),
+            inputSchema: config.inputSchema,
+            createdAt: now.toISOString(),
+        };
+
+        if (config.timeout && config.timeout > 0) {
+            request.expiresAt = new Date(
+                now.getTime() + config.timeout
+            ).toISOString();
+        }
+
+        return request;
     }
 
-    // Image generation models
-    const imageGenPatterns = ['dall-e', 'stable-diffusion', 'midjourney', 'imagen'];
-    if (imageGenPatterns.some(p => lowerModelId.includes(p))) {
-      capabilities.outputModalities = ['image'];
+    /**
+     * Get default prompt based on HITL mode.
+     */
+    private getDefaultHITLPrompt(
+        mode: HITLConfig['mode'],
+        nodeLabel?: string
+    ): string {
+        const label = nodeLabel || 'this node';
+        switch (mode) {
+            case 'approval':
+                return `Review and approve the input for "${label}" before proceeding.`;
+            case 'input':
+                return `Provide input for "${label}".`;
+            case 'review':
+                return `Review the output from "${label}" before continuing.`;
+        }
     }
 
-    // Embedding models
-    const embeddingPatterns = ['embed', 'embedding', 'text-embedding'];
-    if (embeddingPatterns.some(p => lowerModelId.includes(p))) {
-      capabilities.outputModalities = ['embeddings'];
-    }
+    /**
+     * Wait for HITL response with optional timeout.
+     * Respects abort signal to cancel waiting when execution is stopped.
+     * Uses timestamp-based timeout to handle system sleep correctly.
+     */
+    private async waitForHITL(
+        request: HITLRequest,
+        config: HITLConfig
+    ): Promise<HITLResponse> {
+        if (!this.options.onHITLRequest) {
+            throw new Error(
+                'HITL requested but no onHITLRequest callback configured'
+            );
+        }
 
-    return capabilities;
-  }
+        const signal = this.abortController?.signal;
 
-  /**
-   * Check if a model supports a specific input modality.
-   *
-   * @param modelId - The model identifier.
-   * @param modality - The input modality to check ('text', 'image', 'audio', etc.).
-   * @returns True if the model supports the modality.
-   */
-  async supportsModality(modelId: string, modality: InputModality): Promise<boolean> {
-    const capabilities = await this.getModelCapabilities(modelId);
-    if (!capabilities) return modality === 'text'; // Default to text only
-    return capabilities.inputModalities.includes(modality);
-  }
+        // Check if already aborted
+        if (signal?.aborted) {
+            throw new Error('Workflow cancelled');
+        }
 
-  // ==========================================================================
-  // Graph Building
-  // ==========================================================================
-
-  /**
-   * Build a graph structure from nodes and edges for traversal.
-   */
-  private buildGraph(nodes: WorkflowNode[], edges: WorkflowEdge[]): WorkflowGraph {
-    const nodeMap = new Map<string, WorkflowNode>();
-    const children: Record<string, Array<{ nodeId: string; handleId?: string }>> = {};
-    const parents: Record<string, string[]> = {};
-
-    for (const node of nodes) {
-      nodeMap.set(node.id, node);
-      children[node.id] = [];
-      parents[node.id] = [];
-    }
-
-    for (const edge of edges) {
-      children[edge.source]?.push({
-        nodeId: edge.target,
-        handleId: edge.sourceHandle || undefined,
-      });
-      parents[edge.target]?.push(edge.source);
-    }
-
-    return { nodeMap, children, parents };
-  }
-
-  // ==========================================================================
-  // Node Execution
-  // ==========================================================================
-
-  /**
-   * Execute a single node in the workflow.
-   */
-  private async executeNode(
-    nodeId: string,
-    context: InternalExecutionContext,
-    graph: WorkflowGraph,
-    edges: WorkflowEdge[],
-    callbacks: ExecutionCallbacks
-  ): Promise<{ output: string; nextNodes: string[] }> {
-    const node = graph.nodeMap.get(nodeId);
-    if (!node) return { output: '', nextNodes: [] };
-
-    const childEdges = graph.children[nodeId] || [];
-
-    // Pass node info to callback
-    const nodeData = node.data as unknown as Record<string, unknown>;
-    callbacks.onNodeStart(nodeId, {
-      label: typeof nodeData.label === 'string' ? nodeData.label : node.id,
-      type: node.type,
-    });
-
-    try {
-      let output = '';
-      let nextNodes: string[] = [];
-
-      switch (node.type) {
-        case 'start':
-          output = context.currentInput;
-          nextNodes = childEdges.map(c => c.nodeId);
-          break;
-
-        case 'agent':
-          output = await this.withRetry(() =>
-            this.executeAgentNode(node, context, graph.nodeMap, callbacks)
-          );
-          nextNodes = childEdges.map(c => c.nodeId);
-          context.outputs[nodeId] = output;
-          context.nodeChain.push(nodeId);
-          context.currentInput = output;
-          break;
-
-        case 'tool':
-          output = await this.withRetry(() =>
-            this.executeToolNode(node, context)
-          );
-          nextNodes = childEdges.map(c => c.nodeId);
-          context.outputs[nodeId] = output;
-          context.nodeChain.push(nodeId);
-          context.currentInput = output;
-          break;
-
-        case 'router':
-        case 'condition': // Support legacy name
-          const routeResult = await this.withRetry(() =>
-            this.executeRouterNode(node, childEdges, context, graph.nodeMap, edges, callbacks)
-          );
-          output = `Routed to: ${routeResult.selectedRoute}`;
-          nextNodes = routeResult.nextNodes;
-          break;
-
-        case 'parallel':
-          const parallelResult = await this.executeParallelNode(
-            node,
-            childEdges,
-            context,
-            graph,
-            edges,
-            callbacks
-          );
-          output = parallelResult.output;
-          nextNodes = parallelResult.nextNodes;
-          context.history.push({ role: 'assistant', content: output });
-          break;
-
-        default:
-          nextNodes = childEdges.map(c => c.nodeId);
-      }
-
-      callbacks.onNodeFinish(nodeId, output);
-      return { output, nextNodes };
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      callbacks.onNodeError(nodeId, err);
-      throw err;
-    }
-  }
-
-  /**
-   * Execute an agent node by calling the LLM.
-   */
-  private async executeAgentNode(
-    node: WorkflowNode,
-    context: InternalExecutionContext,
-    nodeMap: Map<string, WorkflowNode>,
-    callbacks: ExecutionCallbacks
-  ): Promise<string> {
-    const data = node.data as AgentNodeData;
-    const model = data.model || this.options.defaultModel || DEFAULT_MODEL;
-    const systemPrompt = data.prompt || `You are a helpful assistant named ${data.label}.`;
-
-    // Build context from previous nodes
-    let contextInfo = '';
-    if (context.nodeChain.length > 0) {
-      const previousOutputs = context.nodeChain
-        .filter(id => context.outputs[id])
-        .map(id => {
-          const prevNode = nodeMap.get(id);
-          return `[${prevNode?.data.label || id}]: ${context.outputs[id]}`;
+        // Create abort promise that rejects when execution is cancelled
+        const abortPromise = new Promise<HITLResponse>((_, reject) => {
+            if (!signal) {
+                // If no signal, this promise never resolves (effectively infinite wait)
+                return;
+            }
+            const abortHandler = () => reject(new Error('Workflow cancelled'));
+            signal.addEventListener('abort', abortHandler, { once: true });
         });
 
-      if (previousOutputs.length > 0) {
-        contextInfo = `\n\nContext from previous agents:\n${previousOutputs.join('\n\n')}`;
-      }
-    }
+        const callbackPromise = this.options.onHITLRequest(request);
 
-    // Build message content (with multimodal support)
-    const userContent = await this.buildMessageContent(
-      context.currentInput,
-      context.attachments,
-      model
-    );
-
-    // Build messages
-    const chatMessages: ChatMessageParam[] = [
-      { role: 'system', content: systemPrompt + contextInfo },
-      ...context.history.map(h => ({
-        role: h.role as 'user' | 'assistant',
-        content: h.content,
-      })),
-      { role: 'user', content: userContent },
-    ];
-
-    // Stream the response
-    const stream = await this.client.chat.send({
-      model,
-      messages: chatMessages as any,
-      stream: true,
-    }) as AsyncIterable<StreamChunk>;
-
-    let output = '';
-    for await (const chunk of stream) {
-      if (context.signal.aborted) {
-        throw new Error('Workflow cancelled');
-      }
-      const content = chunk.choices[0]?.delta?.content;
-      if (content) {
-        output += content;
-        callbacks.onToken(node.id, content);
-      }
-    }
-
-    return output;
-  }
-
-  /**
-   * Execute a tool node using the registered tool handler.
-   */
-  private async executeToolNode(
-    node: WorkflowNode,
-    context: InternalExecutionContext
-  ): Promise<string> {
-    const data = node.data as ToolNodeData;
-    if (!data.toolId) {
-      throw new Error('Tool node requires a tool to run');
-    }
-
-    // Custom handler passed via execution options takes precedence
-    if (this.options.onToolCall) {
-      return await this.options.onToolCall(data.toolId, {
-        input: context.currentInput,
-        config: data.config,
-        node,
-      });
-    }
-
-    const tool = toolRegistry.get(data.toolId);
-    if (!tool) {
-      throw new Error(`Tool not registered: ${data.toolId}`);
-    }
-
-    return tool.handler(context.currentInput, data.config);
-  }
-
-  /**
-   * Execute a router node that classifies input and selects a branch.
-   */
-  private async executeRouterNode(
-    node: WorkflowNode,
-    childEdges: Array<{ nodeId: string; handleId?: string }>,
-    context: InternalExecutionContext,
-    nodeMap: Map<string, WorkflowNode>,
-    edges: WorkflowEdge[],
-    callbacks: ExecutionCallbacks
-  ): Promise<{ selectedRoute: string; nextNodes: string[] }> {
-    const data = node.data as RouterNodeData;
-    const configuredRoutes = data.routes || [];
-
-    // Build route options
-    const routeOptions = childEdges.map((child, index) => {
-      const childNode = nodeMap.get(child.nodeId);
-      const edge = edges.find(e => e.source === node.id && e.target === child.nodeId);
-      const edgeLabel = edge?.label;
-      const configuredRoute = configuredRoutes.find((r: RouteDefinition) => r.id === child.handleId);
-
-      return {
-        index,
-        nodeId: child.nodeId,
-        label: configuredRoute?.label || edgeLabel || childNode?.data.label || `Option ${index + 1}`,
-        description: childNode?.data.label || '',
-        handleId: child.handleId,
-      };
-    });
-
-    const routerModel = data.model || this.options.defaultModel || DEFAULT_MODEL;
-    const customInstructions = data.prompt || '';
-
-    // Build classification prompt
-    const routeDescriptions = routeOptions
-      .map((opt, i) => {
-        const desc = opt.description && opt.description !== opt.label
-          ? ` (connects to: ${opt.description})`
-          : '';
-        return `${i + 1}. ${opt.label}${desc}`;
-      })
-      .join('\n');
-
-    const classificationPrompt = `You are a routing assistant. Based on the user's message, determine which route to take.
-
-Available routes:
-${routeDescriptions}
-${customInstructions ? `\nRouting instructions:\n${customInstructions}` : ''}
-
-User message: "${context.currentInput}"
-
-Respond with ONLY the number of the best matching route (e.g., "1" or "2"). Do not explain.`;
-
-    const routerMessages: ChatMessageParam[] = [
-      { role: 'system', content: 'You are a routing classifier. Respond only with a number.' },
-      { role: 'user', content: classificationPrompt },
-    ];
-
-    const response = await this.client.chat.send({
-      model: routerModel,
-      messages: routerMessages as any,
-    });
-
-    const messageContent = response.choices[0]?.message?.content;
-    const choice = (typeof messageContent === 'string' ? messageContent.trim() : '1') || '1';
-    const selectedIndex = parseInt(choice, 10) - 1;
-
-    let selectedRoute: string;
-    let nextNodes: string[];
-
-    if (selectedIndex >= 0 && selectedIndex < routeOptions.length) {
-      const selected = routeOptions[selectedIndex]!;
-      selectedRoute = selected.label;
-      nextNodes = [selected.nodeId];
-      
-      if (callbacks.onRouteSelected && selected.handleId) {
-        callbacks.onRouteSelected(node.id, selected.handleId);
-      }
-    } else {
-      // Default to first route
-      selectedRoute = routeOptions[0]?.label || 'default';
-      nextNodes = routeOptions.length > 0 ? [routeOptions[0]!.nodeId] : [];
-    }
-
-    return { selectedRoute, nextNodes };
-  }
-
-  /**
-   * Execute a parallel node that runs multiple branches concurrently.
-   */
-  private async executeParallelNode(
-    node: WorkflowNode,
-    childEdges: Array<{ nodeId: string; handleId?: string }>,
-    context: InternalExecutionContext,
-    graph: WorkflowGraph,
-    edges: WorkflowEdge[],
-    callbacks: ExecutionCallbacks
-  ): Promise<{ output: string; nextNodes: string[] }> {
-    const data = node.data as ParallelNodeData;
-    const branches = data.branches || [];
-
-    // Execute all branches in parallel
-    const promises = childEdges.map(async (child): Promise<BranchResult> => {
-      const branchConfig = branches.find((b: BranchDefinition) => b.id === child.handleId);
-
-      // Create isolated context for this branch
-      const branchContext: InternalExecutionContext = {
-        ...context,
-        history: [...context.history],
-        outputs: { ...context.outputs },
-        nodeChain: [...context.nodeChain],
-      };
-
-      // Create modified node map with branch-specific settings
-      const branchNodeMap = new Map(graph.nodeMap);
-      const childNode = branchNodeMap.get(child.nodeId);
-      if (childNode && branchConfig) {
-        const modifiedNode = {
-          ...childNode,
-          data: {
-            ...childNode.data,
-            ...(branchConfig.model && { model: branchConfig.model }),
-            ...(branchConfig.prompt && { prompt: branchConfig.prompt }),
-          },
-        };
-        branchNodeMap.set(child.nodeId, modifiedNode);
-      }
-
-      // Execute the branch node
-      const result = await this.executeNode(
-        child.nodeId,
-        branchContext,
-        { ...graph, nodeMap: branchNodeMap },
-        edges,
-        callbacks
-      );
-
-      return {
-        nodeId: child.nodeId,
-        branchId: child.handleId,
-        branchLabel: branchConfig?.label || child.nodeId,
-        output: result.output,
-        nextNodes: result.nextNodes,
-      };
-    });
-
-    // Use Promise.allSettled for partial failure handling
-    const settledResults = await Promise.allSettled(promises);
-
-    // Collect outputs and errors
-    const outputs: Record<string, string> = {};
-    const allNextNodes: string[] = [];
-    const errors: string[] = [];
-
-    settledResults.forEach((result, index) => {
-      const childEdge = childEdges[index];
-      if (result.status === 'fulfilled') {
-        outputs[result.value.nodeId] = result.value.output;
-        allNextNodes.push(...result.value.nextNodes);
-      } else {
-        const branchConfig = branches.find((b: BranchDefinition) => b.id === childEdge?.handleId);
-        const branchLabel = branchConfig?.label || childEdge?.nodeId || `Branch ${index + 1}`;
-        errors.push(`${branchLabel}: ${result.reason?.message || 'Unknown error'}`);
-      }
-    });
-
-    // Format outputs
-    let formattedOutputs = Object.entries(outputs)
-      .map(([id, out]) => `## ${graph.nodeMap.get(id)?.data.label || id}\n${out}`)
-      .join('\n\n');
-
-    if (errors.length > 0) {
-      formattedOutputs += `\n\n## Errors\n${errors.join('\n')}`;
-    }
-
-    // Merge outputs if merge prompt is provided
-    let output: string;
-    const mergePrompt = data.prompt;
-    const mergeModel = data.model || this.options.defaultModel || DEFAULT_MODEL;
-
-    if (mergePrompt) {
-      output = await this.withRetry(async () => {
-        const mergeMessages: ChatMessageParam[] = [
-          { role: 'system', content: mergePrompt },
-          {
-            role: 'user',
-            content: `Here are the outputs from parallel agents:\n\n${formattedOutputs}\n\nPlease merge/summarize these outputs according to your instructions.`,
-          },
+        const promises: Promise<HITLResponse>[] = [
+            callbackPromise,
+            abortPromise,
         ];
 
-        const stream = await this.client.chat.send({
-          model: mergeModel,
-          messages: mergeMessages as any,
-          stream: true,
-        }) as AsyncIterable<StreamChunk>;
-
-        let mergedOutput = '';
-        for await (const chunk of stream) {
-          if (context.signal.aborted) {
-            throw new Error('Workflow cancelled');
-          }
-          const content = chunk.choices[0]?.delta?.content;
-          if (content) {
-            mergedOutput += content;
-            callbacks.onToken(node.id, content);
-          }
-        }
-        return mergedOutput;
-      });
-    } else {
-      output = formattedOutputs;
-    }
-
-    const uniqueNextNodes = [...new Set(allNextNodes)];
-    return { output, nextNodes: uniqueNextNodes };
-  }
-
-  // ==========================================================================
-  // Multimodal Support
-  // ==========================================================================
-
-  /**
-   * Build message content with multimodal attachments.
-   */
-  private async buildMessageContent(
-    text: string,
-    attachments: Attachment[],
-    modelId: string
-  ): Promise<string | MessageContentPart[]> {
-    if (!attachments || attachments.length === 0) {
-      return text;
-    }
-
-    // Check model capabilities
-    const capabilities = await this.getModelCapabilities(modelId);
-    const supportedModalities = capabilities?.inputModalities || ['text'];
-
-    const parts: MessageContentPart[] = [{ type: 'text', text }];
-
-    for (const attachment of attachments) {
-      // Skip unsupported modalities
-      if (!supportedModalities.includes(attachment.type)) {
-        console.warn(`Model ${modelId} does not support ${attachment.type} modality, skipping attachment`);
-        continue;
-      }
-
-      const url = attachment.url || (attachment.content ? `data:${attachment.mimeType};base64,${attachment.content}` : null);
-      if (!url) continue;
-
-      switch (attachment.type) {
-        case 'image':
-          parts.push({
-            type: 'image_url',
-            imageUrl: { url, detail: 'auto' },
-          });
-          break;
-        case 'file':
-          parts.push({
-            type: 'file',
-            file: { url, mimeType: attachment.mimeType },
-          });
-          break;
-        case 'audio':
-          parts.push({
-            type: 'audio',
-            audio: { url },
-          });
-          break;
-        case 'video':
-          parts.push({
-            type: 'video',
-            video: { url, mimeType: attachment.mimeType },
-          });
-          break;
-      }
-    }
-
-    return parts.length > 1 ? parts : text;
-  }
-
-  // ==========================================================================
-  // Retry Logic
-  // ==========================================================================
-
-  /**
-   * Retry helper with exponential backoff.
-   */
-  private async withRetry<T>(
-    fn: () => Promise<T>,
-    maxRetries: number = this.options.maxRetries || DEFAULT_MAX_RETRIES,
-    delayMs: number = this.options.retryDelayMs || DEFAULT_RETRY_DELAY_MS
-  ): Promise<T> {
-    let lastError: Error | null = null;
-
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        return await fn();
-      } catch (err) {
-        lastError = err instanceof Error ? err : new Error(String(err));
-
-        // Don't retry if cancelled
-        if (this.abortController?.signal.aborted) {
-          throw lastError;
+        // Timestamp-based timeout handling (robust to system sleep)
+        let timeoutCheckInterval: ReturnType<typeof setInterval> | undefined;
+        if (config.timeout && config.timeout > 0 && request.expiresAt) {
+            const expiresAtMs = new Date(request.expiresAt).getTime();
+            const timeoutPromise = new Promise<HITLResponse>((resolve) => {
+                // Check expiry every second using performant Date.now()
+                timeoutCheckInterval = setInterval(() => {
+                    if (Date.now() >= expiresAtMs) {
+                        clearInterval(timeoutCheckInterval);
+                        const defaultAction = config.defaultAction || 'reject';
+                        resolve({
+                            requestId: request.id,
+                            action:
+                                defaultAction === 'approve'
+                                    ? 'approve'
+                                    : defaultAction === 'skip'
+                                    ? 'skip'
+                                    : 'reject',
+                            respondedAt: new Date().toISOString(),
+                        });
+                    }
+                }, 1000); // Check every second
+            });
+            promises.push(timeoutPromise);
         }
 
-        // Don't retry on auth errors
+        try {
+            return await Promise.race(promises);
+        } finally {
+            // Cleanup timeout interval
+            if (timeoutCheckInterval) {
+                clearInterval(timeoutCheckInterval);
+            }
+            // Note: abort event listener is automatically cleaned up due to { once: true }
+        }
+    }
+
+    /**
+     * Execute a subgraph starting from a node ID, returning the last output.
+     */
+    private async executeSubgraph(
+        startNodeId: string,
+        context: InternalExecutionContext,
+        graph: WorkflowGraph,
+        edges: WorkflowEdge[],
+        callbacks: ExecutionCallbacks,
+        preExecuted: Set<string> = new Set()
+    ): Promise<{ output: string; nextNodes: string[] }> {
+        const queue: string[] = [startNodeId];
+        const executed = new Set<string>(preExecuted);
+        let output = '';
+        let nextNodes: string[] = [];
+        let iterations = 0;
+        const maxIterations =
+            this.options.maxIterations ??
+            graph.nodeMap.size * MAX_ITERATIONS_MULTIPLIER;
+
+        while (queue.length > 0 && iterations < maxIterations) {
+            iterations++;
+            const currentId = queue.shift()!;
+
+            // Check for cancellation
+            if (this.abortController?.signal.aborted) {
+                throw new Error('Workflow cancelled');
+            }
+
+            if (executed.has(currentId)) continue;
+
+            const parents = graph.parents[currentId];
+            const allParentsExecuted =
+                !parents || parents.every((p) => executed.has(p));
+            if (!allParentsExecuted) {
+                queue.push(currentId);
+                continue;
+            }
+
+            const result = await this.executeNodeWithErrorHandling(
+                currentId,
+                context,
+                graph,
+                edges,
+                callbacks
+            );
+
+            executed.add(currentId);
+            output = result.output;
+            nextNodes = result.nextNodes;
+
+            for (const nextId of result.nextNodes) {
+                if (!executed.has(nextId)) {
+                    queue.push(nextId);
+                }
+            }
+
+            if (result.nextNodes.length === 0) {
+                break;
+            }
+        }
+
+        if (iterations >= maxIterations) {
+            throw new Error(
+                `Subgraph execution exceeded maximum iterations (${maxIterations})`
+            );
+        }
+
+        return { output, nextNodes };
+    }
+
+    // ==========================================================================
+    // Retry Logic
+    // ==========================================================================
+
+    private shouldRetry(
+        error: ExecutionError,
+        config?: NodeRetryConfig
+    ): boolean {
+        if (!config) return false;
+
+        // Use error's built-in retryable check with configured skipOn
+        const skipOn = config.skipOn ?? DEFAULT_SKIP_ON_RETRY;
+        if (!error.isRetryable(skipOn as import('./errors').ErrorCode[])) {
+            return false;
+        }
+
+        // If retryOn is specified, only retry on those codes
         if (
-          lastError.message.includes('API key') ||
-          lastError.message.includes('401') ||
-          lastError.message.includes('403')
+            config.retryOn &&
+            config.retryOn.length > 0 &&
+            !config.retryOn.includes(error.code)
         ) {
-          throw lastError;
+            return false;
         }
 
-        if (attempt < maxRetries) {
-          await new Promise(resolve => setTimeout(resolve, delayMs * (attempt + 1)));
-        }
-      }
+        return true;
     }
 
-    throw lastError;
-  }
-}
+    private async sleep(ms: number): Promise<void> {
+        const signal = this.abortController?.signal;
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
+        if (signal?.aborted) {
+            throw new Error('Workflow cancelled');
+        }
 
-/**
- * Creates ExecutionCallbacks from StreamAccumulatorCallbacks by wiring node lookups.
- * 
- * This helper eliminates boilerplate by automatically resolving node labels and types
- * from the workflow, so your callbacks receive this information directly rather than
- * requiring manual lookups.
- * 
- * Note: This function creates a nodeMap for backward compatibility lookups, but in practice
- * the nodeMap is rarely used since NodeInfo is now passed automatically by the execution adapter.
- * For performance-critical scenarios with many executions of the same workflow, you can reuse
- * the same callbacks object rather than recreating it.
- * 
- * @param workflow - The workflow data containing nodes
- * @param handlers - Simplified callback handlers that receive pre-resolved node info
- * @returns Standard ExecutionCallbacks that can be passed to adapter.execute()
- * 
- * @example
- * ```typescript
- * const callbacks = createAccumulatorCallbacks(workflow, {
- *   onNodeStart: (nodeId, label, type) => console.log(`${label} (${type}) started`),
- *   onNodeToken: (nodeId, token) => process.stdout.write(token),
- *   onNodeReasoning: (nodeId, token) => console.log(`[reasoning] ${token}`),
- *   onNodeFinish: (nodeId, output) => console.log(`Finished: ${output}`),
- *   onNodeError: (nodeId, error) => console.error(`Error:`, error),
- *   onBranchStart: (nodeId, branchId, label) => console.log(`Branch ${label} started`),
- *   onBranchToken: (nodeId, branchId, label, token) => process.stdout.write(token),
- *   onBranchComplete: (nodeId, branchId, label, output) => console.log(`Branch ${label} done`),
- * });
- * 
- * const result = await adapter.execute(workflow, input, callbacks);
- * ```
- */
-export function createAccumulatorCallbacks(
-  workflow: WorkflowData,
-  handlers: StreamAccumulatorCallbacks
-): ExecutionCallbacks {
-  // Create a map for fast node lookups
-  const nodeMap = new Map(workflow.nodes.map(n => [n.id, n]));
-  
-  return {
-    onNodeStart: (nodeId, nodeInfo) => {
-      // If nodeInfo is provided (new signature), use it
-      // Otherwise fall back to manual lookup (backward compatibility)
-      if (nodeInfo) {
-        handlers.onNodeStart(nodeId, nodeInfo.label, nodeInfo.type);
-      } else {
-        const node = nodeMap.get(nodeId);
-        const data = node?.data as Record<string, unknown> | undefined;
-        handlers.onNodeStart(
-          nodeId,
-          typeof data?.label === 'string' ? data.label : nodeId,
-          node?.type || 'unknown'
+        return new Promise((resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+                resolve();
+            }, ms);
+
+            // Only add listener if signal exists
+            if (signal) {
+                const onAbort = () => {
+                    clearTimeout(timeoutId);
+                    reject(new Error('Workflow cancelled'));
+                };
+                signal.addEventListener('abort', onAbort, { once: true });
+            }
+        });
+    }
+
+    private getChildNodes(nodeId: string, edges: WorkflowEdge[]): string[] {
+        return edges
+            .filter((e) => e.source === nodeId && e.sourceHandle !== 'error')
+            .map((e) => e.target);
+    }
+
+    private serializeError(error: ExecutionError): string {
+        const plain = {
+            message: error.message,
+            code: error.code,
+            nodeId: error.nodeId,
+            statusCode: error.statusCode,
+            retry: error.retry,
+            rateLimit: error.rateLimit,
+            stack: error.stack,
+        };
+        try {
+            return JSON.stringify(plain);
+        } catch {
+            return JSON.stringify({ message: error.message, code: error.code });
+        }
+    }
+
+    /**
+     * Compact conversation history if needed based on compaction configuration.
+     * Returns the compacted messages and result if compaction was performed.
+     */
+    private async compactHistoryIfNeeded(
+        messages: ChatMessage[],
+        model: string,
+        callbacks?: ExecutionCallbacks
+    ): Promise<{ messages: ChatMessage[]; result?: CompactionResult }> {
+        const config = this.options.compaction;
+        if (!config) {
+            return { messages };
+        }
+
+        // Early return for empty or single message
+        if (messages.length <= 1) {
+            return { messages };
+        }
+
+        const threshold = calculateThreshold(config, model, this.tokenCounter);
+        const currentTokens = countMessageTokens(messages, this.tokenCounter);
+
+        // No compaction needed if under threshold
+        if (currentTokens <= threshold) {
+            return { messages };
+        }
+
+        const { toPreserve, toCompact } = splitMessagesForCompaction(
+            messages,
+            config.preserveRecent
         );
-      }
-    },
-    
-    onNodeFinish: handlers.onNodeFinish,
-    
-    onNodeError: handlers.onNodeError,
-    
-    onToken: handlers.onNodeToken,
-    
-    onReasoning: handlers.onNodeReasoning,
-    
-    onBranchStart: (nodeId, branchId, label) => 
-      handlers.onBranchStart(nodeId, branchId, label),
-    
-    onBranchToken: (nodeId, branchId, label, token) => 
-      handlers.onBranchToken(nodeId, branchId, label, token),
-    
-    onBranchComplete: (nodeId, branchId, label, output) => 
-      handlers.onBranchComplete(nodeId, branchId, label, output),
-  };
+
+        // No messages to compact
+        if (toCompact.length === 0) {
+            return { messages };
+        }
+
+        let compactedMessages: ChatMessage[];
+        let summary: string | undefined;
+
+        if (config.strategy === 'truncate') {
+            // Simply drop older messages
+            compactedMessages = toPreserve;
+        } else if (config.strategy === 'custom' && config.customCompactor) {
+            // Use custom compactor
+            try {
+                compactedMessages = await config.customCompactor(
+                    messages,
+                    threshold
+                );
+            } catch (error) {
+                // Fallback to truncate on custom compactor error
+                if (this.options.debug) {
+                    console.error(
+                        'Custom compactor failed, falling back to truncate:',
+                        error
+                    );
+                }
+                compactedMessages = toPreserve;
+            }
+        } else {
+            // Default: summarize strategy
+            const summarizeModel = config.summarizeModel || model;
+            const prompt = buildSummarizationPrompt(toCompact, config);
+
+            try {
+                const summarizationResult = await this.provider.chat(
+                    summarizeModel,
+                    [
+                        {
+                            role: 'system',
+                            content:
+                                'You are a helpful assistant that summarizes conversation history concisely.',
+                        },
+                        { role: 'user', content: prompt },
+                    ],
+                    { temperature: 0.3, maxTokens: 500 }
+                );
+
+                summary = summarizationResult.content || '';
+                const summaryMessage = createSummaryMessage(summary);
+                compactedMessages = [summaryMessage, ...toPreserve];
+            } catch (error) {
+                // Fallback to truncate on summarization error
+                if (this.options.debug) {
+                    console.error(
+                        'Summarization failed, falling back to truncate:',
+                        error
+                    );
+                }
+                compactedMessages = toPreserve;
+            }
+        }
+
+        const tokensAfter = countMessageTokens(
+            compactedMessages,
+            this.tokenCounter
+        );
+
+        const result: CompactionResult = {
+            compacted: true,
+            messages: compactedMessages,
+            tokensBefore: currentTokens,
+            tokensAfter,
+            messagesCompacted: toCompact.length,
+            summary,
+        };
+
+        // Invoke callback if provided
+        if (callbacks?.onContextCompacted) {
+            callbacks.onContextCompacted(result);
+        }
+
+        return { messages: compactedMessages, result };
+    }
 }

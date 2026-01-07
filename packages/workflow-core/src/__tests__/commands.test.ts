@@ -229,16 +229,17 @@ describe('CommandManager', () => {
             editor.commands.createNode('agent', { label: 'Agent 2' });
             const newNode = editor.nodes[editor.nodes.length - 1];
 
+            // Use valid handle names: 'output' for agent output, 'input' for agent input
             editor.commands.createEdge(
                 'agent-1',
                 newNode.id,
-                'output-1',
-                'input-1'
+                'output',
+                'input'
             );
 
             const edge = editor.edges[editor.edges.length - 1];
-            expect(edge.sourceHandle).toBe('output-1');
-            expect(edge.targetHandle).toBe('input-1');
+            expect(edge.sourceHandle).toBe('output');
+            expect(edge.targetHandle).toBe('input');
         });
 
         it('should emit edgeCreate event', () => {
@@ -568,6 +569,55 @@ describe('CommandManager', () => {
             });
 
             expect(result).toBe(true);
+        });
+    });
+
+    describe('validation integration', () => {
+        it('should reject deleting the only start node', () => {
+            const initialCount = editor.nodes.length;
+
+            const result = editor.commands.deleteNode('start-1');
+
+            expect(result).toBe(false);
+            expect(editor.nodes.length).toBe(initialCount);
+            expect(editor.nodes.some((n) => n.id === 'start-1')).toBe(true);
+        });
+
+        it('should reject creating a second start node', () => {
+            const initialCount = editor.nodes.length;
+
+            const result = editor.commands.createNode('start', {
+                label: 'New',
+            });
+
+            expect(result).toBe(false);
+            expect(editor.nodes.length).toBe(initialCount);
+        });
+
+        it('should reject edges that create cycles', () => {
+            const initialEdges = editor.edges.length;
+
+            const result = editor.commands.createEdge('agent-1', 'start-1');
+
+            expect(result).toBe(false);
+            expect(editor.edges.length).toBe(initialEdges);
+        });
+
+        it('should reject edges with missing endpoints', () => {
+            const result = editor.commands.createEdge('missing', 'start-1');
+
+            expect(result).toBe(false);
+        });
+
+        it('should allow adding disconnected nodes for incremental editing', () => {
+            const result = editor.commands.createNode('agent', {
+                label: 'Floating',
+            });
+
+            expect(result).toBe(true);
+            expect(editor.nodes.some((n) => n.data.label === 'Floating')).toBe(
+                true
+            );
         });
     });
 });

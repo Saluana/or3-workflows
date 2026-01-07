@@ -34,14 +34,6 @@ export function useMobileNav(options: MobileNavOptions = {}) {
         showMobileMenu.value = false;
     }
 
-    function closeMobileMenu(): void {
-        showMobileMenu.value = false;
-    }
-
-    function toggleMobileMenu(): void {
-        showMobileMenu.value = !showMobileMenu.value;
-    }
-
     onMounted(() => {
         checkMobile();
         window.addEventListener('resize', checkMobile);
@@ -55,9 +47,6 @@ export function useMobileNav(options: MobileNavOptions = {}) {
         isMobile,
         mobileView,
         showMobileMenu,
-        checkMobile,
         toggleMobileView,
-        closeMobileMenu,
-        toggleMobileMenu,
     };
 }

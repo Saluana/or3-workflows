@@ -1,0 +1,13 @@
+{
+    "name": "demo-headless",
+    "private": true,
+    "version": "0.0.0",
+    "type": "module",
+    "scripts": {
+        "run": "bun src/index.ts"
+    },
+    "dependencies": {
+        "or3-workflow-core": "workspace:*",
+        "@openrouter/sdk": "^0.1.0"
+    }
+}

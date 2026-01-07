@@ -20,11 +20,12 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": [
-    "packages/*/src"
+    "packages/workflow-core/src"
   ],
   "exclude": [
     "node_modules",
     "**/node_modules",
-    "demo/node_modules"
+    "**/__tests__/**",
+    "**/*.test.ts"
   ]
 }

@@ -1,5 +1,5 @@
 import { ref, onBeforeUnmount } from 'vue';
-import { WorkflowEditor, WorkflowNode, NodeData } from '@or3/workflow-core';
+import { WorkflowEditor, WorkflowNode, NodeData } from 'or3-workflow-core';
 
 export function useNodeState(editor: WorkflowEditor, nodeId: string) {
   const node = ref<WorkflowNode | undefined>(

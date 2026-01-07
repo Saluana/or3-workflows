@@ -3,25 +3,37 @@ import { ref, computed, onMounted, watch } from 'vue';
 import type { Node, Edge } from '@vue-flow/core';
 
 // Import from our v2 packages
-import { type WorkflowData, validateWorkflow } from '@or3/workflow-core';
 import {
-    WorkflowCanvas,
-    NodePalette,
-    NodeInspector,
-    EdgeLabelEditor,
-    ValidationOverlay,
-    useEditor,
-    useExecutionState,
-} from '@or3/workflow-vue';
+    type WorkflowData,
+    type NodeData,
+    type TokenUsageDetails,
+    validateWorkflow,
+} from 'or3-workflow-core';
+import { useEditor, createExecutionState } from 'or3-workflow-vue';
 
 // Local composables
 import {
-    useWorkflowExecution,
+    useDemoExecution,
     useWorkflowStorage,
     useMobileNav,
     type ChatMessage,
+    type BranchStream,
 } from './composables';
-import type { WorkflowSummary } from '@or3/workflow-core';
+import type { WorkflowSummary } from 'or3-workflow-core';
+
+// Local components
+import {
+    HeaderBar,
+    ChatPanel,
+    LeftSidebar,
+    MobileNav,
+    CanvasArea,
+    ApiKeyModal,
+    SaveModal,
+    LoadModal,
+    ValidationModal,
+    HITLModal,
+} from './components';
 
 // ============================================================================
 // Editor Setup
@@ -34,7 +46,7 @@ const {
     setStreamingContent,
     appendStreamingContent,
     reset: resetExecution,
-} = useExecutionState();
+} = createExecutionState();
 
 // ============================================================================
 // UI State
@@ -60,13 +72,13 @@ const {
     load,
 } = useWorkflowStorage();
 
-const { execute: executeWorkflowFn } = useWorkflowExecution();
+const { execute: executeWorkflowFn } = useDemoExecution();
 
 // Edge editing
 const selectedEdge = ref<Edge | null>(null);
 const showEdgeEditor = ref(false);
 
-// API Key
+// API Key (demo-only: avoid storing secrets in localStorage for production)
 const apiKey = ref(localStorage.getItem('or3-api-key') || '');
 const showApiKeyModal = ref(!apiKey.value);
 const tempApiKey = ref('');
@@ -74,11 +86,35 @@ const tempApiKey = ref('');
 // Chat
 const messages = ref<ChatMessage[]>([]);
 const chatInput = ref('');
-const conversationHistory = ref<Array<{ role: string; content: string }>>([]);
+const tokenUsage = ref<{ nodeId: string; usage: TokenUsageDetails } | null>(
+    null
+);
+
+// Track node outputs for collapsible display
+const nodeOutputs = ref<Record<string, { nodeId: string; output: string }>>({});
+
+// Parallel branch streaming state (for live streaming only)
+const branchStreams = ref<Record<string, BranchStream>>({});
+// Track parallel execution instances to generate unique keys per loop iteration
+const parallelExecutionCounter = ref<Record<string, number>>({});
+
+// Constant for merge branch identifier
+const MERGE_BRANCH_ID = '__merge__';
+
+// Thinking/reasoning state (for main output)
+const isThinking = ref(false);
+const thinkingContent = ref('');
 
 // Workflow name
 const workflowName = ref('My Workflow');
 const workflowDescription = ref('');
+
+// HITL (Human-in-the-Loop) state
+import type { HITLRequest, HITLResponse } from 'or3-workflow-core';
+const showHITLModal = ref(false);
+const pendingHITLRequest = ref<HITLRequest | null>(null);
+const hitlUserInput = ref('');
+let resolveHITLPromise: ((response: HITLResponse) => void) | null = null;
 
 // Modals
 const showSaveModal = ref(false);
@@ -95,6 +131,19 @@ const canRedo = computed(() => editor.value?.canRedo() ?? false);
 const hasApiKey = computed(() => !!apiKey.value);
 const nodeStatuses = computed(() => executionState.value.nodeStatuses);
 const isRunning = computed(() => executionState.value.isRunning);
+
+// Build a map of node ID -> label for display in ChatPanel
+const nodeLabels = computed(() => {
+    if (!editor.value) return {};
+    const nodes = editor.value.getNodes();
+    const labels: Record<string, string> = {};
+    for (const node of nodes) {
+        if (node.data?.label) {
+            labels[node.id] = node.data.label;
+        }
+    }
+    return labels;
+});
 const streamingContent = computed(() => executionState.value.streamingContent);
 
 // ============================================================================
@@ -149,65 +198,102 @@ function createDefaultWorkflow() {
     if (!editor.value) return;
 
     // Load a pre-built default workflow with edges
+    // This workflow demonstrates the new v2 features including:
+    // - Router node for intent detection
+    // - Agent nodes for processing
+    // - While Loop for iterative refinement
+    // - Output node for structured results
+    // - HITL (Human-in-the-Loop) for review
     const defaultWorkflow: WorkflowData = {
         meta: {
             version: '2.0.0',
-            name: 'Customer Support Workflow',
-            description: 'Route support inquiries to the right agent and summarize.',
+            name: 'Smart Assistant Workflow',
+            description:
+                'An intelligent assistant with routing, iteration, and human review capabilities.',
         },
         nodes: [
             {
                 id: 'start',
                 type: 'start',
-                position: { x: 250, y: 0 },
+                position: { x: 300, y: 0 },
                 data: { label: 'Start' },
             },
             {
                 id: 'router',
                 type: 'router',
-                position: { x: 200, y: 120 },
+                position: { x: 250, y: 100 },
                 data: {
                     label: 'Detect Intent',
-                    prompt: 'Route to technical support for technical issues, sales for product inquiries.',
+                    prompt: 'Analyze the user request and route to:\n- "analysis" for questions requiring research or analysis\n- "creative" for creative writing, brainstorming, or idea generation\n- "simple" for quick factual answers',
+                    model: 'z-ai/glm-4.6:exacto',
                 },
             },
             {
-                id: 'tech-agent',
+                id: 'analysis-agent',
                 type: 'agent',
-                position: { x: 50, y: 280 },
+                position: { x: 0, y: 250 },
                 data: {
-                    label: 'Technical Agent',
+                    label: 'Analysis Agent',
                     model: 'anthropic/claude-3.5-sonnet',
-                    prompt: 'You are a technical support specialist. Help users with technical issues, troubleshooting, and bug fixes.',
+                    prompt: 'You are an analytical expert. Provide thorough, well-researched answers with clear reasoning and evidence.',
+                    hitl: {
+                        enabled: true,
+                        mode: 'review',
+                        prompt: 'Please review this analysis before it is finalized.',
+                    },
                 },
             },
             {
-                id: 'sales-agent',
+                id: 'creative-agent',
                 type: 'agent',
-                position: { x: 350, y: 280 },
+                position: { x: 250, y: 250 },
                 data: {
-                    label: 'Sales Agent',
-                    model: 'openai/gpt-4o',
-                    prompt: 'You are a friendly sales representative. Help users with product inquiries, pricing, and features.',
+                    label: 'Creative Agent',
+                    model: 'z-ai/glm-4.6:exacto',
+                    prompt: 'You are a creative writer. Generate engaging, imaginative content that inspires and delights.',
                 },
             },
             {
-                id: 'formatter',
+                id: 'simple-agent',
                 type: 'agent',
-                position: { x: 200, y: 440 },
+                position: { x: 500, y: 250 },
                 data: {
-                    label: 'Response Formatter',
-                    model: 'openai/gpt-4o-mini',
-                    prompt: 'Format the response professionally and ensure it is helpful, complete, and friendly.',
+                    label: 'Quick Answer',
+                    model: 'z-ai/glm-4.6:exacto',
+                    prompt: 'Provide a concise, direct answer. Be helpful but brief.',
                 },
             },
             {
-                id: 'tool-summary',
-                type: 'tool',
-                position: { x: 200, y: 580 },
+                id: 'refine-loop',
+                type: 'whileLoop',
+                position: { x: 250, y: 400 },
                 data: {
-                    label: 'Summarize Tool',
-                    toolId: 'demo_summarize',
+                    label: 'Refine Response',
+                    conditionPrompt:
+                        'Review the response quality. If it could be significantly improved, respond "continue". If it is good enough, respond "done".',
+                    maxIterations: 3,
+                    onMaxIterations: 'continue',
+                },
+            },
+            {
+                id: 'refine-agent',
+                type: 'agent',
+                position: { x: 250, y: 530 },
+                data: {
+                    label: 'Refinement',
+                    model: 'z-ai/glm-4.6:exacto',
+                    prompt: 'Review and improve the previous response. Make it more clear, accurate, and helpful. Build on what was good and fix any issues.',
+                },
+            },
+            {
+                id: 'output',
+                type: 'output',
+                position: { x: 250, y: 680 },
+                data: {
+                    label: 'Final Output',
+                    format: 'text',
+                    template: '',
+                    includeMetadata: false,
                 },
             },
         ],
@@ -216,18 +302,37 @@ function createDefaultWorkflow() {
             {
                 id: 'e2',
                 source: 'router',
-                target: 'tech-agent',
-                label: 'Technical',
+                target: 'analysis-agent',
+                label: 'Analysis',
             },
             {
                 id: 'e3',
                 source: 'router',
-                target: 'sales-agent',
-                label: 'Sales',
+                target: 'creative-agent',
+                label: 'Creative',
             },
-            { id: 'e4', source: 'tech-agent', target: 'formatter' },
-            { id: 'e5', source: 'sales-agent', target: 'formatter' },
-            { id: 'e6', source: 'formatter', target: 'tool-summary' },
+            {
+                id: 'e4',
+                source: 'router',
+                target: 'simple-agent',
+                label: 'Simple',
+            },
+            { id: 'e5', source: 'analysis-agent', target: 'refine-loop' },
+            { id: 'e6', source: 'creative-agent', target: 'refine-loop' },
+            { id: 'e7', source: 'simple-agent', target: 'output' },
+            {
+                id: 'e8',
+                source: 'refine-loop',
+                target: 'refine-agent',
+                sourceHandle: 'body',
+            },
+            { id: 'e9', source: 'refine-agent', target: 'refine-loop' },
+            {
+                id: 'e10',
+                source: 'refine-loop',
+                target: 'output',
+                sourceHandle: 'done',
+            },
         ],
     };
 
@@ -286,8 +391,105 @@ function clearApiKey() {
 }
 
 // ============================================================================
+// HITL (Human-in-the-Loop) Handlers
+// ============================================================================
+async function handleHITLRequest(request: HITLRequest): Promise<HITLResponse> {
+    pendingHITLRequest.value = request;
+    hitlUserInput.value = '';
+    showHITLModal.value = true;
+
+    return new Promise((resolve) => {
+        resolveHITLPromise = resolve;
+    });
+}
+
+function handleHITLApprove() {
+    if (!pendingHITLRequest.value || !resolveHITLPromise) return;
+
+    const response: HITLResponse = {
+        requestId: pendingHITLRequest.value.id,
+        action: 'approve',
+        data: hitlUserInput.value || undefined,
+        respondedAt: new Date().toISOString(),
+    };
+
+    resolveHITLPromise(response);
+    closeHITLModal();
+}
+
+function handleHITLReject() {
+    if (!pendingHITLRequest.value || !resolveHITLPromise) return;
+
+    const response: HITLResponse = {
+        requestId: pendingHITLRequest.value.id,
+        action: 'reject',
+        respondedAt: new Date().toISOString(),
+    };
+
+    resolveHITLPromise(response);
+    closeHITLModal();
+}
+
+function handleHITLSkip() {
+    if (!pendingHITLRequest.value || !resolveHITLPromise) return;
+
+    const response: HITLResponse = {
+        requestId: pendingHITLRequest.value.id,
+        action: 'skip',
+        respondedAt: new Date().toISOString(),
+    };
+
+    resolveHITLPromise(response);
+    closeHITLModal();
+}
+
+function closeHITLModal() {
+    showHITLModal.value = false;
+    pendingHITLRequest.value = null;
+    hitlUserInput.value = '';
+    resolveHITLPromise = null;
+}
+
+// ============================================================================
 // Workflow Execution
 // ============================================================================
+
+// Handle toggling active branch expansion
+function toggleBranchExpanded(key: string) {
+    if (branchStreams.value[key]) {
+        branchStreams.value[key].expanded = !branchStreams.value[key].expanded;
+    }
+}
+
+// Handle toggling branch expansion within a message
+function toggleMessageBranch(payload: { messageId: string; branchId: string }) {
+    const message = messages.value.find((m) => m.id === payload.messageId);
+    if (message?.branches) {
+        const branch = message.branches.find(
+            (b) => b.branchId === payload.branchId
+        );
+        if (branch) {
+            branch.expanded = !branch.expanded;
+        }
+    }
+}
+
+// Handle toggling node output expansion within a message
+function toggleMessageNodeOutput(payload: {
+    messageId: string;
+    nodeId: string;
+}) {
+    const message = messages.value.find((m) => m.id === payload.messageId);
+    if (message?.nodeOutputs) {
+        const nodeOutput = message.nodeOutputs.find(
+            (n) => n.nodeId === payload.nodeId
+        );
+        if (nodeOutput) {
+            nodeOutput.expanded = !nodeOutput.expanded;
+        }
+    }
+}
+
 async function handleSendMessage() {
     const message = chatInput.value.trim();
     if (!message || !editor.value || !apiKey.value) {
@@ -307,32 +509,312 @@ async function handleSendMessage() {
         timestamp: new Date(),
     };
     messages.value.push(userMessage);
-    conversationHistory.value.push({ role: 'user', content: message });
 
-    // Reset node statuses
-    workflow.nodes.forEach((n) => setNodeStatus(n.id, 'idle'));
+    // Reset node statuses and clear loop iteration data
+    workflow.nodes.forEach((n) => {
+        setNodeStatus(n.id, 'idle');
+        // Clear iteration data from loop nodes
+        if (n.type === 'whileLoop' && editor.value) {
+            editor.value.commands.updateNodeData(
+                n.id,
+                { iteration: null } as unknown as Partial<NodeData>
+            );
+        }
+    });
 
     setRunning(true);
     setStreamingContent('');
+    tokenUsage.value = null;
     error.value = null;
+    branchStreams.value = {}; // Reset active branch streams
+    parallelExecutionCounter.value = {}; // Reset parallel execution counters
+    nodeOutputs.value = {}; // Reset node outputs
+    isThinking.value = false; // Reset thinking state
+    thinkingContent.value = '';
+
+    // Find nodes that feed directly into output nodes (their tokens go to main chat)
+    const outputNodeIds = new Set(
+        workflow.nodes.filter((n) => n.type === 'output').map((n) => n.id)
+    );
+    const finalProducerNodeIds = new Set(
+        workflow.edges
+            .filter((e) => outputNodeIds.has(e.target))
+            .map((e) => e.source)
+    );
 
     try {
-        // Map nodes to execution format (data as Record<string, unknown>)
-        const execNodes = nodes.map((n) => ({
-            id: n.id,
-            type: n.type,
-            data: { ...n.data } as Record<string, unknown>,
-        }));
-
         const finalOutput = await executeWorkflowFn(
             apiKey.value,
             workflow,
             message,
-            conversationHistory.value.slice(0, -1),
             {
                 onNodeStatus: setNodeStatus,
+                onNodeOutput: (nodeId, output) => {
+                    // Store node output for later use
+                    nodeOutputs.value[nodeId] = { nodeId, output };
+
+                    // Get node info from workflow
+                    const node = workflow.nodes.find((n) => n.id === nodeId);
+                    const nodeType = node?.type;
+                    const nodeLabel = node?.data?.label || nodeId;
+
+                    // Skip certain node types:
+                    // - start nodes: don't produce meaningful collapsible content
+                    // - output nodes: just format, no LLM output
+                    // - parallel nodes: have their own branch display
+                    // - final producer nodes: their output streams to main chat area
+                    if (
+                        nodeType === 'start' ||
+                        nodeType === 'output' ||
+                        nodeType === 'parallel' ||
+                        finalProducerNodeIds.has(nodeId)
+                    ) {
+                        return;
+                    }
+
+                    // Add a collapsible message for this node's output
+                    const nodeMessage: ChatMessage = {
+                        id: crypto.randomUUID(),
+                        role: 'assistant',
+                        content: '', // Empty - we use nodeOutputs instead
+                        timestamp: new Date(),
+                        nodeId,
+                        nodeOutputs: [
+                            {
+                                nodeId,
+                                label: nodeLabel,
+                                content: output,
+                                expanded: false, // Collapsed by default
+                            },
+                        ],
+                    };
+                    messages.value.push(nodeMessage);
+                },
                 onStreamingContent: setStreamingContent,
-                onAppendContent: appendStreamingContent,
+                onAppendContent: (token) => {
+                    // When we start getting actual content, stop showing thinking
+                    if (isThinking.value) {
+                        isThinking.value = false;
+                        thinkingContent.value = '';
+                    }
+                    appendStreamingContent(token);
+                },
+                onReasoningToken: (_nodeId, token) => {
+                    // Show thinking indicator and accumulate reasoning content
+                    if (!isThinking.value) {
+                        isThinking.value = true;
+                    }
+                    thinkingContent.value += token;
+                },
+                onHITLRequest: handleHITLRequest,
+                onRouteSelected: (nodeId, routeId) => {
+                    console.log(
+                        `[Router] Node ${nodeId} selected route: ${routeId}`
+                    );
+                },
+                onContextCompacted: (result) => {
+                    console.log(
+                        `[Compaction] Reduced from ${result.tokensBefore} to ${result.tokensAfter} tokens`
+                    );
+                },
+                onTokenUsage: (nodeId, usage) => {
+                    tokenUsage.value = { nodeId, usage };
+                },
+                onLoopIteration: (nodeId, iteration, maxIterations) => {
+                    // Update the node data so the WhileLoopNode component can display it
+                    if (editor.value) {
+                        editor.value.commands.updateNodeData(
+                            nodeId,
+                            {
+                                iteration,
+                                maxIterations,
+                            } as unknown as Partial<NodeData>
+                        );
+                    }
+                },
+                // Branch streaming callbacks
+                onBranchStart: (nodeId, branchId, branchLabel) => {
+                    console.log(
+                        `[BranchStart] BEFORE - nodeId=${nodeId}, branchId=${branchId}, currentKeys=${
+                            Object.keys(branchStreams.value).join(', ') ||
+                            'none'
+                        }`
+                    );
+
+                    // Increment execution counter for this node to get a unique instance ID
+                    // This ensures each loop iteration gets unique keys
+                    if (!parallelExecutionCounter.value[nodeId]) {
+                        parallelExecutionCounter.value[nodeId] = 0;
+                    }
+                    
+                    // Check if this is a new execution (first branch of a new batch)
+                    // Exclude merge branches from this check
+                    const existingBranches = Object.keys(
+                        branchStreams.value
+                    ).filter(
+                        (k) =>
+                            branchStreams.value[k].nodeId === nodeId &&
+                            branchStreams.value[k].branchId !== MERGE_BRANCH_ID
+                    );
+                    
+                    // Only increment counter for non-merge branches starting a new execution
+                    if (branchId !== MERGE_BRANCH_ID && existingBranches.length === 0) {
+                        // No active branches for this node, this is a new execution
+                        parallelExecutionCounter.value[nodeId]++;
+                    }
+
+                    const execInstance = parallelExecutionCounter.value[nodeId];
+                    const key = `${nodeId}-${execInstance}-${branchId}`;
+                    console.log(
+                        `[BranchStart] AFTER - key=${key}, execInstance=${execInstance}, isMergeBranch=${branchId === MERGE_BRANCH_ID}`
+                    );
+                    branchStreams.value = {
+                        ...branchStreams.value,
+                        [key]: {
+                            nodeId,
+                            branchId,
+                            label: branchLabel,
+                            content: '',
+                            status: 'streaming',
+                            expanded: false,
+                            isThinking: false,
+                            thinkingContent: '',
+                        },
+                    };
+                },
+                onBranchToken: (nodeId, branchId, _branchLabel, token) => {
+                    // Find the key that matches this node/branch (with any execution instance)
+                    const key = Object.keys(branchStreams.value).find(
+                        (k) =>
+                            branchStreams.value[k].nodeId === nodeId &&
+                            branchStreams.value[k].branchId === branchId
+                    );
+                    if (key && branchStreams.value[key]) {
+                        // Direct mutation is fine for Vue 3 refs
+                        branchStreams.value[key].isThinking = false;
+                        branchStreams.value[key].content += token;
+                    } else {
+                        console.warn(
+                            `[BranchToken] No matching branch found for nodeId=${nodeId}, branchId=${branchId}, keys=${Object.keys(
+                                branchStreams.value
+                            ).join(', ')}`
+                        );
+                    }
+                },
+                onBranchReasoning: (nodeId, branchId, _branchLabel, token) => {
+                    const key = Object.keys(branchStreams.value).find(
+                        (k) =>
+                            branchStreams.value[k].nodeId === nodeId &&
+                            branchStreams.value[k].branchId === branchId
+                    );
+                    if (key && branchStreams.value[key]) {
+                        branchStreams.value[key].isThinking = true;
+                        branchStreams.value[key].thinkingContent =
+                            (branchStreams.value[key].thinkingContent ?? '') +
+                            token;
+                    }
+                },
+                onBranchComplete: (nodeId, branchId, _branchLabel, output) => {
+                    const key = Object.keys(branchStreams.value).find(
+                        (k) =>
+                            branchStreams.value[k].nodeId === nodeId &&
+                            branchStreams.value[k].branchId === branchId
+                    );
+                    console.log(
+                        `[BranchComplete] nodeId=${nodeId}, branchId=${branchId}, key=${key}, hasContent=${!!output}, isMergeBranch=${branchId === MERGE_BRANCH_ID}`
+                    );
+                    if (key && branchStreams.value[key]) {
+                        branchStreams.value[key].content = output;
+                        branchStreams.value[key].status = 'completed';
+                        branchStreams.value[key].isThinking = false;
+                        branchStreams.value[key].thinkingContent = '';
+                    } else {
+                        console.warn(
+                            `[BranchComplete] No matching branch found!`
+                        );
+                    }
+
+                    // Handle merge branch completion separately
+                    if (branchId === MERGE_BRANCH_ID) {
+                        // Merge branch completes after regular branches
+                        // Just clear the merge branch from streams
+                        console.log(
+                            `[BranchComplete] Clearing merge branch for nodeId=${nodeId}`
+                        );
+                        branchStreams.value = Object.fromEntries(
+                            Object.entries(branchStreams.value).filter(
+                                ([, v]) => !(v.nodeId === nodeId && v.branchId === MERGE_BRANCH_ID)
+                            )
+                        );
+                        return; // Don't proceed with regular branch completion logic
+                    }
+
+                    // Check if all NON-MERGE branches for this node are completed
+                    // Merge branches are a separate phase and shouldn't affect this check
+                    const nodeBranches = Object.values(
+                        branchStreams.value
+                    ).filter(
+                        (b) => b.nodeId === nodeId && b.branchId !== MERGE_BRANCH_ID
+                    );
+                    const allCompleted =
+                        nodeBranches.length > 0 &&
+                        nodeBranches.every(
+                            (b) =>
+                                b.status === 'completed' || b.status === 'error'
+                        );
+                    console.log(
+                        `[BranchComplete] nodeBranches=${nodeBranches.length}, allCompleted=${allCompleted}`
+                    );
+
+                    // Only create a message when all regular branches complete
+                    if (allCompleted) {
+                        // Add a message with embedded branches to the chat
+                        const branchesMessage: ChatMessage = {
+                            id: crypto.randomUUID(),
+                            role: 'assistant',
+                            content: '', // Empty content - branches are displayed instead
+                            timestamp: new Date(),
+                            nodeId,
+                            branches: nodeBranches.map((b) => ({
+                                branchId: b.branchId,
+                                label: b.label,
+                                content: b.content,
+                                expanded: false, // Collapsed by default
+                            })),
+                        };
+                        messages.value.push(branchesMessage);
+                        console.log(
+                            '[Branches] Added branches message to chat:',
+                            branchesMessage
+                        );
+
+                        // Clear only the regular branches, not merge branches
+                        // Merge branches will be cleared when they complete
+                        const keysToDeleteSet = new Set(
+                            Object.keys(branchStreams.value).filter(
+                                (k) =>
+                                    branchStreams.value[k].nodeId === nodeId &&
+                                    branchStreams.value[k].branchId !== MERGE_BRANCH_ID
+                            )
+                        );
+                        console.log(
+                            `[Branches] Deleting regular branch keys: ${Array.from(keysToDeleteSet).join(
+                                ', '
+                            )}`
+                        );
+                        branchStreams.value = Object.fromEntries(
+                            Object.entries(branchStreams.value).filter(
+                                ([k]) => !keysToDeleteSet.has(k)
+                            )
+                        );
+                        console.log(
+                            `[Branches] Remaining keys after regular branch cleanup: ${
+                                Object.keys(branchStreams.value).join(', ') ||
+                                'none'
+                            }`
+                        );
+                    }
+                },
             }
         );
 
@@ -344,10 +826,6 @@ async function handleSendMessage() {
             timestamp: new Date(),
         };
         messages.value.push(assistantMessage);
-        conversationHistory.value.push({
-            role: 'assistant',
-            content: finalOutput,
-        });
     } catch (err: unknown) {
         const errMessage = err instanceof Error ? err.message : 'Unknown error';
         error.value = errMessage;
@@ -361,6 +839,9 @@ async function handleSendMessage() {
     } finally {
         setRunning(false);
         setStreamingContent('');
+        isThinking.value = false;
+        thinkingContent.value = '';
+        branchStreams.value = {};
     }
 }
 
@@ -434,7 +915,8 @@ function handleRedo() {
 
 function clearMessages() {
     messages.value = [];
-    conversationHistory.value = [];
+    tokenUsage.value = null;
+    branchStreams.value = {};
     resetExecution();
 }
 
@@ -450,915 +932,147 @@ function syncMetaToEditor() {
 <template>
     <div class="app">
         <!-- Header -->
-        <header class="header">
-            <div class="header-left">
-                <h1 class="logo">or3-workflow</h1>
-                <span class="version">v2</span>
-                <div class="meta-inputs">
-                    <input
-                        v-model="workflowName"
-                        class="meta-input"
-                        placeholder="Workflow name"
-                        @change="syncMetaToEditor"
-                    />
-                    <input
-                        v-model="workflowDescription"
-                        class="meta-input"
-                        placeholder="Description (optional)"
-                        @change="syncMetaToEditor"
-                    />
-                </div>
-            </div>
-
-            <div class="header-center">
-                <button
-                    class="btn btn-ghost"
-                    :disabled="!canUndo"
-                    @click="handleUndo"
-                    title="Undo (Ctrl+Z)"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path d="M3 7v6h6"></path>
-                        <path
-                            d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"
-                        ></path>
-                    </svg>
-                </button>
-                <button
-                    class="btn btn-ghost"
-                    :disabled="!canRedo"
-                    @click="handleRedo"
-                    title="Redo (Ctrl+Shift+Z)"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path d="M21 7v6h-6"></path>
-                        <path
-                            d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"
-                        ></path>
-                    </svg>
-                </button>
-                <div class="divider"></div>
-                <button
-                    class="btn btn-ghost"
-                    @click="showSaveModal = true"
-                    title="Save"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path
-                            d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"
-                        ></path>
-                        <path
-                            d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"
-                        ></path>
-                        <path d="M7 3v4a1 1 0 0 0 1 1h7"></path>
-                    </svg>
-                </button>
-                <button
-                    class="btn btn-ghost"
-                    @click="showLoadModal = true"
-                    title="Load"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path
-                            d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"
-                        ></path>
-                    </svg>
-                </button>
-                <button
-                    class="btn btn-ghost"
-                    @click="handleExport"
-                    title="Export"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path
-                            d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
-                        ></path>
-                        <polyline points="7 10 12 15 17 10"></polyline>
-                        <line x1="12" x2="12" y1="15" y2="3"></line>
-                    </svg>
-                </button>
-                <label class="btn btn-ghost" title="Import">
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path
-                            d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
-                        ></path>
-                        <polyline points="17 8 12 3 7 8"></polyline>
-                        <line x1="12" x2="12" y1="3" y2="15"></line>
-                    </svg>
-                    <input
-                        type="file"
-                        accept=".json"
-                        class="hidden-input"
-                        @change="handleImport"
-                    />
-                </label>
-                <div class="divider"></div>
-                <button
-                    class="btn btn-ghost"
-                    @click="handleValidate"
-                    title="Validate"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                    </svg>
-                    <span class="btn-text">Validate</span>
-                </button>
-            </div>
-
-            <div class="header-right">
-                <button class="btn btn-ghost" @click="showApiKeyModal = true">
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path
-                            d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"
-                        ></path>
-                    </svg>
-                    <span class="btn-text">{{
-                        hasApiKey ? 'API Key Set' : 'Set API Key'
-                    }}</span>
-                </button>
-                <button
-                    class="btn btn-ghost"
-                    @click="showChatPanel = !showChatPanel"
-                    title="Toggle Chat"
-                >
-                    <svg
-                        v-if="showChatPanel"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path>
-                    </svg>
-                    <svg
-                        v-else
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        class="icon"
-                    >
-                        <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path>
-                    </svg>
-                </button>
-            </div>
-        </header>
+        <HeaderBar
+            v-model:workflowName="workflowName"
+            v-model:workflowDescription="workflowDescription"
+            :can-undo="canUndo"
+            :can-redo="canRedo"
+            :has-api-key="hasApiKey"
+            :show-chat-panel="showChatPanel"
+            @update:show-chat-panel="showChatPanel = $event"
+            @undo="handleUndo"
+            @redo="handleRedo"
+            @save="showSaveModal = true"
+            @load="showLoadModal = true"
+            @export="handleExport"
+            @import="handleImport"
+            @validate="handleValidate"
+            @open-api-key-modal="showApiKeyModal = true"
+        />
 
         <!-- Main content -->
         <main class="main">
             <!-- Left sidebar -->
-            <aside
-                v-if="showLeftSidebar || !isMobile"
-                class="sidebar left-sidebar"
-                :class="{ collapsed: !showLeftSidebar }"
-            >
-                <div class="sidebar-header">
-                    <button
-                        class="sidebar-collapse-btn"
-                        @click="showLeftSidebar = !showLeftSidebar"
-                        title="Toggle sidebar"
-                    >
-                        <svg
-                            v-if="showLeftSidebar"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            class="icon"
-                        >
-                            <polyline points="11 17 6 12 11 7"></polyline>
-                            <polyline points="18 17 13 12 18 7"></polyline>
-                        </svg>
-                        <svg
-                            v-else
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            class="icon"
-                        >
-                            <polyline points="13 17 18 12 13 7"></polyline>
-                            <polyline points="6 17 11 12 6 7"></polyline>
-                        </svg>
-                    </button>
-                </div>
-                <div v-if="showLeftSidebar" class="sidebar-tabs">
-                    <button
-                        class="sidebar-tab"
-                        :class="{ active: activePanel === 'palette' }"
-                        @click="activePanel = 'palette'"
-                    >
-                        Nodes
-                    </button>
-                    <button
-                        class="sidebar-tab"
-                        :class="{ active: activePanel === 'inspector' }"
-                        @click="activePanel = 'inspector'"
-                    >
-                        Inspector
-                    </button>
-                </div>
+            <LeftSidebar
+                :editor="editor"
+                :active-panel="activePanel"
+                :collapsed="!showLeftSidebar"
+                :is-mobile="isMobile"
+                @update:active-panel="activePanel = $event"
+                @update:collapsed="showLeftSidebar = !$event"
+                @quick-add="showLeftSidebar = false"
+            />
 
-                <div v-if="showLeftSidebar" class="sidebar-content">
-                    <NodePalette v-if="activePanel === 'palette'" />
-                    <NodeInspector
-                        v-else-if="activePanel === 'inspector' && editor"
-                        :editor="editor"
-                        @close="activePanel = 'palette'"
-                    />
-                </div>
-            </aside>
+            <!-- Mobile sidebar backdrop -->
+            <div
+                v-if="isMobile && showLeftSidebar"
+                class="mobile-sidebar-backdrop"
+                @click="showLeftSidebar = false"
+            ></div>
 
             <!-- Canvas -->
-            <div class="canvas-container">
-                <WorkflowCanvas
-                    v-if="editor"
-                    :editor="editor"
-                    :node-statuses="nodeStatuses"
-                    @node-click="handleNodeClick"
-                    @edge-click="handleEdgeClick"
-                    @pane-click="handlePaneClick"
-                />
-                <ValidationOverlay
-                    v-if="editor"
-                    class="canvas-overlay"
-                    :editor="editor"
-                />
-
-                <!-- Edge Label Editor -->
-                <EdgeLabelEditor
-                    :edge="selectedEdge"
-                    :show="showEdgeEditor"
-                    @close="showEdgeEditor = false"
-                    @update="updateEdgeLabel"
-                    @delete="deleteEdge"
-                />
-            </div>
+            <CanvasArea
+                v-if="!isMobile || mobileView === 'editor'"
+                :editor="editor"
+                :node-statuses="nodeStatuses"
+                :show-left-sidebar="showLeftSidebar"
+                :is-mobile="isMobile"
+                :selected-edge="selectedEdge"
+                :show-edge-editor="showEdgeEditor"
+                @expand-sidebar="showLeftSidebar = true"
+                @node-click="handleNodeClick"
+                @edge-click="handleEdgeClick"
+                @pane-click="handlePaneClick"
+                @update-edge-label="updateEdgeLabel"
+                @delete-edge="deleteEdge"
+                @close-edge-editor="showEdgeEditor = false"
+            />
 
             <!-- Right sidebar - Chat -->
-            <aside v-if="showChatPanel" class="sidebar right-sidebar">
-                <div class="chat-wrapper">
-                    <div class="chat-header">
-                        <div class="chat-title">
-                            <svg
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                class="chat-icon"
-                            >
-                                <path
-                                    d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"
-                                ></path>
-                            </svg>
-                            <h3>Workflow Chat</h3>
-                        </div>
-                        <button
-                            class="btn btn-ghost btn-sm"
-                            @click="clearMessages"
-                        >
-                            Clear
-                        </button>
-                    </div>
+            <ChatPanel
+                v-if="showChatPanel || (isMobile && mobileView === 'chat')"
+                v-model:chat-input="chatInput"
+                :messages="messages"
+                :node-statuses="nodeStatuses"
+                :node-labels="nodeLabels"
+                :streaming-content="streamingContent"
+                :is-running="isRunning"
+                :is-thinking="isThinking"
+                :thinking-content="thinkingContent"
+                :token-usage="tokenUsage"
+                :branch-streams="branchStreams"
+                @send="handleSendMessage"
+                @clear="clearMessages"
+                @toggle-branch="toggleBranchExpanded"
+                @toggle-message-branch="toggleMessageBranch"
+                @toggle-message-node-output="toggleMessageNodeOutput"
+            />
 
-                    <!-- Process Flow -->
-                    <div
-                        v-if="Object.keys(nodeStatuses).length > 0"
-                        class="process-flow"
-                    >
-                        <div class="flow-header">Process Flow</div>
-                        <div class="flow-steps">
-                            <div
-                                v-for="(status, nodeId) in nodeStatuses"
-                                :key="nodeId"
-                                class="flow-step"
-                                :class="`status-${status}`"
-                            >
-                                <div class="step-indicator">
-                                    <svg
-                                        v-if="status === 'active'"
-                                        class="spinning"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                    >
-                                        <path
-                                            d="M21 12a9 9 0 1 1-6.219-8.56"
-                                        ></path>
-                                    </svg>
-                                    <div v-else class="step-dot" />
-                                </div>
-                                <span class="step-label">{{ nodeId }}</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="chat-messages">
-                        <div v-if="messages.length === 0" class="chat-empty">
-                            <svg
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                class="empty-icon"
-                            >
-                                <rect
-                                    x="3"
-                                    y="11"
-                                    width="18"
-                                    height="10"
-                                    rx="2"
-                                ></rect>
-                                <circle cx="12" cy="5" r="2"></circle>
-                                <path d="M12 7v4"></path>
-                            </svg>
-                            <p>Send a message to run the workflow</p>
-                        </div>
-                        <div
-                            v-for="msg in messages"
-                            :key="msg.id"
-                            class="chat-message"
-                            :class="msg.role"
-                        >
-                            <div class="message-avatar">
-                                <svg
-                                    v-if="msg.role === 'user'"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                >
-                                    <path
-                                        d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"
-                                    ></path>
-                                    <circle cx="12" cy="7" r="4"></circle>
-                                </svg>
-                                <svg
-                                    v-else
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                >
-                                    <rect
-                                        x="3"
-                                        y="11"
-                                        width="18"
-                                        height="10"
-                                        rx="2"
-                                    ></rect>
-                                    <circle cx="12" cy="5" r="2"></circle>
-                                    <path d="M12 7v4"></path>
-                                </svg>
-                            </div>
-                            <div class="message-body">
-                                <div class="message-content">
-                                    {{ msg.content }}
-                                </div>
-                                <div v-if="msg.nodeId" class="message-meta">
-                                    via {{ msg.nodeId }}
-                                </div>
-                            </div>
-                        </div>
-                        <div
-                            v-if="streamingContent"
-                            class="chat-message assistant streaming"
-                        >
-                            <div class="message-avatar">
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                >
-                                    <rect
-                                        x="3"
-                                        y="11"
-                                        width="18"
-                                        height="10"
-                                        rx="2"
-                                    ></rect>
-                                    <circle cx="12" cy="5" r="2"></circle>
-                                    <path d="M12 7v4"></path>
-                                </svg>
-                            </div>
-                            <div class="message-body">
-                                <div class="message-content">
-                                    {{ streamingContent
-                                    }}<span class="cursor">|</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="chat-input">
-                        <textarea
-                            v-model="chatInput"
-                            placeholder="Type a message..."
-                            :disabled="isRunning"
-                            @keydown.enter.prevent="handleSendMessage"
-                        ></textarea>
-                        <button
-                            class="btn btn-primary send-btn"
-                            :disabled="!chatInput?.trim() || isRunning"
-                            @click="handleSendMessage"
-                        >
-                            <svg
-                                v-if="isRunning"
-                                class="spinning"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                            >
-                                <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
-                            </svg>
-                            <svg
-                                v-else
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                class="icon"
-                            >
-                                <line x1="22" y1="2" x2="11" y2="13"></line>
-                                <polygon
-                                    points="22 2 15 22 11 13 2 9 22 2"
-                                ></polygon>
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-            </aside>
-
-            <!-- Mobile Bottom Navigation -->
-            <nav v-if="isMobile" class="mobile-nav">
-                <button
-                    class="mobile-nav-btn"
-                    :class="{ active: mobileView === 'editor' }"
-                    @click="toggleMobileView('editor')"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                    >
-                        <rect x="3" y="3" width="7" height="7"></rect>
-                        <rect x="14" y="3" width="7" height="7"></rect>
-                        <rect x="14" y="14" width="7" height="7"></rect>
-                        <rect x="3" y="14" width="7" height="7"></rect>
-                    </svg>
-                    <span>Editor</span>
-                </button>
-                <button
-                    class="mobile-nav-btn"
-                    :class="{ active: mobileView === 'chat' }"
-                    @click="toggleMobileView('chat')"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                    >
-                        <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path>
-                    </svg>
-                    <span>Chat</span>
-                    <span v-if="messages.length > 0" class="nav-badge">{{
-                        messages.length
-                    }}</span>
-                </button>
-                <button
-                    class="mobile-nav-btn"
-                    @click="showMobileMenu = !showMobileMenu"
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                    >
-                        <line x1="3" y1="12" x2="21" y2="12"></line>
-                        <line x1="3" y1="6" x2="21" y2="6"></line>
-                        <line x1="3" y1="18" x2="21" y2="18"></line>
-                    </svg>
-                    <span>More</span>
-                </button>
-            </nav>
-
-            <!-- Mobile Menu Overlay -->
-            <Transition name="slide-up">
-                <div
-                    v-if="showMobileMenu"
-                    class="mobile-menu-overlay"
-                    @click.self="showMobileMenu = false"
-                >
-                    <div class="mobile-menu">
-                        <div class="mobile-menu-header">
-                            <span>Actions</span>
-                            <button
-                                class="btn btn-ghost"
-                                @click="showMobileMenu = false"
-                            >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    class="icon"
-                                >
-                                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                                </svg>
-                            </button>
-                        </div>
-                        <div class="mobile-menu-items">
-                            <button
-                                class="mobile-menu-item"
-                                @click="
-                                    handleUndo();
-                                    showMobileMenu = false;
-                                "
-                            >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    class="icon"
-                                >
-                                    <path d="M3 7v6h6"></path>
-                                    <path
-                                        d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"
-                                    ></path>
-                                </svg>
-                                <span>Undo</span>
-                            </button>
-                            <button
-                                class="mobile-menu-item"
-                                @click="
-                                    handleRedo();
-                                    showMobileMenu = false;
-                                "
-                            >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    class="icon"
-                                >
-                                    <path d="M21 7v6h-6"></path>
-                                    <path
-                                        d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"
-                                    ></path>
-                                </svg>
-                                <span>Redo</span>
-                            </button>
-                            <div class="mobile-menu-divider"></div>
-                            <button
-                                class="mobile-menu-item"
-                                @click="
-                                    showSaveModal = true;
-                                    showMobileMenu = false;
-                                "
-                            >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    class="icon"
-                                >
-                                    <path
-                                        d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"
-                                    ></path>
-                                    <path
-                                        d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"
-                                    ></path>
-                                    <path d="M7 3v4a1 1 0 0 0 1 1h7"></path>
-                                </svg>
-                                <span>Save Workflow</span>
-                            </button>
-                            <button
-                                class="mobile-menu-item"
-                                @click="
-                                    showLoadModal = true;
-                                    showMobileMenu = false;
-                                "
-                            >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    class="icon"
-                                >
-                                    <path
-                                        d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"
-                                    ></path>
-                                </svg>
-                                <span>Load Workflow</span>
-                            </button>
-                            <button
-                                class="mobile-menu-item"
-                                @click="
-                                    handleExport();
-                                    showMobileMenu = false;
-                                "
-                            >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    class="icon"
-                                >
-                                    <path
-                                        d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
-                                    ></path>
-                                    <polyline
-                                        points="7 10 12 15 17 10"
-                                    ></polyline>
-                                    <line x1="12" x2="12" y1="15" y2="3"></line>
-                                </svg>
-                                <span>Export JSON</span>
-                            </button>
-                            <div class="mobile-menu-divider"></div>
-                            <button
-                                class="mobile-menu-item"
-                                @click="
-                                    showApiKeyModal = true;
-                                    showMobileMenu = false;
-                                "
-                            >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    class="icon"
-                                >
-                                    <path
-                                        d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"
-                                    ></path>
-                                </svg>
-                                <span>{{
-                                    hasApiKey ? 'Change API Key' : 'Set API Key'
-                                }}</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </Transition>
+            <!-- Mobile Navigation -->
+            <MobileNav
+                v-if="isMobile"
+                :mobile-view="mobileView"
+                :message-count="messages.length"
+                :has-api-key="hasApiKey"
+                :show-menu="showMobileMenu"
+                @toggle-view="toggleMobileView"
+                @update:show-menu="showMobileMenu = $event"
+                @undo="handleUndo"
+                @redo="handleRedo"
+                @save="showSaveModal = true"
+                @load="showLoadModal = true"
+                @export="handleExport"
+                @open-api-key="showApiKeyModal = true"
+            />
         </main>
 
-        <!-- API Key Modal -->
-        <div
-            v-if="showApiKeyModal"
-            class="modal-overlay"
-            @click.self="hasApiKey && (showApiKeyModal = false)"
-        >
-            <div class="modal">
-                <h2>OpenRouter API Key</h2>
-                <p>
-                    Enter your OpenRouter API key to enable workflow execution.
-                    <a href="https://openrouter.ai/keys" target="_blank"
-                        >Get one here</a
-                    >
-                </p>
-                <input
-                    v-model="tempApiKey"
-                    type="password"
-                    placeholder="sk-or-v1-..."
-                    @keydown.enter="saveApiKey"
-                />
-                <div class="modal-actions">
-                    <button
-                        v-if="hasApiKey"
-                        class="btn btn-ghost"
-                        @click="clearApiKey"
-                    >
-                        Clear Key
-                    </button>
-                    <button
-                        v-if="hasApiKey"
-                        class="btn btn-ghost"
-                        @click="showApiKeyModal = false"
-                    >
-                        Cancel
-                    </button>
-                    <button class="btn btn-primary" @click="saveApiKey">
-                        Save
-                    </button>
-                </div>
-            </div>
-        </div>
+        <!-- Modals -->
+        <ApiKeyModal
+            :show="showApiKeyModal"
+            :has-api-key="hasApiKey"
+            v-model:temp-api-key="tempApiKey"
+            @close="showApiKeyModal = false"
+            @save="saveApiKey"
+            @clear="clearApiKey"
+        />
 
-        <!-- Save Modal -->
-        <div
-            v-if="showSaveModal"
-            class="modal-overlay"
-            @click.self="showSaveModal = false"
-        >
-            <div class="modal">
-                <h2>Save Workflow</h2>
-                <label class="form-label">Workflow Name</label>
-                <input
-                    v-model="workflowName"
-                    type="text"
-                    placeholder="My Workflow"
-                    @keydown.enter="handleSave"
-                />
-                <div class="modal-actions">
-                    <button
-                        class="btn btn-ghost"
-                        @click="showSaveModal = false"
-                    >
-                        Cancel
-                    </button>
-                    <button class="btn btn-primary" @click="handleSave">
-                        Save
-                    </button>
-                </div>
-            </div>
-        </div>
+        <SaveModal
+            :show="showSaveModal"
+            v-model:workflow-name="workflowName"
+            @close="showSaveModal = false"
+            @save="handleSave"
+        />
 
-        <!-- Load Modal -->
-        <div
-            v-if="showLoadModal"
-            class="modal-overlay"
-            @click.self="showLoadModal = false"
-        >
-            <div class="modal modal-lg">
-                <h2>Load Workflow</h2>
-                <div v-if="savedWorkflows.length > 0" class="workflow-list">
-                    <div
-                        v-for="workflow in savedWorkflows"
-                        :key="workflow.id"
-                        class="workflow-item"
-                    >
-                        <div class="workflow-info">
-                            <span class="workflow-name">{{
-                                workflow.name
-                            }}</span>
-                            <span class="workflow-date">{{
-                                new Date(
-                                    workflow.updatedAt
-                                ).toLocaleDateString()
-                            }}</span>
-                        </div>
-                        <div class="workflow-actions">
-                            <button
-                                class="btn btn-primary btn-sm"
-                                @click="handleLoad(workflow)"
-                            >
-                                Load
-                            </button>
-                            <button
-                                class="btn btn-ghost btn-sm"
-                                @click="deleteWorkflow(workflow.id)"
-                            >
-                                Delete
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                <div v-else class="empty-state">
-                    <p>No saved workflows yet.</p>
-                </div>
-                <div class="modal-actions">
-                    <button
-                        class="btn btn-ghost"
-                        @click="showLoadModal = false"
-                    >
-                        Close
-                    </button>
-                </div>
-            </div>
-        </div>
+        <LoadModal
+            :show="showLoadModal"
+            :workflows="savedWorkflows"
+            @close="showLoadModal = false"
+            @load="handleLoad"
+            @delete="deleteWorkflow"
+        />
 
-        <!-- Validation Modal -->
-        <div
-            v-if="showValidationModal"
-            class="modal-overlay"
-            @click.self="showValidationModal = false"
-        >
-            <div class="modal">
-                <h2>Workflow Validation</h2>
-                <div v-if="validationResult" class="validation-result">
-                    <div
-                        v-if="
-                            validationResult.isValid &&
-                            validationResult.warnings.length === 0
-                        "
-                        class="validation-success"
-                    >
-                        <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            class="success-icon"
-                        >
-                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                        </svg>
-                        <p>Workflow is valid and ready to run!</p>
-                    </div>
+        <ValidationModal
+            :show="showValidationModal"
+            :result="validationResult"
+            @close="showValidationModal = false"
+        />
 
-                    <div
-                        v-if="validationResult.errors.length > 0"
-                        class="validation-section errors"
-                    >
-                        <h3>Errors</h3>
-                        <ul>
-                            <li
-                                v-for="(err, i) in validationResult.errors"
-                                :key="'err-' + i"
-                            >
-                                {{ err.message }}
-                            </li>
-                        </ul>
-                    </div>
-
-                    <div
-                        v-if="validationResult.warnings.length > 0"
-                        class="validation-section warnings"
-                    >
-                        <h3>Warnings</h3>
-                        <ul>
-                            <li
-                                v-for="(warn, i) in validationResult.warnings"
-                                :key="'warn-' + i"
-                            >
-                                {{ warn.message }}
-                            </li>
-                        </ul>
-                    </div>
-                </div>
-                <div class="modal-actions">
-                    <button
-                        class="btn btn-primary"
-                        @click="showValidationModal = false"
-                    >
-                        Close
-                    </button>
-                </div>
-            </div>
-        </div>
+        <HITLModal
+            :show="showHITLModal"
+            :request="pendingHITLRequest"
+            v-model:user-input="hitlUserInput"
+            @approve="handleHITLApprove"
+            @reject="handleHITLReject"
+            @skip="handleHITLSkip"
+            @custom="
+                (response) => {
+                    if (resolveHITLPromise) {
+                        resolveHITLPromise(response);
+                        closeHITLModal();
+                    }
+                }
+            "
+        />
     </div>
 </template>
 
@@ -1369,102 +1083,8 @@ function syncMetaToEditor() {
     height: 100vh;
     width: 100vw;
     overflow: hidden;
-}
-
-/* Header */
-.header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 var(--or3-spacing-md, 16px);
-    height: 56px;
-    background: var(--or3-color-bg-secondary, #12121a);
-    border-bottom: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
-    flex-shrink: 0;
-}
-
-.header-left,
-.header-center,
-.header-right {
-    display: flex;
-    align-items: center;
-    gap: var(--or3-spacing-sm, 8px);
-}
-
-.header-center {
-    gap: var(--or3-spacing-xs, 4px);
-}
-
-.logo {
-    font-size: 18px;
-    font-weight: 700;
-    background: linear-gradient(
-        135deg,
-        var(--or3-color-accent, #8b5cf6),
-        #a78bfa
-    );
-    background-clip: text;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    margin: 0;
-}
-
-.version {
-    font-size: 11px;
-    padding: 2px 6px;
-    background: var(--or3-color-accent-muted, rgba(139, 92, 246, 0.2));
-    color: var(--or3-color-accent, #8b5cf6);
-    border-radius: var(--or3-radius-sm, 6px);
-    font-weight: 600;
-}
-
-.meta-inputs {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-left: 12px;
-}
-
-.meta-input {
-    background: var(--or3-color-bg-elevated, #1c1c27);
-    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.1));
-    border-radius: var(--or3-radius-sm, 6px);
-    padding: 6px 10px;
-    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
-    min-width: 180px;
-    font-size: 12px;
-}
-
-.meta-input:focus {
-    outline: none;
-    border-color: var(--or3-color-accent, #8b5cf6);
-    box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
-}
-
-.icon {
-    width: 18px;
-    height: 18px;
-}
-
-.divider {
-    width: 1px;
-    height: 24px;
-    background: var(--or3-color-border, rgba(255, 255, 255, 0.08));
-    margin: 0 var(--or3-spacing-xs, 4px);
-}
-
-.hidden-input {
-    display: none;
-}
-
-.btn-text {
-    margin-left: 4px;
-}
-
-@media (max-width: 900px) {
-    .btn-text {
-        display: none;
-    }
+    background: var(--or3-color-bg-primary, #09090c);
+    padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
 /* Main */
@@ -1472,113 +1092,8 @@ function syncMetaToEditor() {
     display: flex;
     flex: 1;
     overflow: hidden;
-}
-
-/* Sidebars */
-.sidebar {
-    display: flex;
-    flex-direction: column;
-    background: var(--or3-color-bg-secondary, #12121a);
-    border-color: var(--or3-color-border, rgba(255, 255, 255, 0.08));
     position: relative;
-    transition: width 0.3s ease, transform 0.3s ease;
-}
-
-.sidebar-header {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    padding: var(--or3-spacing-xs, 4px);
-    border-bottom: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
-}
-
-.sidebar-collapse-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.03));
-    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
-    border-radius: var(--or3-radius-sm, 6px);
-    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
-    cursor: pointer;
-    transition: all 0.15s ease;
-}
-
-.sidebar-collapse-btn:hover {
-    background: var(--or3-color-surface, rgba(26, 26, 36, 0.8));
-    color: var(--or3-color-text, rgba(255, 255, 255, 0.87));
-}
-
-.sidebar-collapse-btn .icon {
-    width: 14px;
-    height: 14px;
-}
-
-.left-sidebar {
-    width: 280px;
-    border-right: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
-}
-
-.left-sidebar.collapsed {
-    width: 0;
-    overflow: hidden;
-    border: none;
-}
-
-.right-sidebar {
-    width: 380px;
-    border-left: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
-}
-
-.sidebar-tabs {
-    display: flex;
-    border-bottom: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
-}
-
-.sidebar-tab {
-    flex: 1;
-    padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 16px);
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-}
-
-.sidebar-tab:hover {
-    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
-}
-
-.sidebar-tab.active {
-    color: var(--or3-color-accent, #8b5cf6);
-    border-bottom-color: var(--or3-color-accent, #8b5cf6);
-}
-
-.sidebar-content {
-    flex: 1;
-    overflow-y: auto;
-    padding: var(--or3-spacing-md, 16px);
-}
-
-/* Canvas */
-.canvas-container {
-    flex: 1;
-    position: relative;
-    overflow: hidden;
-}
-
-.canvas-overlay {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    z-index: 10;
+    min-height: 0;
 }
 
 /* Chat */
@@ -1834,20 +1349,36 @@ function syncMetaToEditor() {
 .modal-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.7);
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 1000;
+    animation: fadeIn 0.15s ease;
 }
 
 .modal {
-    background: var(--or3-color-bg-secondary, #12121a);
-    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+    background: var(--or3-color-bg-secondary, #111115);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
     border-radius: var(--or3-radius-lg, 16px);
-    padding: var(--or3-spacing-lg, 24px);
+    padding: var(--or3-spacing-xl, 24px);
     width: 400px;
     max-width: 90vw;
+    box-shadow: var(--or3-shadow-xl, 0 24px 64px rgba(0, 0, 0, 0.5));
+    animation: modalSlideUp 0.2s ease;
+}
+
+@keyframes modalSlideUp {
+    from {
+        opacity: 0;
+        transform: translateY(16px) scale(0.98);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
 }
 
 .modal-lg {
@@ -1855,86 +1386,115 @@ function syncMetaToEditor() {
 }
 
 .modal h2 {
-    font-size: 18px;
+    font-size: var(--or3-text-lg, 16px);
+    font-weight: var(--or3-font-semibold, 600);
     margin: 0 0 var(--or3-spacing-sm, 8px) 0;
+    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
 }
 
 .modal p {
-    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
-    font-size: 14px;
-    margin-bottom: var(--or3-spacing-md, 16px);
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.72));
+    font-size: var(--or3-text-sm, 13px);
+    line-height: 1.6;
+    margin-bottom: var(--or3-spacing-lg, 16px);
 }
 
 .modal p a {
     color: var(--or3-color-accent, #8b5cf6);
+    text-decoration: none;
+    font-weight: var(--or3-font-medium, 500);
+}
+
+.modal p a:hover {
+    text-decoration: underline;
 }
 
 .modal input {
     width: 100%;
-    margin-bottom: var(--or3-spacing-md, 16px);
+    margin-bottom: var(--or3-spacing-lg, 16px);
 }
 
 .form-label {
     display: block;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+    font-size: var(--or3-text-xs, 11px);
+    font-weight: var(--or3-font-semibold, 600);
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.72));
     margin-bottom: var(--or3-spacing-xs, 4px);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 .modal-actions {
     display: flex;
     justify-content: flex-end;
     gap: var(--or3-spacing-sm, 8px);
+    padding-top: var(--or3-spacing-md, 12px);
+    margin-top: var(--or3-spacing-md, 12px);
+    border-top: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
 }
 
 /* Workflow List */
 .workflow-list {
     max-height: 300px;
     overflow-y: auto;
-    margin-bottom: var(--or3-spacing-md, 16px);
+    margin-bottom: var(--or3-spacing-lg, 16px);
 }
 
 .workflow-item {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: var(--or3-spacing-sm, 8px);
+    padding: var(--or3-spacing-md, 12px);
     border-radius: var(--or3-radius-md, 10px);
-    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.03));
-    margin-bottom: var(--or3-spacing-xs, 4px);
+    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.06));
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
+    margin-bottom: var(--or3-spacing-sm, 8px);
+    transition: all var(--or3-transition-fast, 120ms);
+}
+
+.workflow-item:hover {
+    background: var(--or3-color-surface-subtle, rgba(255, 255, 255, 0.06));
+    border-color: var(--or3-color-border-hover, rgba(255, 255, 255, 0.12));
 }
 
 .workflow-info {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
 }
 
 .workflow-name {
-    font-weight: 600;
-    font-size: 14px;
+    font-weight: var(--or3-font-semibold, 600);
+    font-size: var(--or3-text-sm, 13px);
+    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
 }
 
 .workflow-date {
-    font-size: 11px;
-    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+    font-size: var(--or3-text-xs, 11px);
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
 }
 
 .workflow-actions {
     display: flex;
     gap: var(--or3-spacing-xs, 4px);
+    opacity: 0.6;
+    transition: opacity var(--or3-transition-fast, 120ms);
+}
+
+.workflow-item:hover .workflow-actions {
+    opacity: 1;
 }
 
 .empty-state {
     text-align: center;
-    padding: var(--or3-spacing-lg, 24px);
-    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
+    padding: var(--or3-spacing-xl, 24px);
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
+    font-size: var(--or3-text-sm, 13px);
 }
 
 /* Validation */
 .validation-result {
-    margin-bottom: var(--or3-spacing-md, 16px);
+    margin-bottom: var(--or3-spacing-lg, 16px);
 }
 
 .validation-success {
@@ -1942,24 +1502,27 @@ function syncMetaToEditor() {
     flex-direction: column;
     align-items: center;
     text-align: center;
-    padding: var(--or3-spacing-lg, 24px);
+    padding: var(--or3-spacing-xl, 24px);
 }
 
 .success-icon {
     width: 48px;
     height: 48px;
     color: var(--or3-color-success, #22c55e);
-    margin-bottom: var(--or3-spacing-sm, 8px);
+    margin-bottom: var(--or3-spacing-md, 12px);
+    filter: drop-shadow(0 0 12px rgba(34, 197, 94, 0.4));
 }
 
 .validation-section {
-    margin-bottom: var(--or3-spacing-md, 16px);
+    margin-bottom: var(--or3-spacing-lg, 16px);
 }
 
 .validation-section h3 {
-    font-size: 13px;
-    font-weight: 600;
-    margin-bottom: var(--or3-spacing-xs, 4px);
+    font-size: var(--or3-text-xs, 11px);
+    font-weight: var(--or3-font-semibold, 600);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: var(--or3-spacing-sm, 8px);
 }
 
 .validation-section.errors h3 {
@@ -1977,190 +1540,24 @@ function syncMetaToEditor() {
 }
 
 .validation-section li {
-    padding: var(--or3-spacing-xs, 4px) 0;
-    font-size: 13px;
-    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
+    padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 12px);
+    font-size: var(--or3-text-sm, 13px);
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.72));
+    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.06));
+    border-radius: var(--or3-radius-sm, 6px);
+    margin-bottom: var(--or3-spacing-xs, 4px);
 }
 
-/* Sidebar Toggle */
-.sidebar-toggle {
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 24px;
-    height: 48px;
-    background: var(--or3-color-bg-secondary, #12121a);
-    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
-    border-radius: 0 var(--or3-radius-md, 10px) var(--or3-radius-md, 10px) 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    z-index: 10;
-    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.65));
-    transition: all 0.15s ease;
-    padding: 0;
-    right: -24px;
-}
+/* Responsive */
 
-.sidebar-toggle:hover {
-    background: var(--or3-color-surface, rgba(26, 26, 36, 0.8));
-    color: var(--or3-color-text, rgba(255, 255, 255, 0.87));
-}
-
-.sidebar-toggle svg {
-    width: 14px;
-    height: 14px;
-}
-
-.left-sidebar.collapsed {
-    width: 0;
-    overflow: hidden;
-    border: none;
-}
-
-.left-sidebar.collapsed .sidebar-toggle {
-    right: -24px;
-    border-left: none;
-}
-
-.right-sidebar.collapsed {
-    width: 0;
-    overflow: hidden;
-    border: none;
-}
-
-/* Mobile Navigation */
-.mobile-nav {
-    display: none;
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: var(--or3-color-bg-secondary, #12121a);
-    border-top: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
-    padding: var(--or3-spacing-sm, 8px);
-    z-index: 200;
-    justify-content: space-around;
-}
-
-.mobile-nav-btn {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 16px);
-    background: none;
-    border: none;
-    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.4));
-    font-size: 11px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    border-radius: var(--or3-radius-md, 10px);
-    position: relative;
-}
-
-.mobile-nav-btn:hover,
-.mobile-nav-btn.active {
-    color: var(--or3-color-accent, #8b5cf6);
-    background: var(--or3-color-accent-muted, rgba(139, 92, 246, 0.2));
-}
-
-.mobile-nav-btn svg {
-    width: 22px;
-    height: 22px;
-}
-
-.nav-badge {
-    position: absolute;
-    top: 4px;
-    right: 8px;
-    width: 8px;
-    height: 8px;
-    background: var(--or3-color-accent, #8b5cf6);
-    border-radius: 50%;
-}
-
-/* Mobile Menu Overlay */
-.mobile-menu-overlay {
+/* Mobile sidebar backdrop */
+.mobile-sidebar-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.7);
-    z-index: 300;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(2px);
+    z-index: 140;
     animation: fadeIn 0.2s ease;
-}
-
-.mobile-menu {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: var(--or3-color-bg-secondary, #12121a);
-    border-radius: var(--or3-radius-lg, 16px) var(--or3-radius-lg, 16px) 0 0;
-    padding: var(--or3-spacing-lg, 24px);
-    z-index: 301;
-    max-height: 70vh;
-    overflow-y: auto;
-    animation: slideUp 0.3s ease;
-}
-
-.mobile-menu h3 {
-    font-size: 16px;
-    font-weight: 600;
-    margin: 0 0 var(--or3-spacing-md, 16px) 0;
-    color: var(--or3-color-text, rgba(255, 255, 255, 0.87));
-}
-
-.mobile-menu-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-bottom: var(--or3-spacing-md, 16px);
-    margin-bottom: var(--or3-spacing-md, 16px);
-    border-bottom: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--or3-color-text, rgba(255, 255, 255, 0.87));
-}
-
-.mobile-menu-items {
-    display: flex;
-    flex-direction: column;
-    gap: var(--or3-spacing-xs, 4px);
-}
-
-.mobile-menu-divider {
-    height: 1px;
-    background: var(--or3-color-border, rgba(255, 255, 255, 0.08));
-    margin: var(--or3-spacing-sm, 8px) 0;
-}
-
-.mobile-menu-item {
-    display: flex;
-    align-items: center;
-    gap: var(--or3-spacing-md, 16px);
-    padding: var(--or3-spacing-md, 16px);
-    background: var(--or3-color-surface-glass, rgba(255, 255, 255, 0.03));
-    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
-    border-radius: var(--or3-radius-md, 10px);
-    margin-bottom: var(--or3-spacing-sm, 8px);
-    color: var(--or3-color-text, rgba(255, 255, 255, 0.87));
-    cursor: pointer;
-    transition: all 0.15s ease;
-    width: 100%;
-    text-align: left;
-    font-size: 14px;
-}
-
-.mobile-menu-item:hover {
-    background: var(--or3-color-surface, rgba(26, 26, 36, 0.8));
-    border-color: var(--or3-color-accent, #8b5cf6);
-}
-
-.mobile-menu-item svg {
-    width: 20px;
-    height: 20px;
-    color: var(--or3-color-accent, #8b5cf6);
 }
 
 @keyframes fadeIn {
@@ -2172,105 +1569,169 @@ function syncMetaToEditor() {
     }
 }
 
-@keyframes slideUp {
-    from {
-        transform: translateY(100%);
-    }
-    to {
-        transform: translateY(0);
-    }
-}
-
-/* Vue Transitions */
-.slide-up-enter-active,
-.slide-up-leave-active {
-    transition: opacity 0.3s ease;
-}
-
-.slide-up-enter-active .mobile-menu,
-.slide-up-leave-active .mobile-menu {
-    transition: transform 0.3s ease;
-}
-
-.slide-up-enter-from,
-.slide-up-leave-to {
-    opacity: 0;
-}
-
-.slide-up-enter-from .mobile-menu,
-.slide-up-leave-to .mobile-menu {
-    transform: translateY(100%);
-}
-
-/* Responsive */
-@media (max-width: 900px) {
-    .left-sidebar {
-        width: 220px;
-    }
-
-    .right-sidebar {
-        width: 320px;
+@media (max-width: 1024px) {
+    .main {
+        gap: var(--or3-spacing-sm, 8px);
     }
 }
 
 @media (max-width: 768px) {
-    .header {
-        padding: var(--or3-spacing-xs, 4px) var(--or3-spacing-sm, 8px);
-    }
-
-    .header-left .btn,
-    .header-center .btn {
-        display: none;
-    }
-
-    .left-sidebar {
-        position: fixed;
-        left: 0;
-        top: 48px;
-        bottom: 60px;
-        z-index: 100;
-        transform: translateX(-100%);
-        transition: transform 0.3s ease;
-        width: 280px;
-    }
-
-    .left-sidebar:not(.collapsed) {
-        transform: translateX(0);
-    }
-
-    .left-sidebar .sidebar-toggle {
-        display: none;
-    }
-
-    .right-sidebar {
-        position: fixed;
-        right: 0;
-        top: 48px;
-        bottom: 60px;
-        width: 100%;
-        z-index: 100;
-        transform: translateX(100%);
-        transition: transform 0.3s ease;
-    }
-
-    .right-sidebar:not(.collapsed) {
-        transform: translateX(0);
-    }
-
     .main {
-        padding-bottom: 60px;
+        padding-bottom: calc(72px + env(safe-area-inset-bottom, 0));
     }
+}
 
-    .mobile-nav {
-        display: flex;
-    }
+/* HITL Modal Styles */
+.hitl-overlay {
+    z-index: 1000;
+}
 
-    .canvas-container {
-        position: fixed;
-        top: 48px;
-        left: 0;
-        right: 0;
-        bottom: 60px;
-    }
+.hitl-modal {
+    max-width: 500px;
+    width: 90%;
+}
+
+.hitl-header {
+    display: flex;
+    align-items: center;
+    gap: var(--or3-spacing-md, 12px);
+    margin-bottom: var(--or3-spacing-lg, 16px);
+}
+
+.hitl-icon {
+    width: 36px;
+    height: 36px;
+    color: var(--or3-color-warning, #f59e0b);
+    filter: drop-shadow(0 0 12px rgba(245, 158, 11, 0.4));
+}
+
+.hitl-icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+.hitl-header h2 {
+    flex: 1;
+    margin: 0;
+    font-size: var(--or3-text-lg, 16px);
+}
+
+.hitl-mode-badge {
+    padding: 4px 10px;
+    border-radius: var(--or3-radius-sm, 6px);
+    font-size: var(--or3-text-xs, 11px);
+    font-weight: var(--or3-font-semibold, 600);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: var(--or3-color-bg-tertiary, #18181d);
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.72));
+}
+
+.hitl-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-lg, 16px);
+}
+
+.hitl-node-info {
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.72));
+    font-size: var(--or3-text-sm, 13px);
+    margin: 0;
+}
+
+.hitl-prompt {
+    padding: var(--or3-spacing-lg, 16px);
+    background: var(--or3-color-bg-tertiary, #18181d);
+    border-radius: var(--or3-radius-md, 10px);
+    line-height: 1.6;
+    font-size: var(--or3-text-sm, 13px);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
+}
+
+.hitl-context {
+    background: var(--or3-color-bg-tertiary, #18181d);
+    border-radius: var(--or3-radius-md, 10px);
+    overflow: hidden;
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
+}
+
+.hitl-context h4 {
+    margin: 0;
+    padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-md, 16px);
+    background: rgba(255, 255, 255, 0.03);
+    font-size: var(--or3-text-xs, 11px);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
+    border-bottom: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
+}
+
+.hitl-context pre {
+    margin: 0;
+    padding: var(--or3-spacing-md, 16px);
+    font-size: var(--or3-text-sm, 13px);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+    color: var(--or3-color-text-secondary, rgba(255, 255, 255, 0.72));
+}
+
+.hitl-input-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--or3-spacing-sm, 8px);
+}
+
+.hitl-textarea {
+    width: 100%;
+    padding: var(--or3-spacing-md, 12px);
+    border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
+    border-radius: var(--or3-radius-md, 10px);
+    background: var(--or3-color-bg-tertiary, #18181d);
+    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
+    font-family: inherit;
+    font-size: var(--or3-text-sm, 13px);
+    resize: vertical;
+    transition: all var(--or3-transition-fast, 120ms);
+}
+
+.hitl-textarea:focus {
+    outline: none;
+    border-color: var(--or3-color-accent, #8b5cf6);
+    box-shadow: 0 0 0 3px
+        var(--or3-color-accent-muted, rgba(139, 92, 246, 0.15));
+}
+
+.hitl-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--or3-spacing-sm, 8px);
+}
+
+.hitl-option-btn {
+    flex: 1;
+    min-width: 100px;
+}
+
+.hitl-actions {
+    margin-top: var(--or3-spacing-lg, 16px);
+    border-top: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.12));
+    padding-top: var(--or3-spacing-lg, 16px);
+}
+
+.btn-danger {
+    background: var(--or3-color-error, #ef4444);
+    color: white;
+    border: none;
+    border-radius: var(--or3-radius-md, 10px);
+    padding: var(--or3-spacing-sm, 10px) var(--or3-spacing-md, 16px);
+    font-weight: var(--or3-font-semibold, 600);
+    transition: all var(--or3-transition-fast, 120ms);
+}
+
+.btn-danger:hover {
+    background: #dc2626;
+    transform: translateY(-1px);
 }
 </style>

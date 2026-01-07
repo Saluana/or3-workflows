@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { Handle, Position } from '@vue-flow/core';
 import NodeWrapper from './NodeWrapper.vue';
+import IconRouter from '../icons/IconRouter.vue';
 
 const props = defineProps<{
   id: string;
@@ -31,21 +32,19 @@ const handlePositions = computed(() => {
   if (count === 1) return [50];
   return routes.value.map((_, i) => ((i + 1) / (count + 1)) * 100);
 });
+const emit = defineEmits<{
+  (e: 'inspect'): void;
+}>();
 </script>
 
 <template>
-  <NodeWrapper :id="id" :selected="selected" :status="status" variant="warning">
+  <NodeWrapper :id="id" :selected="selected" :status="status" variant="warning" @inspect="emit('inspect')">
     <Handle type="target" :position="Position.Top" class="handle" />
     
     <div class="router-node">
       <div class="node-header">
         <div class="icon-wrapper">
-          <svg class="branch-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="6" y1="3" x2="6" y2="15"></line>
-            <circle cx="18" cy="6" r="3"></circle>
-            <circle cx="6" cy="18" r="3"></circle>
-            <path d="M18 9a9 9 0 0 1-9 9"></path>
-          </svg>
+          <IconRouter class="branch-icon" />
         </div>
         <span class="node-label">{{ label }}</span>
         <div v-if="status === 'active'" class="status-spinner"></div>
@@ -63,8 +62,16 @@ const handlePositions = computed(() => {
       type="source" 
       :position="Position.Bottom" 
       :id="route.id"
-      class="handle"
+      class="handle route-handle"
+      :data-route-label="route.label || route.id"
+      :title="route.label || route.id"
       :style="{ left: `${handlePositions[index]}%` }"
+    />
+    <Handle
+      type="source"
+      :position="Position.Right"
+      id="error"
+      class="handle error-handle"
     />
   </NodeWrapper>
 </template>
@@ -137,9 +144,42 @@ const handlePositions = computed(() => {
   height: 12px !important;
 }
 
+.route-handle::after {
+  content: attr(data-route-label);
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--or3-color-bg-elevated, #22222e);
+  border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08));
+  color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.9));
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: var(--or3-radius-sm, 6px);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  z-index: 5;
+}
+
+.route-handle:hover::after,
+.route-handle:focus-visible::after {
+  opacity: 1;
+}
+
 .handle:hover {
   background: var(--or3-color-warning, #f59e0b) !important;
   border-color: var(--or3-color-warning, #f59e0b) !important;
+}
+
+.error-handle {
+  border-color: var(--or3-color-error, #ef4444) !important;
+}
+
+.error-handle:hover {
+  background: var(--or3-color-error, #ef4444) !important;
+  border-color: var(--or3-color-error, #ef4444) !important;
 }
 
 @keyframes spin {

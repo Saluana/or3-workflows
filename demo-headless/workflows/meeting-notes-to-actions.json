@@ -1,0 +1,40 @@
+{
+  "meta": {
+    "version": "2.0.0",
+    "name": "Meeting Notes to Actions",
+    "description": "Condenses messy meeting notes into decisions, risks, and next actions."
+  },
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 0, "y": 0 },
+      "data": { "label": "Start" }
+    },
+    {
+      "id": "agent-parse",
+      "type": "agent",
+      "position": { "x": 220, "y": 0 },
+      "data": {
+        "label": "Parse Notes",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Extract attendees (if present), topics, and key arguments from the notes. Output concise bullets."
+      }
+    },
+    {
+      "id": "agent-actions",
+      "type": "agent",
+      "position": { "x": 440, "y": 0 },
+      "data": {
+        "label": "Decisions & Actions",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Output three sections: Decisions (with owners if implied), Open Risks, Next Actions (each with owner TBD and due hint). Keep it under 180 words."
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "agent-parse" },
+    { "id": "e2", "source": "agent-parse", "target": "agent-actions" }
+  ]
+}
+

@@ -1,0 +1,51 @@
+{
+  "meta": {
+    "version": "2.0.0",
+    "name": "Data Quality Audit",
+    "description": "Creates a lightweight data-quality checklist plus targeted queries to run."
+  },
+  "nodes": [
+    {
+      "id": "start-1",
+      "type": "start",
+      "position": { "x": 0, "y": 0 },
+      "data": { "label": "Start" }
+    },
+    {
+      "id": "agent-checklist",
+      "type": "agent",
+      "position": { "x": 220, "y": 0 },
+      "data": {
+        "label": "Checklist",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Create a data-quality checklist for the described dataset: completeness, validity, timeliness, consistency, anomalies. Bullet format."
+      }
+    },
+    {
+      "id": "agent-queries",
+      "type": "agent",
+      "position": { "x": 440, "y": 0 },
+      "data": {
+        "label": "Probe Queries",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Propose 5 targeted queries or sanity checks (in plain English) to reveal issues. Include why each matters."
+      }
+    },
+    {
+      "id": "agent-summary",
+      "type": "agent",
+      "position": { "x": 660, "y": 0 },
+      "data": {
+        "label": "Audit Summary",
+        "model": "openai/gpt-4o-mini",
+        "prompt": "Summarize the checklist and queries into a short audit plan with priorities (P1-P3)."
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "start-1", "target": "agent-checklist" },
+    { "id": "e2", "source": "agent-checklist", "target": "agent-queries" },
+    { "id": "e3", "source": "agent-queries", "target": "agent-summary" }
+  ]
+}
+
