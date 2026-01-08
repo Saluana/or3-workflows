@@ -60,6 +60,24 @@ interface ThemeColors {
 const themeColors = ref<ThemeColors>({} as ThemeColors);
 const searchQuery = ref('');
 
+// Filter sections based on search query
+const shouldShowSection = (colors: Record<string, string>): boolean => {
+    if (!searchQuery.value.trim()) return true;
+    const query = searchQuery.value.toLowerCase();
+    return Object.keys(colors).some(key => {
+        const label = formatLabel(key);
+        return label.toLowerCase().includes(query) || key.toLowerCase().includes(query);
+    });
+};
+
+// Format key into readable label
+function formatLabel(key: string): string {
+    return key
+        .replace(/^--or3-color-/, '')
+        .replace(/-/g, ' ')
+        .replace(/\b\w/g, l => l.toUpperCase());
+}
+
 // Get current CSS variable value
 function getCSSVariable(variable: string): string {
     return getComputedStyle(document.documentElement)
@@ -301,6 +319,22 @@ const infoColors = computed(() => {
         '--or3-color-info-subtle': themeColors.value['--or3-color-info-subtle'],
     };
 });
+
+// Check if any sections are visible after filtering
+const hasVisibleSections = computed(() => {
+    if (!searchQuery.value.trim()) return true;
+    return (
+        shouldShowSection(backgroundColors.value) ||
+        shouldShowSection(surfaceColors.value) ||
+        shouldShowSection(borderColors.value) ||
+        shouldShowSection(textColors.value) ||
+        shouldShowSection(accentColors.value) ||
+        shouldShowSection(successColors.value) ||
+        shouldShowSection(warningColors.value) ||
+        shouldShowSection(errorColors.value) ||
+        shouldShowSection(infoColors.value)
+    );
+});
 </script>
 
 <template>
@@ -397,6 +431,7 @@ const infoColors = computed(() => {
                 <div class="modal-content">
                     <div class="sections-container">
                         <ColorSection
+                            v-if="shouldShowSection(backgroundColors)"
                             title="Background Colors"
                             description="Main background colors for different surfaces"
                             :colors="backgroundColors"
@@ -404,6 +439,7 @@ const infoColors = computed(() => {
                         />
                         
                         <ColorSection
+                            v-if="shouldShowSection(surfaceColors)"
                             title="Surface Colors"
                             description="Glass effects and layered surfaces"
                             :colors="surfaceColors"
@@ -411,6 +447,7 @@ const infoColors = computed(() => {
                         />
                         
                         <ColorSection
+                            v-if="shouldShowSection(borderColors)"
                             title="Border Colors"
                             description="Borders, dividers, and separators"
                             :colors="borderColors"
@@ -418,6 +455,7 @@ const infoColors = computed(() => {
                         />
                         
                         <ColorSection
+                            v-if="shouldShowSection(textColors)"
                             title="Text Colors"
                             description="Typography colors for different text hierarchies"
                             :colors="textColors"
@@ -425,6 +463,7 @@ const infoColors = computed(() => {
                         />
                         
                         <ColorSection
+                            v-if="shouldShowSection(accentColors)"
                             title="Accent Colors"
                             description="Primary brand colors and interactive elements"
                             :colors="accentColors"
@@ -432,6 +471,7 @@ const infoColors = computed(() => {
                         />
                         
                         <ColorSection
+                            v-if="shouldShowSection(successColors)"
                             title="Success Colors"
                             description="Positive states, confirmations, and completions"
                             :colors="successColors"
@@ -440,6 +480,7 @@ const infoColors = computed(() => {
                         />
                         
                         <ColorSection
+                            v-if="shouldShowSection(warningColors)"
                             title="Warning Colors"
                             description="Cautions, alerts, and important notices"
                             :colors="warningColors"
@@ -448,6 +489,7 @@ const infoColors = computed(() => {
                         />
                         
                         <ColorSection
+                            v-if="shouldShowSection(errorColors)"
                             title="Error Colors"
                             description="Errors, failures, and destructive actions"
                             :colors="errorColors"
@@ -456,12 +498,21 @@ const infoColors = computed(() => {
                         />
                         
                         <ColorSection
+                            v-if="shouldShowSection(infoColors)"
                             title="Info Colors"
                             description="Informational states and neutral alerts"
                             :colors="infoColors"
                             @update:color="updateColor"
                             :expanded="false"
                         />
+                        
+                        <div v-if="searchQuery.trim() && !hasVisibleSections" class="no-results">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <path d="m21 21-4.35-4.35"></path>
+                            </svg>
+                            <p>No colors match "{{ searchQuery }}"</p>
+                        </div>
                     </div>
                 </div>
 
@@ -637,6 +688,28 @@ const infoColors = computed(() => {
     display: flex;
     flex-direction: column;
     gap: var(--or3-spacing-lg, 16px);
+}
+
+.no-results {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--or3-spacing-3xl, 48px) var(--or3-spacing-xl, 24px);
+    text-align: center;
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.5));
+}
+
+.no-results svg {
+    width: 48px;
+    height: 48px;
+    margin-bottom: var(--or3-spacing-lg, 16px);
+    opacity: 0.5;
+}
+
+.no-results p {
+    margin: 0;
+    font-size: var(--or3-text-sm, 12px);
 }
 
 .modal-footer {
