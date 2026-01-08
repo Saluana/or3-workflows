@@ -145,11 +145,13 @@ function formatLabel(key: string): string {
 .expand-leave-to {
     opacity: 0;
     max-height: 0;
+    padding-top: 0;
 }
 
 .expand-enter-to,
 .expand-leave-from {
     opacity: 1;
-    max-height: 2000px;
+    /* Using a large max-height for animation - content should not exceed 1500px */
+    max-height: 1500px;
 }
 </style>

@@ -164,6 +164,7 @@ function updateColor(key: string, value: string) {
 
 // Reset to defaults
 function resetToDefaults() {
+    // Using browser confirm for now - consider custom modal in future
     if (
         confirm(
             'Are you sure you want to reset all colors to their default values? This cannot be undone.'
@@ -206,11 +207,39 @@ function importTheme(event: Event) {
     reader.onload = (e) => {
         try {
             const data = JSON.parse(e.target?.result as string);
-            if (data.colors) {
-                themeColors.value = data.colors;
+            
+            // Validate structure
+            if (!data.colors || typeof data.colors !== 'object') {
+                alert('Invalid theme file: Missing or invalid "colors" property. Expected a JSON object with a "colors" key containing color definitions.');
+                return;
             }
+            
+            // Validate that imported colors match expected keys
+            const validKeys = Object.keys(themeColors.value);
+            const importedKeys = Object.keys(data.colors);
+            const invalidKeys = importedKeys.filter(key => !validKeys.includes(key));
+            
+            if (invalidKeys.length > 0) {
+                console.warn('Theme file contains unrecognized color keys:', invalidKeys);
+            }
+            
+            // Filter to only valid keys and apply
+            const validColors: Partial<ThemeColors> = {};
+            importedKeys.forEach(key => {
+                if (validKeys.includes(key) && typeof data.colors[key] === 'string') {
+                    validColors[key as keyof ThemeColors] = data.colors[key];
+                }
+            });
+            
+            if (Object.keys(validColors).length === 0) {
+                alert('Invalid theme file: No valid color definitions found. Theme file should contain CSS color values for or3 theme tokens.');
+                return;
+            }
+            
+            themeColors.value = { ...themeColors.value, ...validColors };
         } catch (error) {
-            alert('Failed to import theme. Please check the file format.');
+            const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+            alert(`Failed to import theme: ${errorMsg}\n\nExpected JSON format:\n{\n  "colors": {\n    "--or3-color-accent": "#8b5cf6",\n    ...\n  }\n}`);
         }
     };
     reader.readAsText(file);
@@ -762,12 +791,13 @@ const hasVisibleSections = computed(() => {
 }
 
 .btn-primary {
-    background: var(--or3-gradient-accent, linear-gradient(135deg, #8b5cf6, #a78bfa));
+    background: var(--or3-color-accent, #8b5cf6);
     color: white;
     box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
 }
 
 .btn-primary:hover {
+    background: var(--or3-color-accent-hover, #a78bfa);
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4);
 }
