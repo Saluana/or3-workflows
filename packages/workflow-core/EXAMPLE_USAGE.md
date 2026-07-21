@@ -5,8 +5,8 @@ This document demonstrates the new simplified callback integration using `create
 ## Before (Verbose)
 
 ```typescript
-import { OpenRouterExecutionAdapter } from '@or3/workflow-core';
-import type { WorkflowData, ExecutionCallbacks } from '@or3/workflow-core';
+import { OpenRouterExecutionAdapter } from 'or3-workflow-core';
+import type { WorkflowData, ExecutionCallbacks } from 'or3-workflow-core';
 
 // Your accumulator class
 class StreamAccumulator {
@@ -46,8 +46,8 @@ const result = await adapter.execute(workflow, input, callbacks);
 ## After (Clean)
 
 ```typescript
-import { OpenRouterExecutionAdapter, createAccumulatorCallbacks } from '@or3/workflow-core';
-import type { WorkflowData } from '@or3/workflow-core';
+import { OpenRouterExecutionAdapter, createAccumulatorCallbacks } from 'or3-workflow-core';
+import type { WorkflowData } from 'or3-workflow-core';
 
 // Your accumulator class (same as before)
 class StreamAccumulator {

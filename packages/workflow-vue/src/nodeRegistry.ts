@@ -114,11 +114,11 @@ export function createNodeRegistry(): NodeComponentRegistry {
 
 /**
  * Default global node registry.
- * Pre-populated with built-in node components when imported from @or3/workflow-vue.
+ * Pre-populated with built-in node components when imported from or3-workflow-vue.
  *
  * @example
  * ```ts
- * import { defaultNodeRegistry } from '@or3/workflow-vue';
+ * import { defaultNodeRegistry } from 'or3-workflow-vue';
  *
  * // Register a custom node
  * defaultNodeRegistry.register('myNode', MyNodeComponent);
@@ -128,7 +128,7 @@ export const defaultNodeRegistry = createNodeRegistry();
 
 /**
  * Register built-in node components with the default registry.
- * Called automatically when importing from @or3/workflow-vue.
+ * Called automatically when importing from or3-workflow-vue.
  *
  * @internal
  */

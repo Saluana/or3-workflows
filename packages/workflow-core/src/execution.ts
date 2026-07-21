@@ -304,7 +304,7 @@ export function registerExtension(extension: NodeExtension): void {
  * @example
  * ```typescript
  * import OpenRouter from '@openrouter/sdk';
- * import { OpenRouterExecutionAdapter } from '@or3/workflow-core';
+ * import { OpenRouterExecutionAdapter } from 'or3-workflow-core';
  *
  * const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
  * const adapter = new OpenRouterExecutionAdapter(client, {
@@ -646,7 +646,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
                 const results = await Promise.all(readyNodes.map(executeNode));
 
-                // Process results
+                // Process results in readyNodes order (deterministic)
                 for (const { nodeId, result } of results) {
                     // Store output
                     nodeOutputs[nodeId] = result.output;
@@ -654,6 +654,16 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     finalNodeId = nodeId;
                     executionOrder.push(nodeId);
                     lastActiveNodeId = nodeId;
+
+                    // Append agent outputs to session in deterministic wave order
+                    // (avoids race when multiple agents ran concurrently)
+                    const waveNode = graph.nodeMap.get(nodeId);
+                    if (waveNode?.type === 'agent') {
+                        context.session.addMessage({
+                            role: 'assistant',
+                            content: result.output,
+                        });
+                    }
 
                     // Handle skipped nodes (children not in nextNodes) - except while loops which manage their own control flow
                     const currentNode = graph.nodeMap.get(nodeId);
@@ -777,11 +787,13 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
     /**
      * Stop the current execution.
+     * Aborts the shared AbortController but keeps it so traversal guards
+     * (`this.abortController?.signal.aborted`) keep seeing the aborted state
+     * until the next `execute()` creates a fresh controller.
      */
     stop(): void {
         if (this.abortController) {
             this.abortController.abort();
-            this.abortController = null;
         }
         this.running = false;
         // Clear token usage events to prevent memory buildup
@@ -936,8 +948,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         }
 
         // Construct ExecutionContext for extension
+        // Resolve input from parent outputs (not shared mutable currentInput)
+        // so concurrent DAG waves don't race on a single field.
         const executionContext: ExecutionContext = {
-            input: context.currentInput,
+            input: this.resolveNodeInput(nodeId, context, graph),
             history: historyMessages,
             memory: this.memory,
             attachments: context.attachments,
@@ -1222,23 +1236,49 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         if (!context.nodeChain.includes(nodeId)) {
             context.nodeChain.push(nodeId);
         }
+        // Keep currentInput as a fallback for nodes with no parents (e.g. start
+        // children). Downstream nodes prefer parent outputs via resolveNodeInput.
         context.currentInput = result.output;
 
-        // Add assistant message for certain node types?
-        // AgentNode logic was: "context.session.addMessage({ role: 'assistant', content: output });"
-        // Should we move this to extension or keep it here?
-        // Ideally extension manages history?
-        // But `session` is internal.
-        // If `node.type === 'agent'`, add message?
-        if (node.type === 'agent') {
-            context.session.addMessage({
-                role: 'assistant',
-                content: result.output,
-            });
-        }
+        // Defer session history updates to the wave processor so concurrent
+        // agent nodes in the same ready-wave don't interleave message order.
+        // (See processWaveResults in execute().)
 
         callbacks.onNodeFinish(nodeId, result.output, meta);
         return { output: result.output, nextNodes: result.nextNodes };
+    }
+
+    /**
+     * Resolve a node's input from its parents' outputs.
+     * Falls back to shared currentInput when the node has no executed parents
+     * (start node / resume edge cases).
+     */
+    private resolveNodeInput(
+        nodeId: string,
+        context: InternalExecutionContext,
+        graph: WorkflowGraph
+    ): string {
+        const parentIds = graph.parents[nodeId];
+        if (!parentIds || parentIds.length === 0) {
+            return context.currentInput;
+        }
+
+        const parentOutputs: string[] = [];
+        for (const parentId of parentIds) {
+            const output = context.outputs[parentId];
+            if (typeof output === 'string') {
+                parentOutputs.push(output);
+            }
+        }
+
+        if (parentOutputs.length === 0) {
+            return context.currentInput;
+        }
+        if (parentOutputs.length === 1) {
+            return parentOutputs[0]!;
+        }
+        // Deterministic join for multi-parent merges (diamond DAGs)
+        return parentOutputs.join('\n\n');
     }
     private getTokenUsageSummary(): TokenUsage | undefined {
         if (this.tokenUsageEvents.length === 0) {

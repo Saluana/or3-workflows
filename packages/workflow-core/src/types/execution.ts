@@ -152,11 +152,18 @@ export type ChatMessageContent = string | ChatMessageContentPart[];
 
 /**
  * Chat message for conversation history.
- * Supports both simple string content and multimodal content arrays.
+ * Supports multimodal content and the OpenAI/OpenRouter tool-calling protocol
+ * (`assistant` + `tool_calls`, then `tool` results with matching `tool_call_id`).
  */
 export interface ChatMessage {
-    role: 'system' | 'user' | 'assistant';
+    role: 'system' | 'user' | 'assistant' | 'tool';
     content: ChatMessageContent;
+    /** Present on assistant turns that requested tool calls */
+    tool_calls?: ToolCallResult[];
+    /** Required on `role: 'tool'` messages — must match a prior tool_calls[].id */
+    tool_call_id?: string;
+    /** Optional tool name (helpful for some providers) */
+    name?: string;
 }
 
 /**

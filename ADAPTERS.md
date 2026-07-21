@@ -51,7 +51,7 @@ interface MemoryAdapter {
 import {
     OpenRouterExecutionAdapter,
     InMemoryAdapter,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 // Default in-memory adapter
 const adapter = new OpenRouterExecutionAdapter(client, {
@@ -72,7 +72,7 @@ import type {
     MemoryAdapter,
     MemoryEntry,
     MemoryQuery,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 export class RedisMemoryAdapter implements MemoryAdapter {
     private redis: Redis;
@@ -205,7 +205,7 @@ import type {
     MemoryAdapter,
     MemoryEntry,
     MemoryQuery,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 export class PostgresMemoryAdapter implements MemoryAdapter {
     private pool: Pool;
@@ -302,7 +302,7 @@ import type {
     MemoryAdapter,
     MemoryEntry,
     MemoryQuery,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 export class PineconeMemoryAdapter implements MemoryAdapter {
     private pinecone: Pinecone;
@@ -426,7 +426,7 @@ interface WorkflowSummary {
 ### Usage
 
 ```typescript
-import { LocalStorageAdapter } from '@or3/workflow-core';
+import { LocalStorageAdapter } from 'or3-workflow-core';
 
 const storage = new LocalStorageAdapter('my-app-workflows');
 
@@ -465,7 +465,7 @@ interface TokenCounter {
 ### Default Implementation
 
 ```typescript
-import { ApproximateTokenCounter } from '@or3/workflow-core';
+import { ApproximateTokenCounter } from 'or3-workflow-core';
 
 // Uses ~4 chars per token approximation
 const counter = new ApproximateTokenCounter();
@@ -480,7 +480,7 @@ For more accurate counting, implement your own using tiktoken or similar:
 
 ```typescript
 import { encoding_for_model } from 'tiktoken';
-import type { TokenCounter } from '@or3/workflow-core';
+import type { TokenCounter } from 'or3-workflow-core';
 
 export class TiktokenCounter implements TokenCounter {
     private encoders = new Map<string, ReturnType<typeof encoding_for_model>>();
@@ -519,7 +519,7 @@ export class TiktokenCounter implements TokenCounter {
 ### Usage with Execution
 
 ```typescript
-import { OpenRouterExecutionAdapter } from '@or3/workflow-core';
+import { OpenRouterExecutionAdapter } from 'or3-workflow-core';
 
 const adapter = new OpenRouterExecutionAdapter(client, {
     tokenCounter: new TiktokenCounter(),

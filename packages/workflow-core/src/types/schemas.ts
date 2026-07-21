@@ -84,6 +84,7 @@ const ParallelNodeDataSchema = BaseNodeDataSchema.extend({
         .array(BranchDefinitionSchema)
         .min(1, 'Parallel requires at least one branch'),
     mergeEnabled: z.boolean().optional(),
+    branchTimeout: z.number().positive().optional(),
 });
 
 const WhileLoopNodeDataSchema = BaseNodeDataSchema.extend({
@@ -107,12 +108,26 @@ const WhileLoopNodeDataSchema = BaseNodeDataSchema.extend({
 const SubflowNodeDataSchema = BaseNodeDataSchema.extend({
     subflowId: z.string().min(1, 'Subflow node requires a subflowId'),
     inputMappings: z.record(z.string(), z.string()).optional(),
+    /** @deprecated Use shareSession — kept for backwards-compatible parsing */
     preserveContext: z.boolean().optional(),
+    shareSession: z.boolean().optional(),
 });
 
 const OutputNodeDataSchema = BaseNodeDataSchema.extend({
     template: z.string().optional(),
     format: z.enum(['text', 'json', 'markdown']).optional(),
+    mode: z.enum(['combine', 'synthesis']).optional(),
+    sources: z.array(z.string()).optional(),
+    synthesis: z
+        .object({
+            model: z.string().optional(),
+            prompt: z.string().optional(),
+        })
+        .optional(),
+    introText: z.string().optional(),
+    outroText: z.string().optional(),
+    useRawTemplate: z.boolean().optional(),
+    includeMetadata: z.boolean().optional(),
 });
 
 /**
@@ -238,8 +253,10 @@ export const WorkflowEdgeSchema = z.object({
     target: z.string(),
     sourceHandle: z.string().optional(),
     targetHandle: z.string().optional(),
+    type: z.string().optional(),
     label: z.string().optional(),
     data: z.record(z.string(), z.any()).optional(),
+    selected: z.boolean().optional(),
 });
 
 export const WorkflowDataSchema = z.object({

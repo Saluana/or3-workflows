@@ -25,6 +25,7 @@ Building AI applications often requires orchestrating multiple LLM calls in sequ
 
 ## Documentation
 
+-   [AUDIT.md](./AUDIT.md) - July 2026 full audit, bugs fixed, modernization roadmap
 -   [EXTENSIONS.md](./EXTENSIONS.md) - Creating custom extensions, StarterKit configuration
 -   [ADAPTERS.md](./ADAPTERS.md) - Memory, storage, and token counter adapters
 

@@ -7,7 +7,7 @@
  *
  * @example Basic usage
  * ```typescript
- * import { WorkflowEditor, StarterKit } from '@or3/workflow-core';
+ * import { WorkflowEditor, StarterKit } from 'or3-workflow-core';
  *
  * const editor = new WorkflowEditor({
  *   extensions: StarterKit.configure(),
@@ -159,7 +159,7 @@ const DEFAULT_STARTER_KIT_OPTIONS: Required<StarterKitOptions> = {
  *
  * @example
  * ```typescript
- * import { WorkflowEditor, StarterKit } from '@or3/workflow-core';
+ * import { WorkflowEditor, StarterKit } from 'or3-workflow-core';
  *
  * // Basic usage - includes all nodes
  * const editor = new WorkflowEditor({

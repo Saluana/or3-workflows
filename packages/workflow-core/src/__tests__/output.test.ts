@@ -155,14 +155,36 @@ describe('interpolateTemplate', () => {
         expect(result).toBe('Summary: First and Second');
     });
 
-    it('should leave unmatched references as-is', () => {
-        const template = 'Result: {{missingNode}}';
-        const outputs = {};
+        it('should leave unmatched references as-is', () => {
+            const template = 'Result: {{missingNode}}';
+            const outputs = {};
 
-        const result = interpolateTemplate(template, outputs);
+            const result = interpolateTemplate(template, outputs);
 
-        expect(result).toBe('Result: {{missingNode}}');
-    });
+            expect(result).toBe('Result: {{missingNode}}');
+        });
+
+        it('should interpolate UUID-style node IDs with hyphens', () => {
+            const uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+            const template = `Result: {{${uuid}}}`;
+            const outputs = { [uuid]: 'From UUID node' };
+
+            expect(interpolateTemplate(template, outputs)).toBe(
+                'Result: From UUID node'
+            );
+        });
+
+        it('should interpolate composite parallel branch keys', () => {
+            const template = 'A: {{parallel-1:branch-a}} B: {{parallel-1:branch-b}}';
+            const outputs = {
+                'parallel-1:branch-a': 'Alpha',
+                'parallel-1:branch-b': 'Beta',
+            };
+
+            expect(interpolateTemplate(template, outputs)).toBe(
+                'A: Alpha B: Beta'
+            );
+        });
 
     it('should handle mixed static and dynamic content', () => {
         const template = 'Hello {{name}}, your score is {{score}}!';

@@ -1,31 +1,38 @@
-import { ref, readonly } from 'vue';
+import { ref, readonly, inject, provide, type InjectionKey, type Ref } from 'vue';
 
-// Global cache for the current session
-// Note: In a multi-instance scenario, this should be provided via dependency injection
-const cache = ref<Map<string, string>>(new Map());
+type ExecutionCache = Map<string, string>;
+
+const EXECUTION_CACHE_KEY: InjectionKey<Ref<ExecutionCache>> =
+    Symbol('or3-execution-cache');
+
+/**
+ * Create an isolated execution output cache and provide it to descendants.
+ * Call once near the editor root so multiple editor instances don't share state.
+ */
+export function createExecutionCache() {
+    const cache = ref<ExecutionCache>(new Map());
+    provide(EXECUTION_CACHE_KEY, cache);
+    return useExecutionCacheFrom(cache);
+}
 
 /**
  * Composable to manage execution output cache.
  * Used for live preview in the Output Node inspector.
+ *
+ * Prefer calling `createExecutionCache()` at the editor root. Falls back to a
+ * module-level cache only when no provider is present (backwards compatible).
  */
-export function useExecutionCache() {
-    /**
-     * Store an output for a node.
-     */
+const fallbackCache = ref<ExecutionCache>(new Map());
+
+function useExecutionCacheFrom(cache: Ref<ExecutionCache>) {
     const setOutput = (nodeId: string, output: string) => {
         cache.value.set(nodeId, output);
     };
 
-    /**
-     * Get cached output for a node.
-     */
     const getOutput = (nodeId: string) => {
         return cache.value.get(nodeId);
     };
 
-    /**
-     * Clear the entire cache.
-     */
     const clear = () => {
         cache.value.clear();
     };
@@ -36,4 +43,9 @@ export function useExecutionCache() {
         getOutput,
         clear,
     };
+}
+
+export function useExecutionCache() {
+    const cache = inject(EXECUTION_CACHE_KEY, fallbackCache);
+    return useExecutionCacheFrom(cache);
 }

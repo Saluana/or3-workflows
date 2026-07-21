@@ -88,11 +88,14 @@ export function isOutputNodeData(data: unknown): data is OutputNodeData {
  * // => 'Summary: Brief summary | Analysis: Key insights'
  * ```
  */
+/** Matches {{nodeId}} placeholders — allows UUIDs and composite keys (hyphens, colons, dots). */
+const TEMPLATE_PLACEHOLDER_RE = /\{\{([\w.:-]+)\}\}/g;
+
 export function interpolateTemplate(
     template: string,
     outputs: Record<string, string>
 ): string {
-    return template.replace(/\{\{(\w+)\}\}/g, (match, nodeId) => {
+    return template.replace(TEMPLATE_PLACEHOLDER_RE, (match, nodeId) => {
         return outputs[nodeId] ?? match;
     });
 }
@@ -474,7 +477,8 @@ export const OutputNodeExtension: NodeExtension = {
 
         // Validate template if provided and in raw mode
         if (data.useRawTemplate && data.template) {
-            const placeholders = data.template.match(/\{\{(\w+)\}\}/g) || [];
+            const placeholders =
+                data.template.match(/\{\{([\w.:-]+)\}\}/g) || [];
             if (placeholders.length === 0) {
                 errors.push({
                     type: 'warning',
@@ -505,6 +509,6 @@ export const OutputNodeExtension: NodeExtension = {
  * @returns Array of node IDs referenced in the template
  */
 export function extractTemplatePlaceholders(template: string): string[] {
-    const matches = template.match(/\{\{(\w+)\}\}/g) || [];
+    const matches = template.match(/\{\{([\w.:-]+)\}\}/g) || [];
     return matches.map((m) => m.slice(2, -2));
 }

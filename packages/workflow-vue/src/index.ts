@@ -16,6 +16,10 @@ export {
     type UseExecutionStateReturn,
 } from './composables/useExecutionState';
 export { useNodeState } from './composables/useNodeState';
+export {
+    useExecutionCache,
+    createExecutionCache,
+} from './composables/useExecutionCache';
 
 // Node Component Registry
 export {
@@ -71,4 +75,4 @@ export {
 // Re-export vue-flow types for convenience
 export type { Edge, Node, Connection } from '@vue-flow/core';
 
-// CSS - import in your app: import '@or3/workflow-vue/style.css'
+// CSS - import in your app: import 'or3-workflow-vue/style.css'

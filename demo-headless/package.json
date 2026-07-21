@@ -8,6 +8,6 @@
     },
     "dependencies": {
         "or3-workflow-core": "workspace:*",
-        "@openrouter/sdk": "^0.1.0"
+        "@openrouter/sdk": "^0.3.11"
     }
 }

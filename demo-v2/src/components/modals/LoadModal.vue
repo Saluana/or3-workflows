@@ -79,7 +79,11 @@ const emit = defineEmits<{
                             <button
                                 class="btn btn-icon"
                                 title="Delete workflow"
-                                @click.stop="emit('delete', workflow.id)"
+                                @click.stop="
+                                    confirm(
+                                        `Delete \"${workflow.name}\"? This cannot be undone.`
+                                    ) && emit('delete', workflow.id)
+                                "
                             >
                                 <svg
                                     xmlns="http://www.w3.org/2000/svg"

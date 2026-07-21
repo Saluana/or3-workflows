@@ -81,21 +81,33 @@ async function runToolLoop(
             break;
         }
 
+        const normalizedToolCalls = result.toolCalls.map((toolCall, index) => ({
+            ...toolCall,
+            id:
+                toolCall.id ||
+                `${toolCall.function?.name || 'tool'}-${Date.now()}-${index}`,
+            type: 'function' as const,
+            function: {
+                name: toolCall.function?.name || 'unknown_tool',
+                arguments:
+                    typeof toolCall.function?.arguments === 'string'
+                        ? toolCall.function.arguments
+                        : JSON.stringify(toolCall.function?.arguments ?? {}),
+            },
+        }));
+
         // Add assistant message with tool calls
         currentMessages.push({
             role: 'assistant',
-            content: result.content || '',
+            content: result.content || '[Calling tools...]',
+            tool_calls: normalizedToolCalls,
         });
 
         // Execute tool calls
-        for (const toolCall of result.toolCalls) {
-            const toolName = toolCall.function?.name || 'unknown_tool';
-            const toolArgs = toolCall.function?.arguments;
-            const toolCallId =
-                toolCall.id ||
-                `${toolName}-${Date.now()}-${Math.random()
-                    .toString(36)
-                    .slice(2, 8)}`;
+        for (const toolCall of normalizedToolCalls) {
+            const toolName = toolCall.function.name;
+            const toolArgs = toolCall.function.arguments;
+            const toolCallId = toolCall.id;
 
             let parsedArgs: unknown;
             try {
@@ -141,8 +153,10 @@ async function runToolLoop(
             }
 
             currentMessages.push({
-                role: 'system',
-                content: `[Tool Result: ${toolName}]\n${toolResult}`,
+                role: 'tool',
+                content: toolResult,
+                tool_call_id: toolCallId,
+                name: toolName,
             });
 
             context.onToolCallEvent?.({

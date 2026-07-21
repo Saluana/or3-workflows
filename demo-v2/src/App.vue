@@ -72,7 +72,7 @@ const {
     load,
 } = useWorkflowStorage();
 
-const { execute: executeWorkflowFn } = useDemoExecution();
+const { execute: executeWorkflowFn, stop: stopExecution } = useDemoExecution();
 
 // Edge editing
 const selectedEdge = ref<Edge | null>(null);
@@ -607,16 +607,6 @@ async function handleSendMessage() {
                     thinkingContent.value += token;
                 },
                 onHITLRequest: handleHITLRequest,
-                onRouteSelected: (nodeId, routeId) => {
-                    console.log(
-                        `[Router] Node ${nodeId} selected route: ${routeId}`
-                    );
-                },
-                onContextCompacted: (result) => {
-                    console.log(
-                        `[Compaction] Reduced from ${result.tokensBefore} to ${result.tokensAfter} tokens`
-                    );
-                },
                 onTokenUsage: (nodeId, usage) => {
                     tokenUsage.value = { nodeId, usage };
                 },
@@ -634,12 +624,6 @@ async function handleSendMessage() {
                 },
                 // Branch streaming callbacks
                 onBranchStart: (nodeId, branchId, branchLabel) => {
-                    console.log(
-                        `[BranchStart] BEFORE - nodeId=${nodeId}, branchId=${branchId}, currentKeys=${
-                            Object.keys(branchStreams.value).join(', ') ||
-                            'none'
-                        }`
-                    );
 
                     // Increment execution counter for this node to get a unique instance ID
                     // This ensures each loop iteration gets unique keys
@@ -665,9 +649,6 @@ async function handleSendMessage() {
 
                     const execInstance = parallelExecutionCounter.value[nodeId];
                     const key = `${nodeId}-${execInstance}-${branchId}`;
-                    console.log(
-                        `[BranchStart] AFTER - key=${key}, execInstance=${execInstance}, isMergeBranch=${branchId === MERGE_BRANCH_ID}`
-                    );
                     branchStreams.value = {
                         ...branchStreams.value,
                         [key]: {
@@ -693,12 +674,6 @@ async function handleSendMessage() {
                         // Direct mutation is fine for Vue 3 refs
                         branchStreams.value[key].isThinking = false;
                         branchStreams.value[key].content += token;
-                    } else {
-                        console.warn(
-                            `[BranchToken] No matching branch found for nodeId=${nodeId}, branchId=${branchId}, keys=${Object.keys(
-                                branchStreams.value
-                            ).join(', ')}`
-                        );
                     }
                 },
                 onBranchReasoning: (nodeId, branchId, _branchLabel, token) => {
@@ -720,27 +695,17 @@ async function handleSendMessage() {
                             branchStreams.value[k].nodeId === nodeId &&
                             branchStreams.value[k].branchId === branchId
                     );
-                    console.log(
-                        `[BranchComplete] nodeId=${nodeId}, branchId=${branchId}, key=${key}, hasContent=${!!output}, isMergeBranch=${branchId === MERGE_BRANCH_ID}`
-                    );
                     if (key && branchStreams.value[key]) {
                         branchStreams.value[key].content = output;
                         branchStreams.value[key].status = 'completed';
                         branchStreams.value[key].isThinking = false;
                         branchStreams.value[key].thinkingContent = '';
-                    } else {
-                        console.warn(
-                            `[BranchComplete] No matching branch found!`
-                        );
                     }
 
                     // Handle merge branch completion separately
                     if (branchId === MERGE_BRANCH_ID) {
                         // Merge branch completes after regular branches
                         // Just clear the merge branch from streams
-                        console.log(
-                            `[BranchComplete] Clearing merge branch for nodeId=${nodeId}`
-                        );
                         branchStreams.value = Object.fromEntries(
                             Object.entries(branchStreams.value).filter(
                                 ([, v]) => !(v.nodeId === nodeId && v.branchId === MERGE_BRANCH_ID)
@@ -762,9 +727,6 @@ async function handleSendMessage() {
                             (b) =>
                                 b.status === 'completed' || b.status === 'error'
                         );
-                    console.log(
-                        `[BranchComplete] nodeBranches=${nodeBranches.length}, allCompleted=${allCompleted}`
-                    );
 
                     // Only create a message when all regular branches complete
                     if (allCompleted) {
@@ -783,10 +745,6 @@ async function handleSendMessage() {
                             })),
                         };
                         messages.value.push(branchesMessage);
-                        console.log(
-                            '[Branches] Added branches message to chat:',
-                            branchesMessage
-                        );
 
                         // Clear only the regular branches, not merge branches
                         // Merge branches will be cleared when they complete
@@ -797,21 +755,10 @@ async function handleSendMessage() {
                                     branchStreams.value[k].branchId !== MERGE_BRANCH_ID
                             )
                         );
-                        console.log(
-                            `[Branches] Deleting regular branch keys: ${Array.from(keysToDeleteSet).join(
-                                ', '
-                            )}`
-                        );
                         branchStreams.value = Object.fromEntries(
                             Object.entries(branchStreams.value).filter(
                                 ([k]) => !keysToDeleteSet.has(k)
                             )
-                        );
-                        console.log(
-                            `[Branches] Remaining keys after regular branch cleanup: ${
-                                Object.keys(branchStreams.value).join(', ') ||
-                                'none'
-                            }`
                         );
                     }
                 },
@@ -1002,6 +949,7 @@ function syncMetaToEditor() {
                 :token-usage="tokenUsage"
                 :branch-streams="branchStreams"
                 @send="handleSendMessage"
+                @stop="stopExecution"
                 @clear="clearMessages"
                 @toggle-branch="toggleBranchExpanded"
                 @toggle-message-branch="toggleMessageBranch"

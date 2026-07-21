@@ -49,7 +49,23 @@ export class ExecutionSession implements Session {
   get tokenCount(): number {
     // Approximate: 4 chars ≈ 1 token
     return Math.ceil(
-      this.messages.reduce((sum, m) => sum + m.content.length, 0) / 4
+      this.messages.reduce((sum, m) => sum + contentLength(m.content), 0) / 4
     );
   }
+}
+
+function contentLength(content: ChatMessage['content']): number {
+  if (typeof content === 'string') {
+    return content.length;
+  }
+  if (!Array.isArray(content)) {
+    return 0;
+  }
+  return content.reduce((sum, part) => {
+    if (part.type === 'text') {
+      return sum + part.text.length;
+    }
+    // Rough estimate for multimodal parts
+    return sum + 100;
+  }, 0);
 }

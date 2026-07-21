@@ -90,23 +90,37 @@ async function runToolLoop(
             break;
         }
 
+        // Normalize tool calls so every entry has a stable id (required by
+        // OpenAI/OpenRouter protocol and must match later role:'tool' messages)
+        const normalizedToolCalls = result.toolCalls.map((toolCall, index) => ({
+            ...toolCall,
+            id:
+                toolCall.id ||
+                `${toolCall.function?.name || 'tool'}-${Date.now()}-${index}`,
+            type: 'function' as const,
+            function: {
+                name: toolCall.function?.name || 'unknown_tool',
+                arguments:
+                    typeof toolCall.function?.arguments === 'string'
+                        ? toolCall.function.arguments
+                        : JSON.stringify(toolCall.function?.arguments ?? {}),
+            },
+        }));
+
         // Add assistant message with tool calls to conversation
         // Some providers (e.g., Moonshot AI) require non-empty content even with tool_calls
         const assistantContent = result.content || '[Calling tools...]';
         currentMessages.push({
             role: 'assistant' as const,
             content: assistantContent,
+            tool_calls: normalizedToolCalls,
         });
 
         // Execute each tool call
-        for (const toolCall of result.toolCalls) {
-            const toolName = toolCall.function?.name || 'unknown_tool';
-            const toolArgs = toolCall.function?.arguments;
-            const toolCallId =
-                toolCall.id ||
-                `${toolName}-${Date.now()}-${Math.random()
-                    .toString(36)
-                    .slice(2, 8)}`;
+        for (const toolCall of normalizedToolCalls) {
+            const toolName = toolCall.function.name;
+            const toolArgs = toolCall.function.arguments;
+            const toolCallId = toolCall.id;
 
             let parsedArgs: unknown;
             try {
@@ -151,10 +165,12 @@ async function runToolLoop(
                 toolResult = toolError;
             }
 
-            // Add tool result to conversation
+            // OpenAI/OpenRouter protocol: tool results use role 'tool' + tool_call_id
             currentMessages.push({
-                role: 'system' as const,
-                content: `[Tool Result: ${toolName}]\n${toolResult}`,
+                role: 'tool' as const,
+                content: toolResult,
+                tool_call_id: toolCallId,
+                name: toolName,
             });
 
             context.onToolCallEvent?.({

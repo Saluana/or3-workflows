@@ -36,7 +36,7 @@
     "license": "MIT",
     "repository": {
         "type": "git",
-        "url": "https://github.com/or3/or3-workflows"
+        "url": "https://github.com/Saluana/or3-workflows"
     },
     "dependencies": {
         "@openrouter/sdk": "^0.3.11",
