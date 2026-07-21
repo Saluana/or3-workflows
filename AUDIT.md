@@ -17,13 +17,13 @@ Full audit of the monorepo by parallel agents covering `workflow-core`, `workflo
 | C5 | Output `{{nodeId}}` regex `\w+` never matched UUID node IDs | **Fixed** (`[\w.:-]+`) |
 | C6 | `stop()` nulled AbortController so loop guards stopped seeing abort | **Fixed:** keep aborted controller until next execute |
 
-## High-priority follow-ups (not all fixed here)
+## High-priority follow-ups
 
-- **H1–H3:** Forward `AbortSignal` to Router/WhileLoop/Parallel/compaction; inherit into subflows; abort timed-out parallel branches
-- **H4:** Request real token usage (`stream_options.include_usage`) instead of char estimates
-- **H5–H6:** Schema drift remaining around `StrictNodeDataSchema` (`_nodeType` discriminator unused)
-- **H7:** HITL is in-process blocking only — `HITLAdapter` never wired; no durable checkpoint/resume
-- **H8:** Provider reaches into OpenRouter SDK private `_options` fields
+- **H1–H3:** Forward `AbortSignal` to Router/WhileLoop/Parallel/compaction; inherit into subflows; abort timed-out parallel branches — **Done**
+- **H4:** Request real token usage (`stream_options.include_usage`) instead of char estimates — Open
+- **H5–H6:** Schema drift remaining around `StrictNodeDataSchema` (`_nodeType` discriminator unused) — Open
+- **H7:** Durable checkpoint/resume + HITLAdapter wiring — **Done** (`CheckpointAdapter`, `durableHITL`)
+- **H8:** Provider reaches into OpenRouter SDK private `_options` fields — Open
 
 ## UI / UX (demo-v2 + workflow-vue)
 
@@ -44,55 +44,49 @@ Full audit of the monorepo by parallel agents covering `workflow-core`, `workflo
 | Package | Issue | Action |
 |---------|-------|--------|
 | `@openrouter/sdk` | demos on `0.1` vs core `0.3` → Zod 3/4 split | **Unified to `^0.3.11`** |
-| `vitest` | `1.x` (3 majors behind; pins Vite 5) | Upgrade to 4 (follow-up) |
-| `vite` | demo-v2 on 5, packages on 7; latest is 8 | Unify (follow-up) |
-| `@vueuse/core` | `10` vs latest `14` | Upgrade (follow-up) |
-| `vue-tsc` / `vite-plugin-dts` | 1 major behind | Upgrade (follow-up) |
+| `vitest` | was `1.x` | **Upgraded to `^4.1.10`** |
+| `vite` | was 5/7 mix | **Upgraded to `^8.1.5`** |
+| `@vueuse/core` | was `10` | **Upgraded to `^14`** |
+| `vite-plugin-dts` / `@vitejs/plugin-vue` | majors behind | **Upgraded to 5 / 6** |
 | Repo URL | packages pointed at `github.com/or3/...` | **Fixed → Saluana** |
 | Docs imports | `@or3/workflow-*` vs published `or3-workflow-*` | **Fixed** in EXTENSIONS/ADAPTERS/examples |
 | Tooling | No ESLint, Prettier, CI, changesets, Playwright | **CI added**; rest open |
 
 ## Modernization roadmap
 
-### Quick wins (done or nearly free)
-1. Critical engine correctness (C1–C6) — **done this PR**
-2. Unify OpenRouter SDK + docs package names + repo URL — **done**
-3. Stop button + theme tokens + delete confirm + drop debug logs — **done**
-4. GitHub Actions CI — **done**
-5. Upgrade Vitest 4 + Vite 8 + VueUse 14 together
+### Done
+1. Critical engine correctness (C1–C6)
+2. Unify OpenRouter SDK + docs package names + repo URL
+3. Stop button + theme tokens + delete confirm + drop debug logs
+4. GitHub Actions CI
+5. Vitest 4 + Vite 8 + VueUse 14
+6. AbortSignal everywhere (Router/WhileLoop/Parallel/compaction/subflows/timeouts)
+7. `CheckpointAdapter` + `durableHITL` suspend/resume
+8. `McpToolAdapter` / `mcpToolsToExecutable`
 
-### Medium (additive on existing seams)
-6. **`AiSdkLLMProvider`** wrapping Vercel AI SDK `streamText` → multi-provider (OpenAI/Anthropic/Google/Groq/Ollama) without rewriting the DAG engine
-7. Zod-typed tools + structured output node (`generateObject`)
-8. OpenTelemetry / Langfuse around existing `onNode*` / `onTokenUsage` callbacks
-9. Changesets + release workflow; size-limit budget for core
+### Still open
+9. **`AiSdkLLMProvider`** (Vercel AI SDK) → multi-provider
+10. Zod-typed tools + structured output node
+11. OpenTelemetry / Langfuse
+12. Changesets + size-limit; ESLint/Prettier
+13. Accessible modals; promote demo ChatPanel; split NodeInspector
+14. Editor↔execution extension bridge; complete Tool node
 
-### Strategic
-10. **`McpToolAdapter`** → register MCP server tools into `toolRegistry`
-11. **`CheckpointAdapter`** for durable HITL suspend/resume (LangGraph-style interrupt)
-12. Finish editor↔execution extension bridge; complete Tool node; decide fate of original fluent builder / `.stream()` generator in `planning/`
+## Top remaining by ROI
 
-## Top 10 remaining by ROI
+1. AI SDK provider adapter (biggest capability unlock)
+2. Accessible modal primitive + aria-live streaming
+3. Promote demo ChatPanel into the library
+4. Break up NodeInspector; schema-driven forms
+5. ESLint + Prettier + no-`any` on tool types
+6. Real usage tokens + optional tokenizer for compaction
 
-1. AbortSignal everywhere + subflow/timeout cancellation
-2. Vitest 4 + Vite 8 upgrade (kills duplicate Vite)
-3. AI SDK provider adapter (biggest capability unlock)
-4. Accessible modal primitive + aria-live streaming
-5. Promote demo ChatPanel into the library; delete orphaned one
-6. Break up NodeInspector; schema-driven forms
-7. Durable checkpointing / HITLAdapter wiring
-8. MCP tool adapter
-9. ESLint + Prettier + no-`any` on tool types
-10. Real usage tokens + optional tokenizer for compaction
+## Test coverage
 
-## Test coverage gaps (still open)
-
-- Diamond/parallel DAG determinism tests
-- WhileLoop / Parallel / Subflow *execution* tests
-- Cancellation aborts in-flight HTTP
-- Edge `type`/`selected` round-trip
-- Tool protocol assertion — **added** in agent-tool-iterations test
+- Tool protocol assertion — added
+- Durable HITL pause/resume + MCP adapter — added (`checkpoint-mcp.test.ts`)
+- Still open: diamond DAG determinism, WhileLoop/Parallel/Subflow execution, cancel-aborts-HTTP, edge round-trip
 
 ---
 
-*This document captures the July 2026 audit. Implementation in the accompanying PR addresses the critical correctness bugs and highest-ROI quick wins; remaining items are intentional follow-ups.*
+*July 2026 audit. Follow-up commits on this PR implement abort propagation, Vitest/Vite upgrades, durable HITL checkpointing, and MCP tool import.*
