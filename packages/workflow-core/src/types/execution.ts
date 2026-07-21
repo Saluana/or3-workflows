@@ -1,4 +1,5 @@
-import type { HITLCallback } from '../hitl';
+import type { HITLAdapter, HITLCallback, HITLRequest, HITLResponse } from '../hitl';
+import type { CheckpointAdapter } from '../checkpoint';
 import type { MemoryAdapter } from '../memory';
 import type { Session } from '../session';
 import type { SubflowRegistry } from '../subflow';
@@ -523,6 +524,18 @@ export interface ExecutionResult {
 
     /** Session messages captured during execution (for resume). */
     sessionMessages?: ChatMessage[];
+
+    /**
+     * True when execution paused for durable HITL (not a failure).
+     * Check `hitlRequest` / `checkpointId` to resume later.
+     */
+    paused?: boolean;
+
+    /** Checkpoint id when paused (or auto-saved). */
+    checkpointId?: string;
+
+    /** Pending HITL request when `paused` is true. */
+    hitlRequest?: HITLRequest;
 }
 
 /**
@@ -705,6 +718,39 @@ export interface ExecutionOptions {
     resumeFrom?: ResumeFromOptions;
 
     /**
+     * Persist execution snapshots for durable resume.
+     * When set, checkpoints are written on HITL pause (and after waves when
+     * `autoCheckpoint` is enabled).
+     */
+    checkpointAdapter?: CheckpointAdapter;
+
+    /**
+     * Persist pending HITL requests / responses across process restarts.
+     * Used with `durableHITL` and/or interactive `onHITLRequest`.
+     */
+    hitlAdapter?: HITLAdapter;
+
+    /**
+     * When true, HITL pauses return a paused ExecutionResult instead of
+     * blocking on `onHITLRequest`. Resume with `resumeFrom` +
+     * `pendingHITLResponse` (or a response stored in `hitlAdapter`).
+     */
+    durableHITL?: boolean;
+
+    /**
+     * Automatically save a running checkpoint after each DAG wave.
+     * Requires `checkpointAdapter`. Default: false.
+     */
+    autoCheckpoint?: boolean;
+
+    /**
+     * Parent abort signal for nested/subflow adapters.
+     * When aborted, the child adapter's controller aborts too.
+     * @internal
+     */
+    _parentSignal?: AbortSignal;
+
+    /**
      * Enable strict Zod validation of node.data (default: false).
      * When true, node data is validated against type-specific schemas.
      * Existing workflows with loosely-typed data may fail validation.
@@ -737,6 +783,10 @@ export interface ResumeFromOptions {
     resumeInput?: string;
     /** Final node id if known. */
     finalNodeId?: string;
+    /** Pending HITL request id when resuming a durable pause. */
+    pendingHITLRequestId?: string;
+    /** HITL response to apply on resume (skips waiting). */
+    pendingHITLResponse?: HITLResponse;
 }
 
 /** Context passed to node executors during execution */

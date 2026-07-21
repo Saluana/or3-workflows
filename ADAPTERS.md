@@ -7,6 +7,8 @@ or3-workflows uses pluggable adapters for extensibility. This document covers th
 -   [Memory Adapter](#memory-adapter)
 -   [Storage Adapter](#storage-adapter)
 -   [Token Counter](#token-counter)
+-   [Checkpoint Adapter (Durable HITL)](#checkpoint-adapter-durable-hitl)
+-   [MCP Tool Adapter](#mcp-tool-adapter)
 
 ---
 
@@ -529,6 +531,78 @@ const adapter = new OpenRouterExecutionAdapter(client, {
         preserveRecent: 5,
     },
 });
+```
+
+---
+
+## Checkpoint Adapter (Durable HITL)
+
+Persist execution snapshots so workflows can pause for human approval and resume after a process restart.
+
+```typescript
+import {
+    OpenRouterExecutionAdapter,
+    InMemoryCheckpointAdapter,
+    InMemoryHITLAdapter,
+    checkpointToResumeFrom,
+} from 'or3-workflow-core';
+
+const checkpoints = new InMemoryCheckpointAdapter();
+const hitl = new InMemoryHITLAdapter();
+
+const adapter = new OpenRouterExecutionAdapter(client, {
+    durableHITL: true,
+    checkpointAdapter: checkpoints,
+    hitlAdapter: hitl,
+});
+
+const result = await adapter.execute(workflow, { text: 'hi' }, callbacks);
+
+if (result.paused) {
+    // Persist result.checkpointId / result.hitlRequest for your UI
+    // Later, after the human responds:
+    const cp = await checkpoints.load(result.checkpointId!);
+    const response = {
+        requestId: result.hitlRequest!.id,
+        action: 'approve' as const,
+        respondedAt: new Date().toISOString(),
+    };
+    await hitl.respond(result.hitlRequest!.id, response);
+
+    const resumeAdapter = new OpenRouterExecutionAdapter(client, {
+        durableHITL: true,
+        checkpointAdapter: checkpoints,
+        hitlAdapter: hitl,
+        resumeFrom: checkpointToResumeFrom(cp!, response),
+    });
+    await resumeAdapter.execute(workflow, { text: 'hi' }, callbacks);
+}
+```
+
+Set `autoCheckpoint: true` to also save a running snapshot after each DAG wave.
+
+---
+
+## MCP Tool Adapter
+
+Import tools from an MCP server into `ExecutionOptions.tools` without hard-depending on the MCP SDK. Wrap any client that implements `McpClientLike`:
+
+```typescript
+import {
+    mcpToolsToExecutable,
+    McpToolAdapter,
+    type McpClientLike,
+} from 'or3-workflow-core';
+
+const mcp: McpClientLike = {
+    listTools: () => client.listTools(),
+    callTool: (name, args) => client.callTool({ name, arguments: args }),
+};
+
+const tools = await mcpToolsToExecutable(mcp, { prefix: 'mcp_' });
+// or: const tools = await new McpToolAdapter(mcp).getTools();
+
+const adapter = new OpenRouterExecutionAdapter(llm, { tools });
 ```
 
 ---

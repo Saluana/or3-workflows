@@ -46,6 +46,12 @@ import {
     getDefaultApprovalOptions,
 } from './hitl';
 import {
+    type WorkflowCheckpoint,
+    createCheckpointId,
+    WorkflowPausedError,
+    isWorkflowPausedError,
+} from './checkpoint';
+import {
     ApproximateTokenCounter,
     countMessageTokens,
     calculateThreshold,
@@ -396,6 +402,23 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             this.abortController.abort();
         }
         this.abortController = new AbortController();
+
+        // Link parent signal (subflows) so parent stop() cancels children
+        const parentSignal = this.options._parentSignal;
+        if (parentSignal) {
+            if (parentSignal.aborted) {
+                this.abortController.abort();
+            } else {
+                parentSignal.addEventListener(
+                    'abort',
+                    () => {
+                        this.abortController?.abort();
+                    },
+                    { once: true }
+                );
+            }
+        }
+
         this.running = true;
         this.tokenUsageEvents = [];
 
@@ -690,6 +713,27 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                         executed.delete(nodeId);
                     }
                 }
+
+                // Optional auto-checkpoint after each successful wave
+                if (
+                    this.options.autoCheckpoint &&
+                    this.options.checkpointAdapter
+                ) {
+                    const autoCp: WorkflowCheckpoint = {
+                        id: createCheckpointId(),
+                        workflowId: context.workflowName,
+                        sessionId: context.session.id,
+                        createdAt: Date.now(),
+                        status: 'running',
+                        nodeOutputs: { ...nodeOutputs },
+                        executionOrder: [...executionOrder],
+                        lastActiveNodeId,
+                        sessionMessages: [...context.session.messages],
+                        resumeInput: finalOutput,
+                        startNodeId: lastActiveNodeId,
+                    };
+                    await this.options.checkpointAdapter.save(autoCp);
+                }
             }
 
             if (iterations >= maxIterations) {
@@ -728,6 +772,30 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             callbacks.onComplete?.(result as any);
             return result;
         } catch (error) {
+            if (isWorkflowPausedError(error)) {
+                const pausedResult = this.buildExecutionResult(
+                    false,
+                    '',
+                    '',
+                    finalNodeId,
+                    executionOrder,
+                    lastActiveNodeId,
+                    nodeOutputs,
+                    sessionMessages.length
+                        ? sessionMessages
+                        : error.checkpoint.sessionMessages,
+                    startTime,
+                    undefined,
+                    {
+                        paused: true,
+                        checkpointId: error.checkpoint.id,
+                        hitlRequest: error.hitlRequest,
+                    }
+                );
+                callbacks.onComplete?.(pausedResult as any);
+                return pausedResult;
+            }
+
             const err =
                 error instanceof Error ? error : new Error(String(error));
             const result = this.buildExecutionResult(
@@ -762,7 +830,12 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         nodeOutputs: Record<string, string>,
         sessionMessages: ChatMessage[],
         startTime: number,
-        error?: Error
+        error?: Error,
+        extras?: {
+            paused?: boolean;
+            checkpointId?: string;
+            hitlRequest?: HITLRequest;
+        }
     ): ExecutionResult {
         const usage = this.getTokenUsageSummary();
         const tokenUsageDetails = this.tokenUsageEvents.map((entry) => ({
@@ -782,6 +855,9 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             duration: Date.now() - startTime,
             usage,
             tokenUsageDetails,
+            paused: extras?.paused,
+            checkpointId: extras?.checkpointId,
+            hitlRequest: extras?.hitlRequest,
         };
     }
 
@@ -1171,6 +1247,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                         // Pass subflow registry
                         subflowRegistry: this.options.subflowRegistry,
                         _subflowPath: subflowPath,
+                        // Propagate cancellation from parent into child adapter
+                        _parentSignal: context.signal,
                         onToolCallEvent: baseOnToolCallEvent
                             ? (event) => {
                                   baseOnToolCallEvent({
@@ -1347,7 +1425,13 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         const supportsHITL =
             OpenRouterExecutionAdapter.HITL_SUPPORTED_TYPES.has(node.type);
         const shouldUseHITL =
-            supportsHITL && hitlConfig?.enabled && this.options.onHITLRequest;
+            supportsHITL &&
+            hitlConfig?.enabled &&
+            !!(
+                this.options.onHITLRequest ||
+                this.options.durableHITL ||
+                this.options.hitlAdapter
+            );
 
         let lastError: ExecutionError | null = null;
         const retryHistory: Array<{
@@ -1377,6 +1461,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     callbacks
                 );
             } catch (error) {
+                // Durable HITL pause must not be retried
+                if (isWorkflowPausedError(error)) {
+                    throw error;
+                }
+
                 const execError = createExecutionError(
                     error,
                     nodeId,
@@ -1464,8 +1553,23 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             path: context.nodePath.length ? [...context.nodePath] : undefined,
         } satisfies Partial<NodeExecutionMetadata>;
 
-        // No HITL configured or disabled, or no callback provided
-        if (!hitlConfig?.enabled || !this.options.onHITLRequest) {
+        // No HITL configured or disabled
+        if (!hitlConfig?.enabled) {
+            return this.executeNodeInternal(
+                node.id,
+                context,
+                graph,
+                edges,
+                callbacks
+            );
+        }
+
+        // Need a way to receive responses: callback, durable mode, or adapter
+        if (
+            !this.options.onHITLRequest &&
+            !this.options.durableHITL &&
+            !this.options.hitlAdapter
+        ) {
             return this.executeNodeInternal(
                 node.id,
                 context,
@@ -1518,6 +1622,17 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             }
         };
 
+        const hitlSnapshot = () => ({
+            nodeOutputs: { ...context.outputs },
+            executionOrder: [...context.nodeChain],
+            lastActiveNodeId: node.id,
+            sessionMessages: [...context.session.messages],
+            resumeInput: context.currentInput,
+            workflowId: context.workflowName,
+            sessionId: context.session.id,
+            startNodeId: node.id,
+        });
+
         switch (hitlConfig.mode) {
             case 'approval': {
                 // Pause BEFORE execution for approval
@@ -1528,7 +1643,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     workflowName,
                     undefined
                 );
-                const response = await this.waitForHITL(request, hitlConfig);
+                const response = await this.waitForHITL(
+                    request,
+                    hitlConfig,
+                    hitlSnapshot()
+                );
 
                 if (response.action === 'reject') {
                     return handleReject();
@@ -1558,7 +1677,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     workflowName,
                     undefined
                 );
-                const response = await this.waitForHITL(request, hitlConfig);
+                const response = await this.waitForHITL(
+                    request,
+                    hitlConfig,
+                    hitlSnapshot()
+                );
 
                 if (response.action === 'skip') {
                     return handleSkip();
@@ -1597,7 +1720,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     workflowName,
                     result.output
                 );
-                const response = await this.waitForHITL(request, hitlConfig);
+                const response = await this.waitForHITL(
+                    request,
+                    hitlConfig,
+                    hitlSnapshot()
+                );
 
                 if (response.action === 'reject') {
                     // Route to rejection branch or re-execute
@@ -1716,17 +1843,74 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     }
 
     /**
-     * Wait for HITL response with optional timeout.
+     * Wait for HITL response with optional timeout / durable pause.
      * Respects abort signal to cancel waiting when execution is stopped.
      * Uses timestamp-based timeout to handle system sleep correctly.
      */
     private async waitForHITL(
         request: HITLRequest,
-        config: HITLConfig
+        config: HITLConfig,
+        snapshot: {
+            nodeOutputs: Record<string, string>;
+            executionOrder: string[];
+            lastActiveNodeId?: string;
+            sessionMessages: ChatMessage[];
+            resumeInput?: string;
+            workflowId?: string;
+            sessionId: string;
+            startNodeId: string;
+        }
     ): Promise<HITLResponse> {
+        // Resume path: response already provided (id may differ if request was recreated)
+        const resume = this.options.resumeFrom;
+        if (resume?.pendingHITLResponse) {
+            return resume.pendingHITLResponse;
+        }
+
+        // Resume path: look up response from HITL adapter
+        if (this.options.hitlAdapter) {
+            const existing = await this.options.hitlAdapter.getResponse(
+                request.id
+            );
+            if (existing) {
+                return existing;
+            }
+            // Also try by pending id from resume metadata
+            if (resume?.pendingHITLRequestId) {
+                const byId = await this.options.hitlAdapter.getResponse(
+                    resume.pendingHITLRequestId
+                );
+                if (byId) {
+                    return byId;
+                }
+            }
+        }
+
+        // Persist pending request
+        if (this.options.hitlAdapter) {
+            await this.options.hitlAdapter.store(request);
+        }
+
+        // Durable pause: return control to caller instead of blocking
+        if (this.options.durableHITL && !resume?.pendingHITLResponse) {
+            const checkpoint = await this.persistHITLCheckpoint(
+                request,
+                snapshot
+            );
+            throw new WorkflowPausedError(checkpoint, request);
+        }
+
         if (!this.options.onHITLRequest) {
+            // No interactive callback — if we have an adapter, pause durably
+            if (this.options.hitlAdapter) {
+                const checkpoint = await this.persistHITLCheckpoint(
+                    request,
+                    snapshot
+                );
+                throw new WorkflowPausedError(checkpoint, request);
+            }
             throw new Error(
-                'HITL requested but no onHITLRequest callback configured'
+                'HITL requested but no onHITLRequest callback or hitlAdapter configured'
             );
         }
 
@@ -1770,8 +1954,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                                 defaultAction === 'approve'
                                     ? 'approve'
                                     : defaultAction === 'skip'
-                                    ? 'skip'
-                                    : 'reject',
+                                      ? 'skip'
+                                      : 'reject',
                             respondedAt: new Date().toISOString(),
                         });
                     }
@@ -1781,7 +1965,12 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         }
 
         try {
-            return await Promise.race(promises);
+            const response = await Promise.race(promises);
+            // Persist response for durability even in interactive mode
+            if (this.options.hitlAdapter) {
+                await this.options.hitlAdapter.respond(request.id, response);
+            }
+            return response;
         } finally {
             // Cleanup timeout interval
             if (timeoutCheckInterval) {
@@ -1789,6 +1978,47 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             }
             // Note: abort event listener is automatically cleaned up due to { once: true }
         }
+    }
+
+    /**
+     * Persist a paused HITL checkpoint when a checkpoint adapter is configured.
+     */
+    private async persistHITLCheckpoint(
+        request: HITLRequest,
+        snapshot: {
+            nodeOutputs: Record<string, string>;
+            executionOrder: string[];
+            lastActiveNodeId?: string;
+            sessionMessages: ChatMessage[];
+            resumeInput?: string;
+            workflowId?: string;
+            sessionId: string;
+            startNodeId: string;
+        }
+    ): Promise<WorkflowCheckpoint> {
+        const checkpoint: WorkflowCheckpoint = {
+            id: createCheckpointId(),
+            workflowId: snapshot.workflowId,
+            sessionId: snapshot.sessionId,
+            createdAt: Date.now(),
+            status: 'paused',
+            nodeOutputs: { ...snapshot.nodeOutputs },
+            executionOrder: [...snapshot.executionOrder],
+            lastActiveNodeId: snapshot.lastActiveNodeId,
+            sessionMessages: [...snapshot.sessionMessages],
+            resumeInput: snapshot.resumeInput,
+            startNodeId: snapshot.startNodeId,
+            pauseReason: 'hitl',
+            pendingHITLRequestId: request.id,
+            hitlMode: request.mode,
+            hitlNodeId: request.nodeId,
+        };
+
+        if (this.options.checkpointAdapter) {
+            await this.options.checkpointAdapter.save(checkpoint);
+        }
+
+        return checkpoint;
     }
 
     /**
@@ -2012,7 +2242,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                         },
                         { role: 'user', content: prompt },
                     ],
-                    { temperature: 0.3, maxTokens: 500 }
+                    {
+                        temperature: 0.3,
+                        maxTokens: 500,
+                        signal: this.abortController?.signal,
+                    }
                 );
 
                 summary = summarizationResult.content || '';

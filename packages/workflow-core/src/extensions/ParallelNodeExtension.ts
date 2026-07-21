@@ -46,6 +46,7 @@ async function runToolLoop(
         const requestMessages = [...currentMessages];
         const result = await provider.chat(model, currentMessages, {
             tools: toolsForLLM,
+            signal: context.signal,
             onToken: (token) => {
                 context.onBranchToken?.(branchId, branchLabel, token);
             },
@@ -234,29 +235,50 @@ export const ParallelNodeExtension: NodeExtension = {
         // Optional per-branch timeout (default: 5 minutes if not specified)
         const branchTimeout = data.branchTimeout ?? 5 * 60 * 1000;
 
-        // Helper to create a timeout promise
-        const createTimeoutPromise = (
-            branchId: string,
-            label: string,
-            timeoutMs: number
-        ) => {
-            return new Promise<{
-                status: 'rejected';
-                reason: Error;
-                branchId: string;
-                label: string;
-            }>((resolve) => {
-                setTimeout(() => {
-                    resolve({
-                        status: 'rejected' as const,
-                        reason: new Error(
-                            `Branch "${label}" timed out after ${timeoutMs}ms`
-                        ),
-                        branchId,
-                        label,
+        /**
+         * Create a per-branch AbortController linked to the parent signal and
+         * an optional timeout. Aborting cancels in-flight LLM calls that honor
+         * `signal` (instead of only racing a dangling Promise).
+         */
+        const createBranchAbort = (timeoutMs: number) => {
+            const controller = new AbortController();
+            const timers: ReturnType<typeof setTimeout>[] = [];
+            const cleanups: Array<() => void> = [];
+
+            if (context.signal) {
+                if (context.signal.aborted) {
+                    controller.abort();
+                } else {
+                    const onParentAbort = () => controller.abort();
+                    context.signal.addEventListener('abort', onParentAbort, {
+                        once: true,
                     });
+                    cleanups.push(() =>
+                        context.signal?.removeEventListener(
+                            'abort',
+                            onParentAbort
+                        )
+                    );
+                }
+            }
+
+            if (timeoutMs > 0 && !controller.signal.aborted) {
+                const timer = setTimeout(() => {
+                    controller.abort();
                 }, timeoutMs);
-            });
+                timers.push(timer);
+            }
+
+            return {
+                signal: controller.signal,
+                timedOut: () =>
+                    controller.signal.aborted &&
+                    !(context.signal?.aborted ?? false),
+                cleanup: () => {
+                    for (const t of timers) clearTimeout(t);
+                    for (const fn of cleanups) fn();
+                },
+            };
         };
 
         // Prepare global tools map
@@ -298,10 +320,18 @@ export const ParallelNodeExtension: NodeExtension = {
                 });
             }
 
+            const branchAbort = createBranchAbort(branchTimeout);
+
             const executionPromise = (async () => {
                 if (!provider) {
                     throw new Error('Parallel node requires LLM provider');
                 }
+
+                // Scoped context so branch LLM calls use the branch abort signal
+                const branchContext: ExecutionContext = {
+                    ...context,
+                    signal: branchAbort.signal,
+                };
 
                 let supportsImages = false;
                 if (context.attachments && context.attachments.length > 0) {
@@ -312,7 +342,9 @@ export const ParallelNodeExtension: NodeExtension = {
                         false;
                 }
                 if (context.attachments && context.attachments.length > 0) {
-                    const hasImages = context.attachments.some(a => a.type === 'image');
+                    const hasImages = context.attachments.some(
+                        (a) => a.type === 'image'
+                    );
                     if (!supportsImages && hasImages) {
                         console.warn(
                             `Model ${branchModel} does not support image input; skipping image attachments for branch "${branch.label}" (PDFs will still be included).`
@@ -341,7 +373,7 @@ export const ParallelNodeExtension: NodeExtension = {
                     messages,
                     toolsForLLM,
                     toolHandlers,
-                    context,
+                    branchContext,
                     branch.id,
                     branch.label,
                     DEFAULT_MAX_TOOL_ITERATIONS
@@ -358,24 +390,32 @@ export const ParallelNodeExtension: NodeExtension = {
                     branchId: branch.id,
                     label: branch.label,
                 };
-            })().catch((error) => ({
-                status: 'rejected' as const,
-                reason: error,
-                branchId: branch.id,
-                label: branch.label,
-            }));
+            })()
+                .catch((error) => {
+                    const aborted = branchAbort.signal.aborted;
+                    const parentAborted = context.signal?.aborted ?? false;
+                    if (aborted && !parentAborted) {
+                        return {
+                            status: 'rejected' as const,
+                            reason: new Error(
+                                `Branch "${branch.label}" timed out after ${branchTimeout}ms`
+                            ),
+                            branchId: branch.id,
+                            label: branch.label,
+                        };
+                    }
+                    return {
+                        status: 'rejected' as const,
+                        reason: error,
+                        branchId: branch.id,
+                        label: branch.label,
+                    };
+                })
+                .finally(() => {
+                    branchAbort.cleanup();
+                });
 
-            // Race execution against timeout if timeout is configured
-            return branchTimeout > 0
-                ? Promise.race([
-                      executionPromise,
-                      createTimeoutPromise(
-                          branch.id,
-                          branch.label,
-                          branchTimeout
-                      ),
-                  ])
-                : executionPromise;
+            return executionPromise;
         });
 
         if (branchExecutions.length === 0) {
@@ -469,6 +509,7 @@ export const ParallelNodeExtension: NodeExtension = {
 
             let mergeContent = '';
             const result = await provider.chat(mergeModel, mergeMessages, {
+                signal: context.signal,
                 onToken: (token) => {
                     mergeContent += token;
                     // Stream to both the main output and the merge branch

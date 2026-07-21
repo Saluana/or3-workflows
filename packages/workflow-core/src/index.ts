@@ -101,6 +101,27 @@ export {
     getDefaultApprovalOptions,
 } from './hitl';
 
+// Durable checkpointing
+export {
+    type WorkflowCheckpoint,
+    type CheckpointAdapter,
+    InMemoryCheckpointAdapter,
+    WorkflowPausedError,
+    isWorkflowPausedError,
+    checkpointToResumeFrom,
+    createCheckpointId,
+} from './checkpoint';
+
+// MCP tool adapter
+export {
+    type McpToolDescriptor,
+    type McpClientLike,
+    type McpToolsOptions,
+    McpToolAdapter,
+    mcpToolsToExecutable,
+    registerMcpTools,
+} from './mcp';
+
 // Editor and state management
 export {
     createWorkflowEditor,
