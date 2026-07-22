@@ -110,17 +110,53 @@ export {
     isWorkflowPausedError,
     checkpointToResumeFrom,
     createCheckpointId,
+    CHECKPOINT_SCHEMA_VERSION,
+    normalizeCheckpoint,
 } from './checkpoint';
 
 // MCP tool adapter
 export {
     type McpToolDescriptor,
+    type McpResourceDescriptor,
+    type McpPromptDescriptor,
     type McpClientLike,
     type McpToolsOptions,
+    type McpSessionOptions,
     McpToolAdapter,
+    McpSession,
     mcpToolsToExecutable,
     registerMcpTools,
+    mcpListResources,
+    mcpReadResource,
+    mcpListPrompts,
+    mcpGetPrompt,
 } from './mcp';
+
+// Protocol helpers
+export {
+    type WorkflowEvent,
+    type WorkflowEventType,
+    type WorkflowEventHandler,
+    safeEmitEvent,
+} from './events';
+export {
+    type StopPolicy,
+    type StopPolicyState,
+    type BudgetExhaustedReason,
+    createStopPolicyState,
+    checkStopPolicy,
+    BudgetExceededError,
+    isBudgetExceededError,
+} from './stopPolicy';
+export {
+    type ToolArgValidationResult,
+    type ExecutableToolCall,
+    validateToolArgs,
+    stableToolCallId,
+    prepareToolCalls,
+    executeToolCallsParallel,
+} from './toolProtocol';
+export type { EdgeData, EdgeInputMapping } from './types';
 
 // Editor and state management
 export {

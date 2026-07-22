@@ -12,6 +12,8 @@ import type { HITLMode, HITLRequest, HITLResponse } from './hitl';
  * Enough to resume after process restart when paired with a HITL response.
  */
 export interface WorkflowCheckpoint {
+    /** Checkpoint schema version for migrations (current: 1) */
+    schemaVersion: number;
     /** Unique checkpoint ID */
     id: string;
     /** Optional workflow name / id for filtering */
@@ -35,13 +37,30 @@ export interface WorkflowCheckpoint {
     /** Node to restart from on resume */
     startNodeId?: string;
     /** Why execution paused */
-    pauseReason?: 'hitl' | 'manual';
+    pauseReason?: 'hitl' | 'manual' | 'budget';
     /** Pending HITL request id (when pauseReason === 'hitl') */
     pendingHITLRequestId?: string;
     /** HITL mode at pause */
     hitlMode?: HITLMode;
     /** Node awaiting HITL */
     hitlNodeId?: string;
+}
+
+/** Current checkpoint schema version written by this package. */
+export const CHECKPOINT_SCHEMA_VERSION = 1;
+
+/**
+ * Normalize a loaded checkpoint (fill defaults for older snapshots).
+ */
+export function normalizeCheckpoint(
+    checkpoint: WorkflowCheckpoint | (Omit<WorkflowCheckpoint, 'schemaVersion'> & {
+        schemaVersion?: number;
+    })
+): WorkflowCheckpoint {
+    return {
+        ...checkpoint,
+        schemaVersion: checkpoint.schemaVersion ?? 1,
+    };
 }
 
 /**
@@ -71,12 +90,14 @@ export class InMemoryCheckpointAdapter implements CheckpointAdapter {
     private checkpoints = new Map<string, WorkflowCheckpoint>();
 
     async save(checkpoint: WorkflowCheckpoint): Promise<void> {
-        this.checkpoints.set(checkpoint.id, { ...checkpoint });
+        this.checkpoints.set(checkpoint.id, {
+            ...normalizeCheckpoint(checkpoint),
+        });
     }
 
     async load(checkpointId: string): Promise<WorkflowCheckpoint | null> {
         const cp = this.checkpoints.get(checkpointId);
-        return cp ? { ...cp } : null;
+        return cp ? normalizeCheckpoint(cp) : null;
     }
 
     async delete(checkpointId: string): Promise<void> {

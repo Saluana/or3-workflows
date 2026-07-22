@@ -605,6 +605,36 @@ const tools = await mcpToolsToExecutable(mcp, { prefix: 'mcp_' });
 const adapter = new OpenRouterExecutionAdapter(llm, { tools });
 ```
 
+### Resources & prompts
+
+`McpClientLike` optionally supports resources and prompts:
+
+```typescript
+const resources = await mcpListResources(mcp);
+const text = await mcpReadResource(mcp, 'file://docs/readme');
+const prompts = await mcpListPrompts(mcp);
+const greeting = await mcpGetPrompt(mcp, 'greet', { who: 'Ada' });
+```
+
+### Session scoping
+
+Use `McpSession` to scope tools to a workflow run and clean up on close:
+
+```typescript
+import { McpSession } from 'or3-workflow-core';
+
+const session = new McpSession(mcp, {
+    sessionId: 'run-123',
+    prefix: 'mcp_',
+});
+
+const tools = await session.register(); // namespaced registry ids
+// ... run workflow with tools ...
+await session.close(); // unregister + client.close()
+```
+
+Checkpoints now include `schemaVersion` (currently `1`). Loaders should call `normalizeCheckpoint()` for older snapshots.
+
 ---
 
 ## Best Practices

@@ -50,6 +50,7 @@ import {
     createCheckpointId,
     WorkflowPausedError,
     isWorkflowPausedError,
+    CHECKPOINT_SCHEMA_VERSION,
 } from './checkpoint';
 import {
     ApproximateTokenCounter,
@@ -62,6 +63,15 @@ import {
     type TokenCounter,
 } from './compaction';
 import { validateWorkflow } from './validation';
+import { safeEmitEvent } from './events';
+import {
+    BudgetExceededError,
+    checkStopPolicy,
+    createStopPolicyState,
+    isBudgetExceededError,
+    type StopPolicyState,
+} from './stopPolicy';
+import type { EdgeData, EdgeInputMapping } from './types/base';
 
 // ============================================================================
 // Constants
@@ -100,6 +110,10 @@ interface WorkflowGraph {
         Record<string, ReadonlyArray<{ nodeId: string; handleId?: string }>>
     >;
     readonly parents: Readonly<Record<string, ReadonlyArray<string>>>;
+    /** Inbound edges keyed by target node id (preserves EdgeData / inputMapping) */
+    readonly inboundEdges: Readonly<
+        Record<string, ReadonlyArray<WorkflowEdge>>
+    >;
 }
 
 /** Internal execution state */
@@ -138,6 +152,20 @@ function scopeMeta(
         id: meta.id ? scopeNodeId(meta.id, path) : meta.id,
         path: [...path],
     };
+}
+
+/**
+ * Interpolate `{{nodeId}}` (and `{{input}}`) placeholders for edge template mapping.
+ */
+function interpolateEdgeTemplate(
+    template: string,
+    outputs: Record<string, string>,
+    currentInput: string
+): string {
+    return template.replace(/\{\{\s*([\w.:-]+)\s*\}\}/g, (_match, key: string) => {
+        if (key === 'input') return currentInput;
+        return outputs[key] ?? '';
+    });
 }
 
 function scopeExecutionCallbacks(
@@ -332,6 +360,9 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         nodeId: string;
         usage: TokenUsageDetails;
     }> = [];
+    private stopPolicyState: StopPolicyState | null = null;
+    private assertBudgetFn: (() => void) | null = null;
+    private recordLlmStepFn: ((tokens?: number) => void) | null = null;
 
     // Cache node type sets for O(1) lookups
     private static readonly LLM_NODE_TYPES = new Set([
@@ -421,10 +452,21 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
         this.running = true;
         this.tokenUsageEvents = [];
+        this.stopPolicyState = createStopPolicyState();
+
+        const emit = (event: Parameters<typeof safeEmitEvent>[1]) => {
+            safeEmitEvent(this.options.onEvent, event);
+        };
 
         const resumeFrom = this.options.resumeFrom;
 
         const startTime = Date.now();
+        emit({
+            type: 'run_start',
+            workflowName: workflow.meta.name,
+            sessionId: this.options.sessionId,
+            at: startTime,
+        });
         const nodeOutputs: Record<string, string> = resumeFrom?.nodeOutputs
             ? { ...resumeFrom.nodeOutputs }
             : {};
@@ -435,6 +477,56 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         let finalNodeId: string | undefined = resumeFrom?.finalNodeId;
         let finalOutput = resumeFrom?.resumeInput || '';
         let sessionMessages: ChatMessage[] = [];
+
+        const assertBudget = () => {
+            const check = checkStopPolicy(
+                this.options.stopPolicy,
+                this.stopPolicyState!
+            );
+            if (check.exceeded) {
+                emit({
+                    type: 'budget',
+                    reason: check.reason,
+                    tokensUsed: this.stopPolicyState!.tokens,
+                    stepsUsed: this.stopPolicyState!.steps,
+                    durationMs: Date.now() - this.stopPolicyState!.startedAt,
+                    at: Date.now(),
+                });
+                throw new BudgetExceededError(check.reason, check.message);
+            }
+        };
+
+        const recordLlmStep = (tokens?: number) => {
+            if (!this.stopPolicyState) return;
+            this.stopPolicyState.steps += 1;
+            if (typeof tokens === 'number' && tokens > 0) {
+                this.stopPolicyState.tokens += tokens;
+            }
+            // Enforce duration/token budgets immediately; maxSteps is checked
+            // at the start of the next LLM call via assertBudget.
+            const policy = this.options.stopPolicy;
+            if (!policy) return;
+            const check = checkStopPolicy(
+                {
+                    maxDurationMs: policy.maxDurationMs,
+                    maxTokens: policy.maxTokens,
+                },
+                this.stopPolicyState
+            );
+            if (check.exceeded) {
+                emit({
+                    type: 'budget',
+                    reason: check.reason,
+                    tokensUsed: this.stopPolicyState.tokens,
+                    stepsUsed: this.stopPolicyState.steps,
+                    durationMs: Date.now() - this.stopPolicyState.startedAt,
+                    at: Date.now(),
+                });
+                throw new BudgetExceededError(check.reason, check.message);
+            }
+        };
+        this.assertBudgetFn = assertBudget;
+        this.recordLlmStepFn = recordLlmStep;
 
         // Preflight validation (enabled by default)
         if (this.options.preflight !== false) {
@@ -721,6 +813,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 ) {
                     const autoCp: WorkflowCheckpoint = {
                         id: createCheckpointId(),
+                        schemaVersion: CHECKPOINT_SCHEMA_VERSION,
                         workflowId: context.workflowName,
                         sessionId: context.session.id,
                         createdAt: Date.now(),
@@ -769,6 +862,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 context.session.messages,
                 startTime
             );
+            emit({ type: 'done', result, at: Date.now() });
             callbacks.onComplete?.(result as any);
             return result;
         } catch (error) {
@@ -790,10 +884,79 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                         paused: true,
                         checkpointId: error.checkpoint.id,
                         hitlRequest: error.hitlRequest,
+                        pause: {
+                            type: 'hitl',
+                            resumeToken: error.checkpoint.id,
+                            reason: `HITL on node ${error.hitlRequest.nodeId}`,
+                            hitlRequest: error.hitlRequest,
+                        },
                     }
                 );
+                emit({
+                    type: 'hitl_pause',
+                    request: error.hitlRequest,
+                    checkpointId: error.checkpoint.id,
+                    resumeToken: error.checkpoint.id,
+                    at: Date.now(),
+                });
+                emit({ type: 'done', result: pausedResult, at: Date.now() });
                 callbacks.onComplete?.(pausedResult as any);
                 return pausedResult;
+            }
+
+            if (isBudgetExceededError(error)) {
+                const budgetCheckpoint: WorkflowCheckpoint = {
+                    id: createCheckpointId(),
+                    schemaVersion: CHECKPOINT_SCHEMA_VERSION,
+                    workflowId: workflow.meta.name,
+                    sessionId: this.options.sessionId || 'anonymous',
+                    createdAt: Date.now(),
+                    status: 'paused',
+                    nodeOutputs: { ...nodeOutputs },
+                    executionOrder: [...executionOrder],
+                    lastActiveNodeId,
+                    sessionMessages: [...sessionMessages],
+                    resumeInput: finalOutput,
+                    startNodeId: lastActiveNodeId,
+                    pauseReason: 'budget',
+                };
+                if (this.options.checkpointAdapter) {
+                    await this.options.checkpointAdapter.save(budgetCheckpoint);
+                }
+                const budgetResult = this.buildExecutionResult(
+                    false,
+                    finalOutput,
+                    finalOutput,
+                    finalNodeId,
+                    executionOrder,
+                    lastActiveNodeId,
+                    nodeOutputs,
+                    sessionMessages,
+                    startTime,
+                    error,
+                    {
+                        paused: true,
+                        checkpointId: budgetCheckpoint.id,
+                        pause: {
+                            type: 'budget',
+                            resumeToken: budgetCheckpoint.id,
+                            reason: error.message,
+                        },
+                    }
+                );
+                emit({
+                    type: 'budget',
+                    reason: error.reason,
+                    tokensUsed: this.stopPolicyState?.tokens,
+                    stepsUsed: this.stopPolicyState?.steps,
+                    durationMs: this.stopPolicyState
+                        ? Date.now() - this.stopPolicyState.startedAt
+                        : undefined,
+                    at: Date.now(),
+                });
+                emit({ type: 'done', result: budgetResult, at: Date.now() });
+                callbacks.onComplete?.(budgetResult as any);
+                return budgetResult;
             }
 
             const err =
@@ -810,10 +973,13 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 startTime,
                 err
             );
+            emit({ type: 'done', result, at: Date.now() });
             callbacks.onComplete?.(result as any);
             return result;
         } finally {
             this.running = false;
+            this.assertBudgetFn = null;
+            this.recordLlmStepFn = null;
         }
     }
 
@@ -835,6 +1001,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             paused?: boolean;
             checkpointId?: string;
             hitlRequest?: HITLRequest;
+            pause?: ExecutionResult['pause'];
         }
     ): ExecutionResult {
         const usage = this.getTokenUsageSummary();
@@ -858,6 +1025,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             paused: extras?.paused,
             checkpointId: extras?.checkpointId,
             hitlRequest: extras?.hitlRequest,
+            pause: extras?.pause,
         };
     }
 
@@ -925,12 +1093,14 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             Array<{ nodeId: string; handleId?: string }>
         > = {};
         const parents: Record<string, string[]> = {};
+        const inboundEdges: Record<string, WorkflowEdge[]> = {};
 
         // First pass: build node map and initialize edge arrays
         for (const node of nodes) {
             nodeMap.set(node.id, node);
             children[node.id] = [];
             parents[node.id] = [];
+            inboundEdges[node.id] = [];
         }
 
         // Second pass: build edges (with validation)
@@ -954,9 +1124,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             if (!parents[edge.target].includes(edge.source)) {
                 parents[edge.target].push(edge.source);
             }
+            inboundEdges[edge.target].push(edge);
         }
 
-        return { nodeMap, children, parents };
+        return { nodeMap, children, parents, inboundEdges };
     }
 
     // ==========================================================================
@@ -983,6 +1154,12 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         } satisfies Partial<NodeExecutionMetadata>;
 
         callbacks.onNodeStart(nodeId, meta);
+        safeEmitEvent(this.options.onEvent, {
+            type: 'node_start',
+            nodeId,
+            meta: meta as NodeExecutionMetadata,
+            at: Date.now(),
+        });
 
         // Look up extension
         const extension = extensionRegistry.get(node.type);
@@ -1053,7 +1230,15 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     callbacks.onTokenUsage(nodeId, usage);
                 }
                 this.tokenUsageEvents.push({ nodeId, usage });
+                safeEmitEvent(this.options.onEvent, {
+                    type: 'token_usage',
+                    nodeId,
+                    usage,
+                    at: Date.now(),
+                });
             },
+            assertBudget: () => this.assertBudgetFn?.(),
+            recordLlmStep: (tokens) => this.recordLlmStepFn?.(tokens),
 
             onToken: (token: string) => {
                 callbacks.onToken(nodeId, token);
@@ -1323,6 +1508,13 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         // (See processWaveResults in execute().)
 
         callbacks.onNodeFinish(nodeId, result.output, meta);
+        safeEmitEvent(this.options.onEvent, {
+            type: 'node_finish',
+            nodeId,
+            output: result.output,
+            meta: meta as NodeExecutionMetadata,
+            at: Date.now(),
+        });
         return { output: result.output, nextNodes: result.nextNodes };
     }
 
@@ -1336,27 +1528,77 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         context: InternalExecutionContext,
         graph: WorkflowGraph
     ): string {
-        const parentIds = graph.parents[nodeId];
-        if (!parentIds || parentIds.length === 0) {
+        const inbound = graph.inboundEdges[nodeId];
+        if (!inbound || inbound.length === 0) {
             return context.currentInput;
         }
 
-        const parentOutputs: string[] = [];
-        for (const parentId of parentIds) {
-            const output = context.outputs[parentId];
-            if (typeof output === 'string') {
-                parentOutputs.push(output);
+        type Contribution = {
+            parentId: string;
+            output: string;
+            mapping?: EdgeInputMapping;
+        };
+
+        const contributions: Contribution[] = [];
+        for (const edge of inbound) {
+            const output = context.outputs[edge.source];
+            if (typeof output !== 'string') continue;
+            const edgeData = edge.data as EdgeData | undefined;
+            contributions.push({
+                parentId: edge.source,
+                output,
+                mapping: edgeData?.inputMapping,
+            });
+        }
+
+        if (contributions.length === 0) {
+            return context.currentInput;
+        }
+
+        const picks = contributions.filter((c) => c.mapping?.mode === 'pick');
+        if (picks.length > 0) {
+            return picks.map((p) => p.output).join('\n\n');
+        }
+
+        const templateContrib = contributions.find(
+            (c) => c.mapping?.mode === 'template'
+        );
+        if (
+            templateContrib &&
+            templateContrib.mapping?.mode === 'template'
+        ) {
+            return interpolateEdgeTemplate(
+                templateContrib.mapping.template,
+                context.outputs,
+                context.currentInput
+            );
+        }
+
+        const hasJson = contributions.some((c) => c.mapping?.mode === 'json');
+        if (hasJson) {
+            const obj: Record<string, string> = {};
+            for (const c of contributions) {
+                const key =
+                    c.mapping?.mode === 'json'
+                        ? (c.mapping.key ?? c.parentId)
+                        : c.parentId;
+                obj[key] = c.output;
             }
+            return JSON.stringify(obj);
         }
 
-        if (parentOutputs.length === 0) {
-            return context.currentInput;
+        const concatMapping = contributions.find(
+            (c) => c.mapping?.mode === 'concat'
+        )?.mapping;
+        const separator =
+            concatMapping && concatMapping.mode === 'concat'
+                ? (concatMapping.separator ?? '\n\n')
+                : '\n\n';
+
+        if (contributions.length === 1) {
+            return contributions[0]!.output;
         }
-        if (parentOutputs.length === 1) {
-            return parentOutputs[0]!;
-        }
-        // Deterministic join for multi-parent merges (diamond DAGs)
-        return parentOutputs.join('\n\n');
+        return contributions.map((c) => c.output).join(separator);
     }
     private getTokenUsageSummary(): TokenUsage | undefined {
         if (this.tokenUsageEvents.length === 0) {
@@ -1461,8 +1703,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     callbacks
                 );
             } catch (error) {
-                // Durable HITL pause must not be retried
+                // Durable HITL pause / budget stop must not be retried
                 if (isWorkflowPausedError(error)) {
+                    throw error;
+                }
+                if (isBudgetExceededError(error)) {
                     throw error;
                 }
 
@@ -1998,6 +2243,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     ): Promise<WorkflowCheckpoint> {
         const checkpoint: WorkflowCheckpoint = {
             id: createCheckpointId(),
+            schemaVersion: CHECKPOINT_SCHEMA_VERSION,
             workflowId: snapshot.workflowId,
             sessionId: snapshot.sessionId,
             createdAt: Date.now(),

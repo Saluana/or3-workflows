@@ -230,6 +230,28 @@ export interface AgentNodeData extends BaseNodeData {
     temperature?: number;
     maxTokens?: number;
     tools?: string[];
+    /**
+     * Control tool selection for this agent.
+     * - 'auto' (default): model may call tools
+     * - 'none': disable tools for this call
+     * - 'required': model must call at least one tool
+     * - { type:'function', function:{ name } }: force a specific tool
+     */
+    toolChoice?:
+        | 'auto'
+        | 'none'
+        | 'required'
+        | { type: 'function'; function: { name: string } };
+    /**
+     * Request structured JSON output from the model (when supported).
+     * Uses provider `response_format: json_schema` when possible.
+     */
+    structuredOutput?: {
+        name: string;
+        description?: string;
+        schema: Record<string, unknown>;
+        strict?: boolean;
+    };
     acceptsImages?: boolean;
     acceptsAudio?: boolean;
     acceptsVideo?: boolean;
@@ -383,7 +405,37 @@ export interface WorkflowEdge {
 
 export interface EdgeData {
     condition?: RouteCondition;
+    /**
+     * How this edge's source output contributes to the target node's input.
+     * When multiple inbound edges exist, each edge's mapping is applied then
+     * combined (see resolveNodeInput).
+     */
+    inputMapping?: EdgeInputMapping;
 }
+
+/**
+ * Declares how a parent node's output is mapped into a child node's input.
+ */
+export type EdgeInputMapping =
+    | {
+          /** Join parent outputs with a separator (default behavior). */
+          mode: 'concat';
+          separator?: string;
+      }
+    | {
+          /** Use only this edge's parent output (ignore siblings). */
+          mode: 'pick';
+      }
+    | {
+          /** Interpolate `{{nodeId}}` placeholders from available outputs. */
+          mode: 'template';
+          template: string;
+      }
+    | {
+          /** Combine contributing parent outputs into a JSON object. */
+          mode: 'json';
+          key?: string;
+      };
 
 /**
  * Defines an input or output port on a node.

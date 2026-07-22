@@ -14,167 +14,17 @@ import type {
 import { estimateTokenUsage } from '../compaction';
 import {
     type ToolForLLM,
-    type ToolLoopResult,
     buildUserContentWithAttachments,
 } from './shared';
+import {
+    buildToolMeta,
+    runValidatedToolLoop,
+} from './runValidatedToolLoop';
 
 const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
 
 /** Default maximum number of tool call iterations */
 const DEFAULT_MAX_TOOL_ITERATIONS = 10;
-
-/**
- * Run the tool execution loop for a branch.
- */
-async function runToolLoop(
-    provider: LLMProvider,
-    model: string,
-    messages: ChatMessage[],
-    toolsForLLM: ToolForLLM[] | undefined,
-    toolHandlers: Map<string, (args: unknown) => Promise<string> | string>,
-    context: ExecutionContext,
-    branchId: string,
-    branchLabel: string,
-    maxIterations: number
-): Promise<ToolLoopResult> {
-
-    const currentMessages = [...messages];
-    let iterations = 0;
-    let finalContent = '';
-
-    while (iterations < maxIterations) {
-        const requestMessages = [...currentMessages];
-        const result = await provider.chat(model, currentMessages, {
-            tools: toolsForLLM,
-            signal: context.signal,
-            onToken: (token) => {
-                context.onBranchToken?.(branchId, branchLabel, token);
-            },
-            onReasoning: (token) => {
-                context.onBranchReasoning?.(branchId, branchLabel, token);
-            },
-        });
-
-        if (context.tokenCounter && context.onTokenUsage) {
-            let usage = estimateTokenUsage({
-                model,
-                messages: requestMessages,
-                output: result.content || '',
-                tokenCounter: context.tokenCounter,
-                compaction: context.compaction,
-            });
-
-            if (result.usage) {
-                usage = {
-                    ...usage,
-                    promptTokens: result.usage.promptTokens,
-                    completionTokens: result.usage.completionTokens,
-                    totalTokens: result.usage.totalTokens,
-                };
-            }
-
-            context.onTokenUsage(usage);
-        }
-
-        // If no tool calls, we're done
-        if (!result.toolCalls || result.toolCalls.length === 0) {
-            finalContent = result.content || '';
-            break;
-        }
-
-        const normalizedToolCalls = result.toolCalls.map((toolCall, index) => ({
-            ...toolCall,
-            id:
-                toolCall.id ||
-                `${toolCall.function?.name || 'tool'}-${Date.now()}-${index}`,
-            type: 'function' as const,
-            function: {
-                name: toolCall.function?.name || 'unknown_tool',
-                arguments:
-                    typeof toolCall.function?.arguments === 'string'
-                        ? toolCall.function.arguments
-                        : JSON.stringify(toolCall.function?.arguments ?? {}),
-            },
-        }));
-
-        // Add assistant message with tool calls
-        currentMessages.push({
-            role: 'assistant',
-            content: result.content || '[Calling tools...]',
-            tool_calls: normalizedToolCalls,
-        });
-
-        // Execute tool calls
-        for (const toolCall of normalizedToolCalls) {
-            const toolName = toolCall.function.name;
-            const toolArgs = toolCall.function.arguments;
-            const toolCallId = toolCall.id;
-
-            let parsedArgs: unknown;
-            try {
-                parsedArgs =
-                    typeof toolArgs === 'string'
-                        ? JSON.parse(toolArgs)
-                        : toolArgs;
-            } catch {
-                parsedArgs = toolArgs;
-            }
-
-            context.onToolCallEvent?.({
-                id: toolCallId,
-                name: toolName,
-                status: 'active',
-                branchId,
-                branchLabel,
-            });
-
-            let toolResult: string;
-            let toolError: string | undefined;
-            const handler = toolHandlers.get(toolName);
-
-            if (handler) {
-                try {
-                    toolResult = await handler(parsedArgs);
-                } catch (err) {
-                    toolError =
-                        err instanceof Error ? err.message : String(err);
-                    toolResult = `Error executing tool ${toolName}: ${toolError}`;
-                }
-            } else if (context.onToolCall) {
-                try {
-                    toolResult = await context.onToolCall(toolName, parsedArgs);
-                } catch (err) {
-                    toolError =
-                        err instanceof Error ? err.message : String(err);
-                    toolResult = `Error executing tool ${toolName}: ${toolError}`;
-                }
-            } else {
-                toolError = `Tool ${toolName} not found or no handler registered`;
-                toolResult = toolError;
-            }
-
-            currentMessages.push({
-                role: 'tool',
-                content: toolResult,
-                tool_call_id: toolCallId,
-                name: toolName,
-            });
-
-            context.onToolCallEvent?.({
-                id: toolCallId,
-                name: toolName,
-                status: toolError ? 'error' : 'completed',
-                error: toolError,
-                branchId,
-                branchLabel,
-            });
-        }
-
-        iterations++;
-    }
-
-    return { finalContent, iterations, messages: currentMessages };
-}
 
 /**
  * Parallel Node Extension
@@ -283,15 +133,7 @@ export const ParallelNodeExtension: NodeExtension = {
 
         // Prepare global tools map
         const globalTools = context.tools || [];
-        const toolHandlers = new Map<
-            string,
-            (args: unknown) => Promise<string> | string
-        >();
-        for (const tool of globalTools) {
-            if (tool.handler) {
-                toolHandlers.set(tool.function.name, tool.handler);
-            }
-        }
+        const toolMeta = buildToolMeta(globalTools);
 
         // Execute all branches internally using their model/prompt configs
         // Branches are internal LLM calls, not external node connections
@@ -331,6 +173,13 @@ export const ParallelNodeExtension: NodeExtension = {
                 const branchContext: ExecutionContext = {
                     ...context,
                     signal: branchAbort.signal,
+                    onToolCallEvent: (event) => {
+                        context.onToolCallEvent?.({
+                            ...event,
+                            branchId: branch.id,
+                            branchLabel: branch.label,
+                        });
+                    },
                 };
 
                 let supportsImages = false;
@@ -367,17 +216,30 @@ export const ParallelNodeExtension: NodeExtension = {
                 context.onBranchStart?.(branch.id, branch.label);
 
                 // Run tool loop
-                const result = await runToolLoop(
+                const result = await runValidatedToolLoop({
                     provider,
-                    branchModel,
+                    model: branchModel,
                     messages,
                     toolsForLLM,
-                    toolHandlers,
-                    branchContext,
-                    branch.id,
-                    branch.label,
-                    DEFAULT_MAX_TOOL_ITERATIONS
-                );
+                    toolMeta,
+                    context: branchContext,
+                    nodeId: `${node.id}:${branch.id}`,
+                    maxIterations: DEFAULT_MAX_TOOL_ITERATIONS,
+                    onToken: (token) => {
+                        context.onBranchToken?.(
+                            branch.id,
+                            branch.label,
+                            token
+                        );
+                    },
+                    onReasoning: (token) => {
+                        context.onBranchReasoning?.(
+                            branch.id,
+                            branch.label,
+                            token
+                        );
+                    },
+                });
 
                 const output = result.finalContent;
 

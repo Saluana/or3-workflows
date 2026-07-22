@@ -104,6 +104,20 @@ export interface ToolDefinition {
     function: ToolFunctionDefinition;
 }
 
+/**
+ * Tool definition with optional Zod schema + handler for execution.
+ */
+export interface ExecutableToolDefinition extends ToolDefinition {
+    /** Handler function to execute when the tool is called */
+    handler?: (args: unknown) => Promise<string> | string;
+    /**
+     * Optional Zod schema for argument validation (preferred over JSON Schema).
+     * When set, args are parsed with this schema before the handler runs.
+     */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    zodSchema?: import('zod').ZodType<any>;
+}
+
 export type ToolCallStatus = 'active' | 'completed' | 'error';
 
 export interface ToolCallEvent {
@@ -189,7 +203,21 @@ export interface LLMProvider {
                 | 'none'
                 | 'required'
                 | { type: 'function'; function: { name: string } };
-            responseFormat?: { type: 'json_object' | 'text' };
+            /**
+             * Response format. Prefer `json_schema` for structured outputs when
+             * the provider supports it; `json_object` is the loose fallback.
+             */
+            responseFormat?:
+                | { type: 'json_object' | 'text' }
+                | {
+                      type: 'json_schema';
+                      json_schema: {
+                          name: string;
+                          description?: string;
+                          schema: Record<string, unknown>;
+                          strict?: boolean;
+                      };
+                  };
             onToken?: (token: string) => void;
             onReasoning?: (token: string) => void;
             signal?: AbortSignal;
@@ -202,6 +230,14 @@ export interface LLMProvider {
             completionTokens: number;
             totalTokens: number;
         };
+        /** Provider finish reason when available */
+        finishReason?:
+            | 'stop'
+            | 'length'
+            | 'tool_calls'
+            | 'content_filter'
+            | 'error'
+            | 'unknown';
     }>;
 
     /**
@@ -527,15 +563,26 @@ export interface ExecutionResult {
 
     /**
      * True when execution paused for durable HITL (not a failure).
-     * Check `hitlRequest` / `checkpointId` to resume later.
+     * Check `hitlRequest` / `checkpointId` / `pause` to resume later.
      */
     paused?: boolean;
 
-    /** Checkpoint id when paused (or auto-saved). */
+    /** Checkpoint id when paused (or auto-saved). Alias for pause.resumeToken when HITL. */
     checkpointId?: string;
 
     /** Pending HITL request when `paused` is true. */
     hitlRequest?: HITLRequest;
+
+    /**
+     * Explicit pause reason envelope (preferred over bare `paused` boolean).
+     * `resumeToken` is typically the checkpoint id.
+     */
+    pause?: {
+        type: 'hitl' | 'budget' | 'manual' | 'error';
+        resumeToken: string;
+        reason?: string;
+        hitlRequest?: HITLRequest;
+    };
 }
 
 /**
@@ -744,6 +791,16 @@ export interface ExecutionOptions {
     autoCheckpoint?: boolean;
 
     /**
+     * Run-level stop / budget policy (max steps, duration, tokens).
+     */
+    stopPolicy?: import('../stopPolicy').StopPolicy;
+
+    /**
+     * Unified typed event stream. Fired in addition to legacy callbacks.
+     */
+    onEvent?: import('../events').WorkflowEventHandler;
+
+    /**
      * Parent abort signal for nested/subflow adapters.
      * When aborted, the child adapter's controller aborts too.
      * @internal
@@ -756,15 +813,6 @@ export interface ExecutionOptions {
      * Existing workflows with loosely-typed data may fail validation.
      */
     strictDataValidation?: boolean;
-}
-
-/**
- * Tool definition with handler for execution context.
- * Extends the base ToolDefinition with an optional handler function.
- */
-export interface ExecutableToolDefinition extends ToolDefinition {
-    /** Handler function to execute when the tool is called */
-    handler?: (args: unknown) => Promise<string> | string;
 }
 
 /** Resume metadata to continue from a failed node without re-running parents. */
@@ -900,6 +948,15 @@ export interface ExecutionContext {
     onLoopIteration?: (iteration: number, maxIterations: number) => void;
     /** Callback for non-fatal warnings (e.g., router fallback) */
     onWarning?: (message: string) => void;
+    /**
+     * Assert stop/budget policy still allows another LLM step.
+     * Throws BudgetExceededError when exhausted.
+     */
+    assertBudget?: () => void;
+    /**
+     * Record one LLM chat round (+ optional actual token count) toward stop policy.
+     */
+    recordLlmStep?: (tokens?: number) => void;
 }
 
 /** Execution adapter interface */

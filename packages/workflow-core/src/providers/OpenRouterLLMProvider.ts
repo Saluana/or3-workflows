@@ -18,7 +18,17 @@ type ChatOptions = {
         | 'none'
         | 'required'
         | { type: 'function'; function: { name: string } };
-    responseFormat?: { type: 'json_object' | 'text' };
+    responseFormat?:
+        | { type: 'json_object' | 'text' }
+        | {
+              type: 'json_schema';
+              json_schema: {
+                  name: string;
+                  description?: string;
+                  schema: Record<string, unknown>;
+                  strict?: boolean;
+              };
+          };
     onToken?: (token: string) => void;
     onReasoning?: (token: string) => void;
     signal?: AbortSignal;
@@ -29,7 +39,7 @@ interface StreamChunk {
     choices: Array<{
         delta?: {
             content?: string;
-            reasoning?: string; // Thinking/reasoning tokens from models that support it
+            reasoning?: string;
             tool_calls?: Array<{
                 index: number;
                 id?: string;
@@ -39,7 +49,6 @@ interface StreamChunk {
                     arguments?: string;
                 };
             }>;
-            // Some providers/SDKs might return camelCase
             toolCalls?: Array<{
                 index: number;
                 id?: string;
@@ -50,8 +59,18 @@ interface StreamChunk {
                 };
             }>;
         };
+        finish_reason?: string | null;
+        finishReason?: string | null;
         message?: { content?: string | unknown[] };
     }>;
+    usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+        promptTokens?: number;
+        completionTokens?: number;
+        totalTokens?: number;
+    };
 }
 
 type OpenRouterContentPart =
@@ -67,6 +86,55 @@ type OpenRouterMessage = {
     content: string | OpenRouterContentPart[];
 };
 
+type FinishReason =
+    | 'stop'
+    | 'length'
+    | 'tool_calls'
+    | 'content_filter'
+    | 'error'
+    | 'unknown';
+
+type ChatResult = {
+    content: string | null;
+    toolCalls?: ToolCallResult[];
+    usage?: {
+        promptTokens: number;
+        completionTokens: number;
+        totalTokens: number;
+    };
+    finishReason?: FinishReason;
+};
+
+function normalizeFinishReason(
+    reason: string | null | undefined
+): FinishReason | undefined {
+    if (!reason) return undefined;
+    switch (reason) {
+        case 'stop':
+        case 'length':
+        case 'tool_calls':
+        case 'content_filter':
+        case 'error':
+            return reason;
+        case 'function_call':
+            return 'tool_calls';
+        case 'max_tokens':
+            return 'length';
+        default:
+            return 'unknown';
+    }
+}
+
+function extractUsage(chunkUsage: StreamChunk['usage']): ChatResult['usage'] {
+    if (!chunkUsage) return undefined;
+    return {
+        promptTokens: chunkUsage.prompt_tokens ?? chunkUsage.promptTokens ?? 0,
+        completionTokens:
+            chunkUsage.completion_tokens ?? chunkUsage.completionTokens ?? 0,
+        totalTokens: chunkUsage.total_tokens ?? chunkUsage.totalTokens ?? 0,
+    };
+}
+
 export class OpenRouterLLMProvider implements LLMProvider {
     private modelCapabilitiesCache: Map<string, ModelCapabilities | null> =
         new Map();
@@ -80,37 +148,45 @@ export class OpenRouterLLMProvider implements LLMProvider {
         model: string,
         messages: ChatMessage[],
         options?: ChatOptions
-    ): Promise<{
-        content: string | null;
-        toolCalls?: ToolCallResult[];
-        usage?: {
-            promptTokens: number;
-            completionTokens: number;
-            totalTokens: number;
-        };
-    }> {
+    ): Promise<ChatResult> {
         // The SDK schema does not accept file content parts yet, so use raw fetch when needed.
         if (this.hasFileParts(messages)) {
             return this.chatWithFilesViaFetch(model, messages, options);
+        }
+
+        // Prefer abortable fetch when a signal is provided — SDK stream path
+        // cannot cancel the underlying HTTP request mid-flight.
+        // Fall back to SDK when we can't resolve an API key (e.g. mocked clients).
+        if (options?.signal) {
+            const apiKey = await this.resolveApiKey();
+            if (apiKey) {
+                return this.chatViaFetch(model, messages, options);
+            }
         }
 
         const stream = (await this.client.chat.send({
             model,
             messages: messages as any, // OpenRouter SDK types might differ slightly
             stream: true,
+            // Request usage on the final stream chunk when supported
+            stream_options: { include_usage: true },
             temperature: options?.temperature,
             maxTokens: options?.maxTokens,
             tools: options?.tools,
             toolChoice: options?.toolChoice,
             responseFormat: options?.responseFormat,
-        })) as AsyncIterable<StreamChunk>;
+        } as any)) as unknown as AsyncIterable<StreamChunk>;
 
         let content = '';
+        let finishReason: string | null | undefined;
+        let usage:
+            | {
+                  promptTokens: number;
+                  completionTokens: number;
+                  totalTokens: number;
+              }
+            | undefined;
         const toolCallsMap = new Map<number, ToolCallResult>();
-
-        // We need to handle cancellation if signal is provided.
-        // However, the OpenRouter SDK doesn't seem to accept a signal in `send`.
-        // But we can check signal in the loop.
 
         for await (const chunk of stream) {
             if (this.debug) {
@@ -121,7 +197,15 @@ export class OpenRouterLLMProvider implements LLMProvider {
                 throw new Error('Request cancelled');
             }
 
-            const delta = chunk.choices[0]?.delta;
+            const choice = chunk.choices[0];
+            const delta = choice?.delta;
+            if (choice?.finish_reason || choice?.finishReason) {
+                finishReason = choice.finish_reason ?? choice.finishReason;
+            }
+
+            if (chunk.usage) {
+                usage = extractUsage(chunk.usage);
+            }
 
             // Handle reasoning/thinking tokens (from models like o1, Claude with extended thinking, etc.)
             if (delta?.reasoning) {
@@ -171,9 +255,20 @@ export class OpenRouterLLMProvider implements LLMProvider {
         return {
             content,
             toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-            // Usage is usually not available in streaming response until the end or not at all in some APIs
-            // OpenRouter might provide it in the last chunk but we are just aggregating content for now.
+            usage,
+            finishReason: normalizeFinishReason(finishReason),
         };
+    }
+
+    /**
+     * Abortable streaming chat via raw fetch (used when AbortSignal is set).
+     */
+    private async chatViaFetch(
+        model: string,
+        messages: ChatMessage[],
+        options?: ChatOptions
+    ): Promise<ChatResult> {
+        return this.chatWithFilesViaFetch(model, messages, options);
     }
 
     private hasFileParts(messages: ChatMessage[]): boolean {
@@ -264,15 +359,7 @@ export class OpenRouterLLMProvider implements LLMProvider {
         model: string,
         messages: ChatMessage[],
         options?: ChatOptions
-    ): Promise<{
-        content: string | null;
-        toolCalls?: ToolCallResult[];
-        usage?: {
-            promptTokens: number;
-            completionTokens: number;
-            totalTokens: number;
-        };
-    }> {
+    ): Promise<ChatResult> {
         const apiKey = await this.resolveApiKey();
         if (!apiKey) {
             throw new Error('OpenRouter API key is missing');
@@ -285,6 +372,7 @@ export class OpenRouterLLMProvider implements LLMProvider {
             model,
             messages: this.normalizeMessages(messages),
             stream: true,
+            stream_options: { include_usage: true },
         };
 
         if (typeof options?.temperature === 'number') {
@@ -300,7 +388,9 @@ export class OpenRouterLLMProvider implements LLMProvider {
             body.tool_choice = options.toolChoice;
         }
         if (options?.responseFormat) {
-            body.response_format = options.responseFormat;
+            body.response_format = this.toOpenAIResponseFormat(
+                options.responseFormat
+            );
         }
 
         const headers: Record<string, string> = {
@@ -343,6 +433,8 @@ export class OpenRouterLLMProvider implements LLMProvider {
         }
 
         let content = '';
+        let finishReason: string | null | undefined;
+        let usage: ChatResult['usage'];
         const toolCallsMap = new Map<number, ToolCallResult>();
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -357,123 +449,143 @@ export class OpenRouterLLMProvider implements LLMProvider {
             if (options?.onReasoning) options.onReasoning(text);
         };
 
-        for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
+        try {
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
 
-            if (options?.signal?.aborted) {
-                throw new Error('Request cancelled');
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            for (const raw of lines) {
-                const line = raw.trim();
-                if (!line.startsWith('data:')) continue;
-                const data = line.replace(/^data:\s*/, '');
-                if (!data) continue;
-                if (data === '[DONE]') {
-                    continue;
+                if (options?.signal?.aborted) {
+                    await reader.cancel().catch(() => undefined);
+                    throw new Error('Request cancelled');
                 }
 
-                let parsed: StreamChunk | null = null;
-                try {
-                    parsed = JSON.parse(data) as StreamChunk;
-                } catch (error) {
-                    if (this.debug) {
-                        console.warn(
-                            '[OpenRouter] Failed to parse SSE chunk',
-                            error
-                        );
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const raw of lines) {
+                    const line = raw.trim();
+                    if (!line.startsWith('data:')) continue;
+                    const data = line.replace(/^data:\s*/, '');
+                    if (!data) continue;
+                    if (data === '[DONE]') {
+                        continue;
                     }
-                    continue;
-                }
 
-                const choices = parsed.choices || [];
-                for (const choice of choices) {
-                    const delta = choice.delta || {};
-
-                    const reasoningDetails = (
-                        delta as {
-                            reasoning_details?: Array<{
-                                type?: string;
-                                text?: string;
-                                summary?: string;
-                            }>;
+                    let parsed: StreamChunk | null = null;
+                    try {
+                        parsed = JSON.parse(data) as StreamChunk;
+                    } catch (error) {
+                        if (this.debug) {
+                            console.warn(
+                                '[OpenRouter] Failed to parse SSE chunk',
+                                error
+                            );
                         }
-                    ).reasoning_details;
-                    const firstReasoning = reasoningDetails?.[0];
-                    if (firstReasoning?.type === 'reasoning.text') {
-                        if (firstReasoning.text)
-                            pushReasoning(firstReasoning.text);
-                    } else if (firstReasoning?.type === 'reasoning.summary') {
-                        if (firstReasoning.summary)
-                            pushReasoning(firstReasoning.summary);
-                    } else if (
-                        typeof (delta as { reasoning?: unknown }).reasoning ===
-                        'string'
-                    ) {
-                        pushReasoning(
-                            (delta as { reasoning: string }).reasoning
-                        );
+                        continue;
                     }
 
-                    const deltaContent = delta.content;
-                    if (typeof deltaContent === 'string' && deltaContent) {
-                        pushText(deltaContent);
-                    } else if (Array.isArray(deltaContent)) {
-                        for (const part of deltaContent) {
-                            const text = (
-                                part as { type?: string; text?: string }
-                            ).text;
-                            if (
-                                (part as { type?: string }).type === 'text' &&
-                                typeof text === 'string'
-                            ) {
-                                pushText(text);
+                    if (parsed.usage) {
+                        usage = extractUsage(parsed.usage);
+                    }
+
+                    const choices = parsed.choices || [];
+                    for (const choice of choices) {
+                        if (choice.finish_reason || choice.finishReason) {
+                            finishReason =
+                                choice.finish_reason ?? choice.finishReason;
+                        }
+
+                        const delta = choice.delta || {};
+
+                        const reasoningDetails = (
+                            delta as {
+                                reasoning_details?: Array<{
+                                    type?: string;
+                                    text?: string;
+                                    summary?: string;
+                                }>;
+                            }
+                        ).reasoning_details;
+                        const firstReasoning = reasoningDetails?.[0];
+                        if (firstReasoning?.type === 'reasoning.text') {
+                            if (firstReasoning.text)
+                                pushReasoning(firstReasoning.text);
+                        } else if (
+                            firstReasoning?.type === 'reasoning.summary'
+                        ) {
+                            if (firstReasoning.summary)
+                                pushReasoning(firstReasoning.summary);
+                        } else if (
+                            typeof (delta as { reasoning?: unknown })
+                                .reasoning === 'string'
+                        ) {
+                            pushReasoning(
+                                (delta as { reasoning: string }).reasoning
+                            );
+                        }
+
+                        const deltaContent = delta.content;
+                        if (typeof deltaContent === 'string' && deltaContent) {
+                            pushText(deltaContent);
+                        } else if (Array.isArray(deltaContent)) {
+                            for (const part of deltaContent) {
+                                const text = (
+                                    part as { type?: string; text?: string }
+                                ).text;
+                                if (
+                                    (part as { type?: string }).type ===
+                                        'text' &&
+                                    typeof text === 'string'
+                                ) {
+                                    pushText(text);
+                                }
+                            }
+                        }
+
+                        if (
+                            typeof (delta as { text?: unknown }).text ===
+                            'string'
+                        ) {
+                            pushText((delta as { text: string }).text);
+                        }
+
+                        const toolCalls =
+                            (delta as { tool_calls?: unknown }).tool_calls ||
+                            (delta as { toolCalls?: unknown }).toolCalls;
+
+                        if (Array.isArray(toolCalls)) {
+                            for (const toolCall of toolCalls) {
+                                const index = toolCall.index;
+                                if (!toolCallsMap.has(index)) {
+                                    toolCallsMap.set(index, {
+                                        id: toolCall.id || '',
+                                        type: 'function' as const,
+                                        function: {
+                                            name:
+                                                toolCall.function?.name || '',
+                                            arguments:
+                                                toolCall.function?.arguments ||
+                                                '',
+                                        },
+                                    });
+                                } else {
+                                    const current = toolCallsMap.get(index)!;
+                                    if (toolCall.id) current.id = toolCall.id;
+                                    if (toolCall.function?.name)
+                                        current.function.name =
+                                            toolCall.function.name;
+                                    if (toolCall.function?.arguments)
+                                        current.function.arguments +=
+                                            toolCall.function.arguments;
+                                }
                             }
                         }
                     }
-
-                    if (
-                        typeof (delta as { text?: unknown }).text === 'string'
-                    ) {
-                        pushText((delta as { text: string }).text);
-                    }
-
-                    const toolCalls =
-                        (delta as { tool_calls?: unknown }).tool_calls ||
-                        (delta as { toolCalls?: unknown }).toolCalls;
-
-                    if (Array.isArray(toolCalls)) {
-                        for (const toolCall of toolCalls) {
-                            const index = toolCall.index;
-                            if (!toolCallsMap.has(index)) {
-                                toolCallsMap.set(index, {
-                                    id: toolCall.id || '',
-                                    type: 'function' as const,
-                                    function: {
-                                        name: toolCall.function?.name || '',
-                                        arguments:
-                                            toolCall.function?.arguments || '',
-                                    },
-                                });
-                            } else {
-                                const current = toolCallsMap.get(index)!;
-                                if (toolCall.id) current.id = toolCall.id;
-                                if (toolCall.function?.name)
-                                    current.function.name =
-                                        toolCall.function.name;
-                                if (toolCall.function?.arguments)
-                                    current.function.arguments +=
-                                        toolCall.function.arguments;
-                            }
-                        }
-                    }
                 }
             }
+        } finally {
+            reader.releaseLock();
         }
 
         const toolCalls = Array.from(toolCallsMap.values());
@@ -481,7 +593,26 @@ export class OpenRouterLLMProvider implements LLMProvider {
         return {
             content,
             toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+            usage,
+            finishReason: normalizeFinishReason(finishReason),
         };
+    }
+
+    private toOpenAIResponseFormat(
+        format: NonNullable<ChatOptions['responseFormat']>
+    ): Record<string, unknown> {
+        if (format.type === 'json_schema') {
+            return {
+                type: 'json_schema',
+                json_schema: {
+                    name: format.json_schema.name,
+                    description: format.json_schema.description,
+                    schema: format.json_schema.schema,
+                    strict: format.json_schema.strict ?? true,
+                },
+            };
+        }
+        return { type: format.type };
     }
 
     async getModelCapabilities(
