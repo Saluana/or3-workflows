@@ -19,6 +19,7 @@ const props = defineProps<{
 const emit = defineEmits<{
     'update:chatInput': [value: string];
     send: [];
+    stop: [];
     clear: [];
     toggleBranch: [key: string];
     toggleMessageBranch: [payload: { messageId: string; branchId: string }];
@@ -581,22 +582,28 @@ const formatNumber = (value?: number) =>
                     @keydown.enter.shift.exact=""
                 ></textarea>
                 <button
+                    v-if="isRunning"
+                    class="stop-btn"
+                    type="button"
+                    title="Stop execution"
+                    aria-label="Stop execution"
+                    @click="emit('stop')"
+                >
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        aria-hidden="true"
+                    >
+                        <rect x="6" y="6" width="12" height="12" rx="1" />
+                    </svg>
+                </button>
+                <button
+                    v-else
                     class="send-btn"
-                    :disabled="!chatInput?.trim() || isRunning"
+                    :disabled="!chatInput?.trim()"
                     @click="emit('send')"
                 >
                     <svg
-                        v-if="isRunning"
-                        class="spinner"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                    >
-                        <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
-                    </svg>
-                    <svg
-                        v-else
                         viewBox="0 0 24 24"
                         fill="none"
                         stroke="currentColor"
@@ -1376,6 +1383,35 @@ const formatNumber = (value?: number) =>
 .send-btn svg {
     width: 16px;
     height: 16px;
+}
+
+.stop-btn {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--or3-color-error, #ef4444);
+    border: none;
+    border-radius: var(--or3-radius-md, 8px);
+    color: white;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all var(--or3-transition-fast, 120ms);
+}
+
+.stop-btn:hover {
+    background: var(--or3-color-error-hover, #f87171);
+    transform: scale(1.02);
+}
+
+.stop-btn:active {
+    transform: scale(0.98);
+}
+
+.stop-btn svg {
+    width: 14px;
+    height: 14px;
 }
 
 .input-hint {

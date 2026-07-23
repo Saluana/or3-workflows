@@ -7,6 +7,8 @@ or3-workflows uses pluggable adapters for extensibility. This document covers th
 -   [Memory Adapter](#memory-adapter)
 -   [Storage Adapter](#storage-adapter)
 -   [Token Counter](#token-counter)
+-   [Checkpoint Adapter (Durable HITL)](#checkpoint-adapter-durable-hitl)
+-   [MCP Tool Adapter](#mcp-tool-adapter)
 
 ---
 
@@ -51,7 +53,7 @@ interface MemoryAdapter {
 import {
     OpenRouterExecutionAdapter,
     InMemoryAdapter,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 // Default in-memory adapter
 const adapter = new OpenRouterExecutionAdapter(client, {
@@ -72,7 +74,7 @@ import type {
     MemoryAdapter,
     MemoryEntry,
     MemoryQuery,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 export class RedisMemoryAdapter implements MemoryAdapter {
     private redis: Redis;
@@ -205,7 +207,7 @@ import type {
     MemoryAdapter,
     MemoryEntry,
     MemoryQuery,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 export class PostgresMemoryAdapter implements MemoryAdapter {
     private pool: Pool;
@@ -302,7 +304,7 @@ import type {
     MemoryAdapter,
     MemoryEntry,
     MemoryQuery,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 export class PineconeMemoryAdapter implements MemoryAdapter {
     private pinecone: Pinecone;
@@ -426,7 +428,7 @@ interface WorkflowSummary {
 ### Usage
 
 ```typescript
-import { LocalStorageAdapter } from '@or3/workflow-core';
+import { LocalStorageAdapter } from 'or3-workflow-core';
 
 const storage = new LocalStorageAdapter('my-app-workflows');
 
@@ -465,7 +467,7 @@ interface TokenCounter {
 ### Default Implementation
 
 ```typescript
-import { ApproximateTokenCounter } from '@or3/workflow-core';
+import { ApproximateTokenCounter } from 'or3-workflow-core';
 
 // Uses ~4 chars per token approximation
 const counter = new ApproximateTokenCounter();
@@ -480,7 +482,7 @@ For more accurate counting, implement your own using tiktoken or similar:
 
 ```typescript
 import { encoding_for_model } from 'tiktoken';
-import type { TokenCounter } from '@or3/workflow-core';
+import type { TokenCounter } from 'or3-workflow-core';
 
 export class TiktokenCounter implements TokenCounter {
     private encoders = new Map<string, ReturnType<typeof encoding_for_model>>();
@@ -519,7 +521,7 @@ export class TiktokenCounter implements TokenCounter {
 ### Usage with Execution
 
 ```typescript
-import { OpenRouterExecutionAdapter } from '@or3/workflow-core';
+import { OpenRouterExecutionAdapter } from 'or3-workflow-core';
 
 const adapter = new OpenRouterExecutionAdapter(client, {
     tokenCounter: new TiktokenCounter(),
@@ -530,6 +532,108 @@ const adapter = new OpenRouterExecutionAdapter(client, {
     },
 });
 ```
+
+---
+
+## Checkpoint Adapter (Durable HITL)
+
+Persist execution snapshots so workflows can pause for human approval and resume after a process restart.
+
+```typescript
+import {
+    OpenRouterExecutionAdapter,
+    InMemoryCheckpointAdapter,
+    InMemoryHITLAdapter,
+    checkpointToResumeFrom,
+} from 'or3-workflow-core';
+
+const checkpoints = new InMemoryCheckpointAdapter();
+const hitl = new InMemoryHITLAdapter();
+
+const adapter = new OpenRouterExecutionAdapter(client, {
+    durableHITL: true,
+    checkpointAdapter: checkpoints,
+    hitlAdapter: hitl,
+});
+
+const result = await adapter.execute(workflow, { text: 'hi' }, callbacks);
+
+if (result.paused) {
+    // Persist result.checkpointId / result.hitlRequest for your UI
+    // Later, after the human responds:
+    const cp = await checkpoints.load(result.checkpointId!);
+    const response = {
+        requestId: result.hitlRequest!.id,
+        action: 'approve' as const,
+        respondedAt: new Date().toISOString(),
+    };
+    await hitl.respond(result.hitlRequest!.id, response);
+
+    const resumeAdapter = new OpenRouterExecutionAdapter(client, {
+        durableHITL: true,
+        checkpointAdapter: checkpoints,
+        hitlAdapter: hitl,
+        resumeFrom: checkpointToResumeFrom(cp!, response),
+    });
+    await resumeAdapter.execute(workflow, { text: 'hi' }, callbacks);
+}
+```
+
+Set `autoCheckpoint: true` to also save a running snapshot after each DAG wave.
+
+---
+
+## MCP Tool Adapter
+
+Import tools from an MCP server into `ExecutionOptions.tools` without hard-depending on the MCP SDK. Wrap any client that implements `McpClientLike`:
+
+```typescript
+import {
+    mcpToolsToExecutable,
+    McpToolAdapter,
+    type McpClientLike,
+} from 'or3-workflow-core';
+
+const mcp: McpClientLike = {
+    listTools: () => client.listTools(),
+    callTool: (name, args) => client.callTool({ name, arguments: args }),
+};
+
+const tools = await mcpToolsToExecutable(mcp, { prefix: 'mcp_' });
+// or: const tools = await new McpToolAdapter(mcp).getTools();
+
+const adapter = new OpenRouterExecutionAdapter(llm, { tools });
+```
+
+### Resources & prompts
+
+`McpClientLike` optionally supports resources and prompts:
+
+```typescript
+const resources = await mcpListResources(mcp);
+const text = await mcpReadResource(mcp, 'file://docs/readme');
+const prompts = await mcpListPrompts(mcp);
+const greeting = await mcpGetPrompt(mcp, 'greet', { who: 'Ada' });
+```
+
+### Session scoping
+
+Use `McpSession` to scope tools to a workflow run and clean up on close:
+
+```typescript
+import { McpSession } from 'or3-workflow-core';
+
+const session = new McpSession(mcp, {
+    sessionId: 'run-123',
+    prefix: 'mcp_',
+});
+
+const tools = await session.register(); // namespaced registry ids
+// ... run workflow with tools ...
+await session.close(); // unregister + client.close()
+```
+
+Checkpoints now include `schemaVersion` (currently `1`). Loaders should call `normalizeCheckpoint()` for older snapshots.
 
 ---
 

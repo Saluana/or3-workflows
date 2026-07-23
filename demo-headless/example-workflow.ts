@@ -1,4 +1,4 @@
-import type { WorkflowData } from '@or3/workflow-core';
+import type { WorkflowData } from 'or3-workflow-core';
 
 export const workflow: WorkflowData = {
     meta: {

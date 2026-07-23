@@ -46,6 +46,13 @@ import {
     getDefaultApprovalOptions,
 } from './hitl';
 import {
+    type WorkflowCheckpoint,
+    createCheckpointId,
+    WorkflowPausedError,
+    isWorkflowPausedError,
+    CHECKPOINT_SCHEMA_VERSION,
+} from './checkpoint';
+import {
     ApproximateTokenCounter,
     countMessageTokens,
     calculateThreshold,
@@ -56,6 +63,15 @@ import {
     type TokenCounter,
 } from './compaction';
 import { validateWorkflow } from './validation';
+import { safeEmitEvent } from './events';
+import {
+    BudgetExceededError,
+    checkStopPolicy,
+    createStopPolicyState,
+    isBudgetExceededError,
+    type StopPolicyState,
+} from './stopPolicy';
+import type { EdgeData, EdgeInputMapping } from './types/base';
 
 // ============================================================================
 // Constants
@@ -94,6 +110,10 @@ interface WorkflowGraph {
         Record<string, ReadonlyArray<{ nodeId: string; handleId?: string }>>
     >;
     readonly parents: Readonly<Record<string, ReadonlyArray<string>>>;
+    /** Inbound edges keyed by target node id (preserves EdgeData / inputMapping) */
+    readonly inboundEdges: Readonly<
+        Record<string, ReadonlyArray<WorkflowEdge>>
+    >;
 }
 
 /** Internal execution state */
@@ -132,6 +152,20 @@ function scopeMeta(
         id: meta.id ? scopeNodeId(meta.id, path) : meta.id,
         path: [...path],
     };
+}
+
+/**
+ * Interpolate `{{nodeId}}` (and `{{input}}`) placeholders for edge template mapping.
+ */
+function interpolateEdgeTemplate(
+    template: string,
+    outputs: Record<string, string>,
+    currentInput: string
+): string {
+    return template.replace(/\{\{\s*([\w.:-]+)\s*\}\}/g, (_match, key: string) => {
+        if (key === 'input') return currentInput;
+        return outputs[key] ?? '';
+    });
 }
 
 function scopeExecutionCallbacks(
@@ -304,7 +338,7 @@ export function registerExtension(extension: NodeExtension): void {
  * @example
  * ```typescript
  * import OpenRouter from '@openrouter/sdk';
- * import { OpenRouterExecutionAdapter } from '@or3/workflow-core';
+ * import { OpenRouterExecutionAdapter } from 'or3-workflow-core';
  *
  * const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
  * const adapter = new OpenRouterExecutionAdapter(client, {
@@ -326,6 +360,9 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         nodeId: string;
         usage: TokenUsageDetails;
     }> = [];
+    private stopPolicyState: StopPolicyState | null = null;
+    private assertBudgetFn: (() => void) | null = null;
+    private recordLlmStepFn: ((tokens?: number) => void) | null = null;
 
     // Cache node type sets for O(1) lookups
     private static readonly LLM_NODE_TYPES = new Set([
@@ -396,12 +433,40 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             this.abortController.abort();
         }
         this.abortController = new AbortController();
+
+        // Link parent signal (subflows) so parent stop() cancels children
+        const parentSignal = this.options._parentSignal;
+        if (parentSignal) {
+            if (parentSignal.aborted) {
+                this.abortController.abort();
+            } else {
+                parentSignal.addEventListener(
+                    'abort',
+                    () => {
+                        this.abortController?.abort();
+                    },
+                    { once: true }
+                );
+            }
+        }
+
         this.running = true;
         this.tokenUsageEvents = [];
+        this.stopPolicyState = createStopPolicyState();
+
+        const emit = (event: Parameters<typeof safeEmitEvent>[1]) => {
+            safeEmitEvent(this.options.onEvent, event);
+        };
 
         const resumeFrom = this.options.resumeFrom;
 
         const startTime = Date.now();
+        emit({
+            type: 'run_start',
+            workflowName: workflow.meta.name,
+            sessionId: this.options.sessionId,
+            at: startTime,
+        });
         const nodeOutputs: Record<string, string> = resumeFrom?.nodeOutputs
             ? { ...resumeFrom.nodeOutputs }
             : {};
@@ -412,6 +477,56 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         let finalNodeId: string | undefined = resumeFrom?.finalNodeId;
         let finalOutput = resumeFrom?.resumeInput || '';
         let sessionMessages: ChatMessage[] = [];
+
+        const assertBudget = () => {
+            const check = checkStopPolicy(
+                this.options.stopPolicy,
+                this.stopPolicyState!
+            );
+            if (check.exceeded) {
+                emit({
+                    type: 'budget',
+                    reason: check.reason,
+                    tokensUsed: this.stopPolicyState!.tokens,
+                    stepsUsed: this.stopPolicyState!.steps,
+                    durationMs: Date.now() - this.stopPolicyState!.startedAt,
+                    at: Date.now(),
+                });
+                throw new BudgetExceededError(check.reason, check.message);
+            }
+        };
+
+        const recordLlmStep = (tokens?: number) => {
+            if (!this.stopPolicyState) return;
+            this.stopPolicyState.steps += 1;
+            if (typeof tokens === 'number' && tokens > 0) {
+                this.stopPolicyState.tokens += tokens;
+            }
+            // Enforce duration/token budgets immediately; maxSteps is checked
+            // at the start of the next LLM call via assertBudget.
+            const policy = this.options.stopPolicy;
+            if (!policy) return;
+            const check = checkStopPolicy(
+                {
+                    maxDurationMs: policy.maxDurationMs,
+                    maxTokens: policy.maxTokens,
+                },
+                this.stopPolicyState
+            );
+            if (check.exceeded) {
+                emit({
+                    type: 'budget',
+                    reason: check.reason,
+                    tokensUsed: this.stopPolicyState.tokens,
+                    stepsUsed: this.stopPolicyState.steps,
+                    durationMs: Date.now() - this.stopPolicyState.startedAt,
+                    at: Date.now(),
+                });
+                throw new BudgetExceededError(check.reason, check.message);
+            }
+        };
+        this.assertBudgetFn = assertBudget;
+        this.recordLlmStepFn = recordLlmStep;
 
         // Preflight validation (enabled by default)
         if (this.options.preflight !== false) {
@@ -646,7 +761,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
                 const results = await Promise.all(readyNodes.map(executeNode));
 
-                // Process results
+                // Process results in readyNodes order (deterministic)
                 for (const { nodeId, result } of results) {
                     // Store output
                     nodeOutputs[nodeId] = result.output;
@@ -654,6 +769,16 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     finalNodeId = nodeId;
                     executionOrder.push(nodeId);
                     lastActiveNodeId = nodeId;
+
+                    // Append agent outputs to session in deterministic wave order
+                    // (avoids race when multiple agents ran concurrently)
+                    const waveNode = graph.nodeMap.get(nodeId);
+                    if (waveNode?.type === 'agent') {
+                        context.session.addMessage({
+                            role: 'assistant',
+                            content: result.output,
+                        });
+                    }
 
                     // Handle skipped nodes (children not in nextNodes) - except while loops which manage their own control flow
                     const currentNode = graph.nodeMap.get(nodeId);
@@ -679,6 +804,28 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     if (result.nextNodes.includes(nodeId)) {
                         executed.delete(nodeId);
                     }
+                }
+
+                // Optional auto-checkpoint after each successful wave
+                if (
+                    this.options.autoCheckpoint &&
+                    this.options.checkpointAdapter
+                ) {
+                    const autoCp: WorkflowCheckpoint = {
+                        id: createCheckpointId(),
+                        schemaVersion: CHECKPOINT_SCHEMA_VERSION,
+                        workflowId: context.workflowName,
+                        sessionId: context.session.id,
+                        createdAt: Date.now(),
+                        status: 'running',
+                        nodeOutputs: { ...nodeOutputs },
+                        executionOrder: [...executionOrder],
+                        lastActiveNodeId,
+                        sessionMessages: [...context.session.messages],
+                        resumeInput: finalOutput,
+                        startNodeId: lastActiveNodeId,
+                    };
+                    await this.options.checkpointAdapter.save(autoCp);
                 }
             }
 
@@ -715,9 +862,103 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 context.session.messages,
                 startTime
             );
+            emit({ type: 'done', result, at: Date.now() });
             callbacks.onComplete?.(result as any);
             return result;
         } catch (error) {
+            if (isWorkflowPausedError(error)) {
+                const pausedResult = this.buildExecutionResult(
+                    false,
+                    '',
+                    '',
+                    finalNodeId,
+                    executionOrder,
+                    lastActiveNodeId,
+                    nodeOutputs,
+                    sessionMessages.length
+                        ? sessionMessages
+                        : error.checkpoint.sessionMessages,
+                    startTime,
+                    undefined,
+                    {
+                        paused: true,
+                        checkpointId: error.checkpoint.id,
+                        hitlRequest: error.hitlRequest,
+                        pause: {
+                            type: 'hitl',
+                            resumeToken: error.checkpoint.id,
+                            reason: `HITL on node ${error.hitlRequest.nodeId}`,
+                            hitlRequest: error.hitlRequest,
+                        },
+                    }
+                );
+                emit({
+                    type: 'hitl_pause',
+                    request: error.hitlRequest,
+                    checkpointId: error.checkpoint.id,
+                    resumeToken: error.checkpoint.id,
+                    at: Date.now(),
+                });
+                emit({ type: 'done', result: pausedResult, at: Date.now() });
+                callbacks.onComplete?.(pausedResult as any);
+                return pausedResult;
+            }
+
+            if (isBudgetExceededError(error)) {
+                const budgetCheckpoint: WorkflowCheckpoint = {
+                    id: createCheckpointId(),
+                    schemaVersion: CHECKPOINT_SCHEMA_VERSION,
+                    workflowId: workflow.meta.name,
+                    sessionId: this.options.sessionId || 'anonymous',
+                    createdAt: Date.now(),
+                    status: 'paused',
+                    nodeOutputs: { ...nodeOutputs },
+                    executionOrder: [...executionOrder],
+                    lastActiveNodeId,
+                    sessionMessages: [...sessionMessages],
+                    resumeInput: finalOutput,
+                    startNodeId: lastActiveNodeId,
+                    pauseReason: 'budget',
+                };
+                if (this.options.checkpointAdapter) {
+                    await this.options.checkpointAdapter.save(budgetCheckpoint);
+                }
+                const budgetResult = this.buildExecutionResult(
+                    false,
+                    finalOutput,
+                    finalOutput,
+                    finalNodeId,
+                    executionOrder,
+                    lastActiveNodeId,
+                    nodeOutputs,
+                    sessionMessages,
+                    startTime,
+                    error,
+                    {
+                        paused: true,
+                        checkpointId: budgetCheckpoint.id,
+                        pause: {
+                            type: 'budget',
+                            resumeToken: budgetCheckpoint.id,
+                            reason: error.message,
+                        },
+                    }
+                );
+                emit({
+                    type: 'budget',
+                    reason: error.reason,
+                    tokensUsed: this.stopPolicyState?.tokens,
+                    stepsUsed: this.stopPolicyState?.steps,
+                    durationMs: this.stopPolicyState
+                        ? Date.now() - this.stopPolicyState.startedAt
+                        : undefined,
+                    at: Date.now(),
+                });
+                emit({ type: 'done', result: budgetResult, at: Date.now() });
+                callbacks.onComplete?.(budgetResult as any);
+                return budgetResult;
+            }
+
             const err =
                 error instanceof Error ? error : new Error(String(error));
             const result = this.buildExecutionResult(
@@ -732,10 +973,13 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 startTime,
                 err
             );
+            emit({ type: 'done', result, at: Date.now() });
             callbacks.onComplete?.(result as any);
             return result;
         } finally {
             this.running = false;
+            this.assertBudgetFn = null;
+            this.recordLlmStepFn = null;
         }
     }
 
@@ -752,7 +996,13 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         nodeOutputs: Record<string, string>,
         sessionMessages: ChatMessage[],
         startTime: number,
-        error?: Error
+        error?: Error,
+        extras?: {
+            paused?: boolean;
+            checkpointId?: string;
+            hitlRequest?: HITLRequest;
+            pause?: ExecutionResult['pause'];
+        }
     ): ExecutionResult {
         const usage = this.getTokenUsageSummary();
         const tokenUsageDetails = this.tokenUsageEvents.map((entry) => ({
@@ -772,16 +1022,22 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             duration: Date.now() - startTime,
             usage,
             tokenUsageDetails,
+            paused: extras?.paused,
+            checkpointId: extras?.checkpointId,
+            hitlRequest: extras?.hitlRequest,
+            pause: extras?.pause,
         };
     }
 
     /**
      * Stop the current execution.
+     * Aborts the shared AbortController but keeps it so traversal guards
+     * (`this.abortController?.signal.aborted`) keep seeing the aborted state
+     * until the next `execute()` creates a fresh controller.
      */
     stop(): void {
         if (this.abortController) {
             this.abortController.abort();
-            this.abortController = null;
         }
         this.running = false;
         // Clear token usage events to prevent memory buildup
@@ -837,12 +1093,14 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             Array<{ nodeId: string; handleId?: string }>
         > = {};
         const parents: Record<string, string[]> = {};
+        const inboundEdges: Record<string, WorkflowEdge[]> = {};
 
         // First pass: build node map and initialize edge arrays
         for (const node of nodes) {
             nodeMap.set(node.id, node);
             children[node.id] = [];
             parents[node.id] = [];
+            inboundEdges[node.id] = [];
         }
 
         // Second pass: build edges (with validation)
@@ -866,9 +1124,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             if (!parents[edge.target].includes(edge.source)) {
                 parents[edge.target].push(edge.source);
             }
+            inboundEdges[edge.target].push(edge);
         }
 
-        return { nodeMap, children, parents };
+        return { nodeMap, children, parents, inboundEdges };
     }
 
     // ==========================================================================
@@ -895,6 +1154,12 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         } satisfies Partial<NodeExecutionMetadata>;
 
         callbacks.onNodeStart(nodeId, meta);
+        safeEmitEvent(this.options.onEvent, {
+            type: 'node_start',
+            nodeId,
+            meta: meta as NodeExecutionMetadata,
+            at: Date.now(),
+        });
 
         // Look up extension
         const extension = extensionRegistry.get(node.type);
@@ -936,8 +1201,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         }
 
         // Construct ExecutionContext for extension
+        // Resolve input from parent outputs (not shared mutable currentInput)
+        // so concurrent DAG waves don't race on a single field.
         const executionContext: ExecutionContext = {
-            input: context.currentInput,
+            input: this.resolveNodeInput(nodeId, context, graph),
             history: historyMessages,
             memory: this.memory,
             attachments: context.attachments,
@@ -963,7 +1230,15 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     callbacks.onTokenUsage(nodeId, usage);
                 }
                 this.tokenUsageEvents.push({ nodeId, usage });
+                safeEmitEvent(this.options.onEvent, {
+                    type: 'token_usage',
+                    nodeId,
+                    usage,
+                    at: Date.now(),
+                });
             },
+            assertBudget: () => this.assertBudgetFn?.(),
+            recordLlmStep: (tokens) => this.recordLlmStepFn?.(tokens),
 
             onToken: (token: string) => {
                 callbacks.onToken(nodeId, token);
@@ -1157,6 +1432,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                         // Pass subflow registry
                         subflowRegistry: this.options.subflowRegistry,
                         _subflowPath: subflowPath,
+                        // Propagate cancellation from parent into child adapter
+                        _parentSignal: context.signal,
                         onToolCallEvent: baseOnToolCallEvent
                             ? (event) => {
                                   baseOnToolCallEvent({
@@ -1222,23 +1499,106 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         if (!context.nodeChain.includes(nodeId)) {
             context.nodeChain.push(nodeId);
         }
+        // Keep currentInput as a fallback for nodes with no parents (e.g. start
+        // children). Downstream nodes prefer parent outputs via resolveNodeInput.
         context.currentInput = result.output;
 
-        // Add assistant message for certain node types?
-        // AgentNode logic was: "context.session.addMessage({ role: 'assistant', content: output });"
-        // Should we move this to extension or keep it here?
-        // Ideally extension manages history?
-        // But `session` is internal.
-        // If `node.type === 'agent'`, add message?
-        if (node.type === 'agent') {
-            context.session.addMessage({
-                role: 'assistant',
-                content: result.output,
+        // Defer session history updates to the wave processor so concurrent
+        // agent nodes in the same ready-wave don't interleave message order.
+        // (See processWaveResults in execute().)
+
+        callbacks.onNodeFinish(nodeId, result.output, meta);
+        safeEmitEvent(this.options.onEvent, {
+            type: 'node_finish',
+            nodeId,
+            output: result.output,
+            meta: meta as NodeExecutionMetadata,
+            at: Date.now(),
+        });
+        return { output: result.output, nextNodes: result.nextNodes };
+    }
+
+    /**
+     * Resolve a node's input from its parents' outputs.
+     * Falls back to shared currentInput when the node has no executed parents
+     * (start node / resume edge cases).
+     */
+    private resolveNodeInput(
+        nodeId: string,
+        context: InternalExecutionContext,
+        graph: WorkflowGraph
+    ): string {
+        const inbound = graph.inboundEdges[nodeId];
+        if (!inbound || inbound.length === 0) {
+            return context.currentInput;
+        }
+
+        type Contribution = {
+            parentId: string;
+            output: string;
+            mapping?: EdgeInputMapping;
+        };
+
+        const contributions: Contribution[] = [];
+        for (const edge of inbound) {
+            const output = context.outputs[edge.source];
+            if (typeof output !== 'string') continue;
+            const edgeData = edge.data as EdgeData | undefined;
+            contributions.push({
+                parentId: edge.source,
+                output,
+                mapping: edgeData?.inputMapping,
             });
         }
 
-        callbacks.onNodeFinish(nodeId, result.output, meta);
-        return { output: result.output, nextNodes: result.nextNodes };
+        if (contributions.length === 0) {
+            return context.currentInput;
+        }
+
+        const picks = contributions.filter((c) => c.mapping?.mode === 'pick');
+        if (picks.length > 0) {
+            return picks.map((p) => p.output).join('\n\n');
+        }
+
+        const templateContrib = contributions.find(
+            (c) => c.mapping?.mode === 'template'
+        );
+        if (
+            templateContrib &&
+            templateContrib.mapping?.mode === 'template'
+        ) {
+            return interpolateEdgeTemplate(
+                templateContrib.mapping.template,
+                context.outputs,
+                context.currentInput
+            );
+        }
+
+        const hasJson = contributions.some((c) => c.mapping?.mode === 'json');
+        if (hasJson) {
+            const obj: Record<string, string> = {};
+            for (const c of contributions) {
+                const key =
+                    c.mapping?.mode === 'json'
+                        ? (c.mapping.key ?? c.parentId)
+                        : c.parentId;
+                obj[key] = c.output;
+            }
+            return JSON.stringify(obj);
+        }
+
+        const concatMapping = contributions.find(
+            (c) => c.mapping?.mode === 'concat'
+        )?.mapping;
+        const separator =
+            concatMapping && concatMapping.mode === 'concat'
+                ? (concatMapping.separator ?? '\n\n')
+                : '\n\n';
+
+        if (contributions.length === 1) {
+            return contributions[0]!.output;
+        }
+        return contributions.map((c) => c.output).join(separator);
     }
     private getTokenUsageSummary(): TokenUsage | undefined {
         if (this.tokenUsageEvents.length === 0) {
@@ -1307,7 +1667,13 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         const supportsHITL =
             OpenRouterExecutionAdapter.HITL_SUPPORTED_TYPES.has(node.type);
         const shouldUseHITL =
-            supportsHITL && hitlConfig?.enabled && this.options.onHITLRequest;
+            supportsHITL &&
+            hitlConfig?.enabled &&
+            !!(
+                this.options.onHITLRequest ||
+                this.options.durableHITL ||
+                this.options.hitlAdapter
+            );
 
         let lastError: ExecutionError | null = null;
         const retryHistory: Array<{
@@ -1337,6 +1703,14 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     callbacks
                 );
             } catch (error) {
+                // Durable HITL pause / budget stop must not be retried
+                if (isWorkflowPausedError(error)) {
+                    throw error;
+                }
+                if (isBudgetExceededError(error)) {
+                    throw error;
+                }
+
                 const execError = createExecutionError(
                     error,
                     nodeId,
@@ -1424,8 +1798,23 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             path: context.nodePath.length ? [...context.nodePath] : undefined,
         } satisfies Partial<NodeExecutionMetadata>;
 
-        // No HITL configured or disabled, or no callback provided
-        if (!hitlConfig?.enabled || !this.options.onHITLRequest) {
+        // No HITL configured or disabled
+        if (!hitlConfig?.enabled) {
+            return this.executeNodeInternal(
+                node.id,
+                context,
+                graph,
+                edges,
+                callbacks
+            );
+        }
+
+        // Need a way to receive responses: callback, durable mode, or adapter
+        if (
+            !this.options.onHITLRequest &&
+            !this.options.durableHITL &&
+            !this.options.hitlAdapter
+        ) {
             return this.executeNodeInternal(
                 node.id,
                 context,
@@ -1478,6 +1867,17 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             }
         };
 
+        const hitlSnapshot = () => ({
+            nodeOutputs: { ...context.outputs },
+            executionOrder: [...context.nodeChain],
+            lastActiveNodeId: node.id,
+            sessionMessages: [...context.session.messages],
+            resumeInput: context.currentInput,
+            workflowId: context.workflowName,
+            sessionId: context.session.id,
+            startNodeId: node.id,
+        });
+
         switch (hitlConfig.mode) {
             case 'approval': {
                 // Pause BEFORE execution for approval
@@ -1488,7 +1888,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     workflowName,
                     undefined
                 );
-                const response = await this.waitForHITL(request, hitlConfig);
+                const response = await this.waitForHITL(
+                    request,
+                    hitlConfig,
+                    hitlSnapshot()
+                );
 
                 if (response.action === 'reject') {
                     return handleReject();
@@ -1518,7 +1922,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     workflowName,
                     undefined
                 );
-                const response = await this.waitForHITL(request, hitlConfig);
+                const response = await this.waitForHITL(
+                    request,
+                    hitlConfig,
+                    hitlSnapshot()
+                );
 
                 if (response.action === 'skip') {
                     return handleSkip();
@@ -1557,7 +1965,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     workflowName,
                     result.output
                 );
-                const response = await this.waitForHITL(request, hitlConfig);
+                const response = await this.waitForHITL(
+                    request,
+                    hitlConfig,
+                    hitlSnapshot()
+                );
 
                 if (response.action === 'reject') {
                     // Route to rejection branch or re-execute
@@ -1676,17 +2088,74 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     }
 
     /**
-     * Wait for HITL response with optional timeout.
+     * Wait for HITL response with optional timeout / durable pause.
      * Respects abort signal to cancel waiting when execution is stopped.
      * Uses timestamp-based timeout to handle system sleep correctly.
      */
     private async waitForHITL(
         request: HITLRequest,
-        config: HITLConfig
+        config: HITLConfig,
+        snapshot: {
+            nodeOutputs: Record<string, string>;
+            executionOrder: string[];
+            lastActiveNodeId?: string;
+            sessionMessages: ChatMessage[];
+            resumeInput?: string;
+            workflowId?: string;
+            sessionId: string;
+            startNodeId: string;
+        }
     ): Promise<HITLResponse> {
+        // Resume path: response already provided (id may differ if request was recreated)
+        const resume = this.options.resumeFrom;
+        if (resume?.pendingHITLResponse) {
+            return resume.pendingHITLResponse;
+        }
+
+        // Resume path: look up response from HITL adapter
+        if (this.options.hitlAdapter) {
+            const existing = await this.options.hitlAdapter.getResponse(
+                request.id
+            );
+            if (existing) {
+                return existing;
+            }
+            // Also try by pending id from resume metadata
+            if (resume?.pendingHITLRequestId) {
+                const byId = await this.options.hitlAdapter.getResponse(
+                    resume.pendingHITLRequestId
+                );
+                if (byId) {
+                    return byId;
+                }
+            }
+        }
+
+        // Persist pending request
+        if (this.options.hitlAdapter) {
+            await this.options.hitlAdapter.store(request);
+        }
+
+        // Durable pause: return control to caller instead of blocking
+        if (this.options.durableHITL && !resume?.pendingHITLResponse) {
+            const checkpoint = await this.persistHITLCheckpoint(
+                request,
+                snapshot
+            );
+            throw new WorkflowPausedError(checkpoint, request);
+        }
+
         if (!this.options.onHITLRequest) {
+            // No interactive callback — if we have an adapter, pause durably
+            if (this.options.hitlAdapter) {
+                const checkpoint = await this.persistHITLCheckpoint(
+                    request,
+                    snapshot
+                );
+                throw new WorkflowPausedError(checkpoint, request);
+            }
             throw new Error(
-                'HITL requested but no onHITLRequest callback configured'
+                'HITL requested but no onHITLRequest callback or hitlAdapter configured'
             );
         }
 
@@ -1730,8 +2199,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                                 defaultAction === 'approve'
                                     ? 'approve'
                                     : defaultAction === 'skip'
-                                    ? 'skip'
-                                    : 'reject',
+                                      ? 'skip'
+                                      : 'reject',
                             respondedAt: new Date().toISOString(),
                         });
                     }
@@ -1741,7 +2210,12 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         }
 
         try {
-            return await Promise.race(promises);
+            const response = await Promise.race(promises);
+            // Persist response for durability even in interactive mode
+            if (this.options.hitlAdapter) {
+                await this.options.hitlAdapter.respond(request.id, response);
+            }
+            return response;
         } finally {
             // Cleanup timeout interval
             if (timeoutCheckInterval) {
@@ -1749,6 +2223,48 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             }
             // Note: abort event listener is automatically cleaned up due to { once: true }
         }
+    }
+
+    /**
+     * Persist a paused HITL checkpoint when a checkpoint adapter is configured.
+     */
+    private async persistHITLCheckpoint(
+        request: HITLRequest,
+        snapshot: {
+            nodeOutputs: Record<string, string>;
+            executionOrder: string[];
+            lastActiveNodeId?: string;
+            sessionMessages: ChatMessage[];
+            resumeInput?: string;
+            workflowId?: string;
+            sessionId: string;
+            startNodeId: string;
+        }
+    ): Promise<WorkflowCheckpoint> {
+        const checkpoint: WorkflowCheckpoint = {
+            id: createCheckpointId(),
+            schemaVersion: CHECKPOINT_SCHEMA_VERSION,
+            workflowId: snapshot.workflowId,
+            sessionId: snapshot.sessionId,
+            createdAt: Date.now(),
+            status: 'paused',
+            nodeOutputs: { ...snapshot.nodeOutputs },
+            executionOrder: [...snapshot.executionOrder],
+            lastActiveNodeId: snapshot.lastActiveNodeId,
+            sessionMessages: [...snapshot.sessionMessages],
+            resumeInput: snapshot.resumeInput,
+            startNodeId: snapshot.startNodeId,
+            pauseReason: 'hitl',
+            pendingHITLRequestId: request.id,
+            hitlMode: request.mode,
+            hitlNodeId: request.nodeId,
+        };
+
+        if (this.options.checkpointAdapter) {
+            await this.options.checkpointAdapter.save(checkpoint);
+        }
+
+        return checkpoint;
     }
 
     /**
@@ -1972,7 +2488,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                         },
                         { role: 'user', content: prompt },
                     ],
-                    { temperature: 0.3, maxTokens: 500 }
+                    {
+                        temperature: 0.3,
+                        maxTokens: 500,
+                        signal: this.abortController?.signal,
+                    }
                 );
 
                 summary = summarizationResult.content || '';

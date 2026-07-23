@@ -37,6 +37,23 @@ const AgentNodeDataSchema = BaseNodeDataSchema.extend({
     temperature: z.number().min(0).max(2).optional(),
     maxTokens: z.number().int().positive().optional(),
     tools: z.array(z.string()).optional(),
+    toolChoice: z
+        .union([
+            z.enum(['auto', 'none', 'required']),
+            z.object({
+                type: z.literal('function'),
+                function: z.object({ name: z.string() }),
+            }),
+        ])
+        .optional(),
+    structuredOutput: z
+        .object({
+            name: z.string(),
+            description: z.string().optional(),
+            schema: z.record(z.string(), z.unknown()),
+            strict: z.boolean().optional(),
+        })
+        .optional(),
     acceptsImages: z.boolean().optional(),
     acceptsAudio: z.boolean().optional(),
     acceptsVideo: z.boolean().optional(),
@@ -46,6 +63,38 @@ const AgentNodeDataSchema = BaseNodeDataSchema.extend({
     maxToolIterations: z.number().int().positive().optional(),
     onMaxToolIterations: z.enum(['warning', 'error', 'hitl']).optional(),
 });
+
+const EdgeInputMappingSchema = z.discriminatedUnion('mode', [
+    z.object({
+        mode: z.literal('concat'),
+        separator: z.string().optional(),
+    }),
+    z.object({
+        mode: z.literal('pick'),
+    }),
+    z.object({
+        mode: z.literal('template'),
+        template: z.string(),
+    }),
+    z.object({
+        mode: z.literal('json'),
+        key: z.string().optional(),
+    }),
+]);
+
+const EdgeDataSchema = z
+    .object({
+        condition: z
+            .object({
+                type: z.enum(['contains', 'equals', 'regex', 'custom']),
+                field: z.string().optional(),
+                value: z.string().optional(),
+                expression: z.string().optional(),
+            })
+            .optional(),
+        inputMapping: EdgeInputMappingSchema.optional(),
+    })
+    .passthrough();
 
 const RouteDefinitionSchema = z.object({
     id: z.string(),
@@ -84,6 +133,7 @@ const ParallelNodeDataSchema = BaseNodeDataSchema.extend({
         .array(BranchDefinitionSchema)
         .min(1, 'Parallel requires at least one branch'),
     mergeEnabled: z.boolean().optional(),
+    branchTimeout: z.number().positive().optional(),
 });
 
 const WhileLoopNodeDataSchema = BaseNodeDataSchema.extend({
@@ -107,12 +157,26 @@ const WhileLoopNodeDataSchema = BaseNodeDataSchema.extend({
 const SubflowNodeDataSchema = BaseNodeDataSchema.extend({
     subflowId: z.string().min(1, 'Subflow node requires a subflowId'),
     inputMappings: z.record(z.string(), z.string()).optional(),
+    /** @deprecated Use shareSession — kept for backwards-compatible parsing */
     preserveContext: z.boolean().optional(),
+    shareSession: z.boolean().optional(),
 });
 
 const OutputNodeDataSchema = BaseNodeDataSchema.extend({
     template: z.string().optional(),
     format: z.enum(['text', 'json', 'markdown']).optional(),
+    mode: z.enum(['combine', 'synthesis']).optional(),
+    sources: z.array(z.string()).optional(),
+    synthesis: z
+        .object({
+            model: z.string().optional(),
+            prompt: z.string().optional(),
+        })
+        .optional(),
+    introText: z.string().optional(),
+    outroText: z.string().optional(),
+    useRawTemplate: z.boolean().optional(),
+    includeMetadata: z.boolean().optional(),
 });
 
 /**
@@ -238,8 +302,10 @@ export const WorkflowEdgeSchema = z.object({
     target: z.string(),
     sourceHandle: z.string().optional(),
     targetHandle: z.string().optional(),
+    type: z.string().optional(),
     label: z.string().optional(),
-    data: z.record(z.string(), z.any()).optional(),
+    data: EdgeDataSchema.optional(),
+    selected: z.boolean().optional(),
 });
 
 export const WorkflowDataSchema = z.object({

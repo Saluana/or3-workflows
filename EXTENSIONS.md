@@ -18,7 +18,7 @@ or3-workflows uses a TipTap-inspired extension architecture. Extensions define n
 The fastest way to get started is with StarterKit, which includes all core nodes:
 
 ```typescript
-import { WorkflowEditor, StarterKit } from '@or3/workflow-core';
+import { WorkflowEditor, StarterKit } from 'or3-workflow-core';
 
 const editor = new WorkflowEditor({
     extensions: StarterKit.configure(),
@@ -34,7 +34,7 @@ StarterKit is a convenience bundle that includes all essential node extensions.
 ### Basic Usage
 
 ```typescript
-import { StarterKit } from '@or3/workflow-core';
+import { StarterKit } from 'or3-workflow-core';
 
 // Include all default extensions
 const extensions = StarterKit.configure();
@@ -175,7 +175,7 @@ import type {
     ExecutionContext,
     ValidationError,
     ValidationWarning,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 export const TransformNodeExtension: NodeExtension = {
     name: 'transform',
@@ -316,7 +316,7 @@ import {
     type WorkflowNode,
     type WorkflowEdge,
     type ExecutionContext,
-} from '@or3/workflow-core';
+} from 'or3-workflow-core';
 
 export const EchoNodeExtension: NodeExtension = {
     name: 'echo',
@@ -369,7 +369,7 @@ registerExtension(EchoNodeExtension);
 For extensions that need runtime configuration, use the `createConfigurableExtension` helper:
 
 ```typescript
-import { createConfigurableExtension } from '@or3/workflow-core';
+import { createConfigurableExtension } from 'or3-workflow-core';
 
 interface ApiNodeOptions {
     baseUrl?: string;
@@ -443,7 +443,7 @@ const editor = new WorkflowEditor({
 Use `makeConfigurable` to add configuration to existing extensions:
 
 ```typescript
-import { makeConfigurable, AgentNodeExtension } from '@or3/workflow-core';
+import { makeConfigurable, AgentNodeExtension } from 'or3-workflow-core';
 
 const ConfigurableAgent = makeConfigurable(AgentNodeExtension, {
     defaultModel: 'openai/gpt-4o',
@@ -687,7 +687,7 @@ const MyExtension: NodeExtension = {
 ## Registering Extensions
 
 ```typescript
-import { WorkflowEditor } from '@or3/workflow-core';
+import { WorkflowEditor } from 'or3-workflow-core';
 
 // Via constructor
 const editor = new WorkflowEditor({
@@ -704,7 +704,7 @@ editor.extensions.has('myExtension'); // true
 const ext = editor.extensions.get('myExtension');
 ```
 
-> Until the editor-to-execution bridge ships, also call `registerExtension(MyExtension)` from `@or3/workflow-core` so validation and execution adapters can resolve custom nodes.
+> Until the editor-to-execution bridge ships, also call `registerExtension(MyExtension)` from `or3-workflow-core` so validation and execution adapters can resolve custom nodes.
 
 ---
 

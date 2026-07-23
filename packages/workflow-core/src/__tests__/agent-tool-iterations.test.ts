@@ -614,6 +614,31 @@ describe('AgentNodeExtension tool iterations', () => {
             // Tool handler should have been called with parsed arguments
             expect(toolHandler).toHaveBeenCalledWith({ param: 'value' });
             expect(result.output).toBe('Final response using tool result');
+
+            // Second LLM call must receive OpenAI-compatible tool protocol messages
+            const secondCallMessages = (provider.chat as ReturnType<typeof vi.fn>)
+                .mock.calls[1][1] as ChatMessage[];
+            const assistantWithTools = secondCallMessages.find(
+                (m) => m.role === 'assistant' && m.tool_calls?.length
+            );
+            const toolResultMsg = secondCallMessages.find(
+                (m) => m.role === 'tool'
+            );
+            expect(assistantWithTools).toBeDefined();
+            expect(toolResultMsg).toBeDefined();
+            expect(toolResultMsg?.tool_call_id).toBeTruthy();
+            expect(toolResultMsg?.content).toContain(
+                'Tool executed successfully'
+            );
+            // Must not fake tool results as system messages
+            expect(
+                secondCallMessages.some(
+                    (m) =>
+                        m.role === 'system' &&
+                        typeof m.content === 'string' &&
+                        m.content.includes('[Tool Result:')
+                )
+            ).toBe(false);
         });
 
         it('should handle tool errors gracefully', async () => {

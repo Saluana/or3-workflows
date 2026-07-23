@@ -252,6 +252,7 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
                 type: 'function',
                 function: { name: 'select_route' },
             },
+            signal: context.signal,
         });
 
         if (context.tokenCounter && context.onTokenUsage) {

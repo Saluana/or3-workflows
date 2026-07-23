@@ -10,13 +10,15 @@ import type {
     ChatMessage,
 } from '../types';
 import type { HITLRequest } from '../hitl';
-import { estimateTokenUsage } from '../compaction';
 import {
     type OpenRouterContentPart,
     type ToolForLLM,
-    type ToolLoopResult,
     resolveAttachmentUrl,
 } from './shared';
+import {
+    buildToolMeta,
+    runValidatedToolLoop,
+} from './runValidatedToolLoop';
 
 /** Default model for agent nodes */
 const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
@@ -25,151 +27,37 @@ const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
 const DEFAULT_MAX_TOOL_ITERATIONS = 10;
 
 /**
-
- * Run the tool execution loop until completion or max iterations.
- * This handles calling the LLM, executing tool calls, and collecting results.
+ * Delegates to runValidatedToolLoop (Zod validation, parallel tools, stable ids).
  */
 async function runToolLoop(
     provider: LLMProvider,
     model: string,
     messages: ChatMessage[],
     toolsForLLM: ToolForLLM[] | undefined,
-    toolHandlers: Map<string, (args: unknown) => Promise<string> | string>,
+    toolMeta: ReturnType<typeof buildToolMeta>,
     context: ExecutionContext,
     data: AgentNodeData,
-    maxIterations: number
-): Promise<ToolLoopResult> {
-    const currentMessages = [...messages];
-    let iterations = 0;
-    let finalContent = '';
-
-    while (iterations < maxIterations) {
-        const requestMessages = [...currentMessages];
-        const result = await provider.chat(model, currentMessages, {
-            temperature: data.temperature,
-            maxTokens: data.maxTokens,
-            tools: toolsForLLM,
-            onToken: (token) => {
-                if (context.onToken) {
-                    context.onToken(token);
-                }
-            },
-            onReasoning: (token) => {
-                if (context.onReasoning) {
-                    context.onReasoning(token);
-                }
-            },
-            signal: context.signal,
-        });
-
-        // Report token usage for this call
-        if (context.tokenCounter && context.onTokenUsage) {
-            let usage = estimateTokenUsage({
-                model,
-                messages: requestMessages,
-                output: result.content || '',
-                tokenCounter: context.tokenCounter,
-                compaction: context.compaction,
-            });
-
-            if (result.usage) {
-                usage = {
-                    ...usage,
-                    promptTokens: result.usage.promptTokens,
-                    completionTokens: result.usage.completionTokens,
-                    totalTokens: result.usage.totalTokens,
-                };
-            }
-
-            context.onTokenUsage(usage);
-        }
-
-        // If no tool calls, we're done
-        if (!result.toolCalls || result.toolCalls.length === 0) {
-            finalContent = result.content || '';
-            break;
-        }
-
-        // Add assistant message with tool calls to conversation
-        // Some providers (e.g., Moonshot AI) require non-empty content even with tool_calls
-        const assistantContent = result.content || '[Calling tools...]';
-        currentMessages.push({
-            role: 'assistant' as const,
-            content: assistantContent,
-        });
-
-        // Execute each tool call
-        for (const toolCall of result.toolCalls) {
-            const toolName = toolCall.function?.name || 'unknown_tool';
-            const toolArgs = toolCall.function?.arguments;
-            const toolCallId =
-                toolCall.id ||
-                `${toolName}-${Date.now()}-${Math.random()
-                    .toString(36)
-                    .slice(2, 8)}`;
-
-            let parsedArgs: unknown;
-            try {
-                parsedArgs =
-                    typeof toolArgs === 'string'
-                        ? JSON.parse(toolArgs)
-                        : toolArgs;
-            } catch {
-                parsedArgs = toolArgs;
-            }
-
-            context.onToolCallEvent?.({
-                id: toolCallId,
-                name: toolName,
-                status: 'active',
-            });
-
-            let toolResult: string;
-            let toolError: string | undefined;
-
-            // Try to find and execute the tool handler
-            const handler = toolHandlers.get(toolName);
-            if (handler) {
-                try {
-                    toolResult = await handler(parsedArgs);
-                } catch (err) {
-                    toolError =
-                        err instanceof Error ? err.message : String(err);
-                    toolResult = `Error executing tool ${toolName}: ${toolError}`;
-                }
-            } else if (context.onToolCall) {
-                // Fallback to global onToolCall handler
-                try {
-                    toolResult = await context.onToolCall(toolName, parsedArgs);
-                } catch (err) {
-                    toolError =
-                        err instanceof Error ? err.message : String(err);
-                    toolResult = `Error executing tool ${toolName}: ${toolError}`;
-                }
-            } else {
-                toolError = `Tool ${toolName} not found or no handler registered`;
-                toolResult = toolError;
-            }
-
-            // Add tool result to conversation
-            currentMessages.push({
-                role: 'system' as const,
-                content: `[Tool Result: ${toolName}]\n${toolResult}`,
-            });
-
-            context.onToolCallEvent?.({
-                id: toolCallId,
-                name: toolName,
-                status: toolError ? 'error' : 'completed',
-                error: toolError,
-            });
-        }
-
-        iterations++;
-    }
-
-    return { finalContent, iterations, messages: currentMessages };
+    maxIterations: number,
+    nodeId: string
+) {
+    return runValidatedToolLoop({
+        provider,
+        model,
+        messages,
+        toolsForLLM,
+        toolMeta,
+        context,
+        nodeId,
+        maxIterations,
+        temperature: data.temperature,
+        maxTokens: data.maxTokens,
+        toolChoice: data.toolChoice,
+        structuredOutput: data.structuredOutput,
+        onToken: (token) => context.onToken?.(token),
+        onReasoning: (token) => context.onReasoning?.(token),
+    });
 }
+
 
 /**
  * Convert message content to a string for comparison.
@@ -377,17 +265,7 @@ export const AgentNodeExtension: NodeExtension = {
         // Build tools array from node config and global context tools
         const nodeToolNames = data.tools || [];
         const globalTools = context.tools || [];
-
-        // Create a map of tool handlers from global tools
-        const toolHandlers = new Map<
-            string,
-            (args: unknown) => Promise<string> | string
-        >();
-        for (const tool of globalTools) {
-            if (tool.handler) {
-                toolHandlers.set(tool.function.name, tool.handler);
-            }
-        }
+        const toolMeta = buildToolMeta(globalTools);
 
         // Build tools for LLM - either from node config (basic) or global tools (full)
         let toolsForLLM: ToolForLLM[] | undefined;
@@ -431,10 +309,11 @@ export const AgentNodeExtension: NodeExtension = {
             model,
             messages,
             toolsForLLM,
-            toolHandlers,
+            toolMeta,
             context,
             data,
-            maxToolIterations
+            maxToolIterations,
+            node.id
         );
         let { finalContent, iterations: toolIterations } = loopResult;
         let currentMessages = loopResult.messages;
@@ -482,10 +361,11 @@ export const AgentNodeExtension: NodeExtension = {
                         model,
                         currentMessages,
                         toolsForLLM,
-                        toolHandlers,
+                        toolMeta,
                         context,
                         data,
-                        maxToolIterations
+                        maxToolIterations,
+                        node.id
                     );
                     finalContent = loopResult.finalContent;
                     toolIterations = loopResult.iterations;

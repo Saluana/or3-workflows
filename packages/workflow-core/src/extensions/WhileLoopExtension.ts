@@ -183,6 +183,7 @@ Respond with only "continue" or "done".`;
                 const result = await provider.chat(model, messages, {
                     temperature: 0,
                     maxTokens: 10,
+                    signal: context.signal,
                 });
 
                 if (context.tokenCounter && context.onTokenUsage) {
