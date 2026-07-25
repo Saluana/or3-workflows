@@ -431,6 +431,7 @@ describe('OpenRouterExecutionAdapter - Router Node', () => {
 
         expect(result.success).toBe(true);
         expect(result.output).toBe('Technical response');
+        expect(result.nodeOutputs['router-1']).toBe('How do I code?');
         expect(callbacks.onNodeStart).toHaveBeenCalledWith(
             'agent-tech',
             expect.objectContaining({ id: 'agent-tech', label: 'Tech Agent' })
@@ -455,5 +456,24 @@ describe('OpenRouterExecutionAdapter - Router Node', () => {
         const routerRequest = mockClient.chat.send.mock.calls[0]?.[0]
             ?.chatRequest as Record<string, unknown>;
         expect(routerRequest).not.toHaveProperty('temperature');
+        const routedAgentRequest = mockClient.chat.send.mock.calls[1]?.[0]
+            ?.chatRequest as {
+            messages?: Array<{ role?: string; content?: unknown }>;
+        };
+        expect(
+            routedAgentRequest.messages?.some(
+                (message) =>
+                    message.role === 'user' &&
+                    typeof message.content === 'string' &&
+                    message.content.includes('How do I code?')
+            )
+        ).toBe(true);
+        expect(
+            routedAgentRequest.messages?.some(
+                (message) =>
+                    typeof message.content === 'string' &&
+                    message.content.includes('Routed to')
+            )
+        ).toBe(false);
     });
 });

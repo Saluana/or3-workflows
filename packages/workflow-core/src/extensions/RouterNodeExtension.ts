@@ -414,7 +414,10 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
             }
 
             return {
-                output: `Routed to ${selectedOption?.name || selectedRouteId}`,
+                // A router controls graph flow; it must not replace the data
+                // flowing through that graph with a diagnostic route label.
+                // Selection details remain available in metadata/events.
+                output: context.input,
                 nextNodes,
                 metadata: {
                     selectedRoute: selectedRouteId,
@@ -449,7 +452,9 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
         }
 
         return {
-            output: `Routed to ${selectedOption?.name || selectedRouteId}`,
+            // Preserve the routed payload for downstream agent/parallel nodes.
+            // Returning "Routed to …" here silently discarded the user's task.
+            output: context.input,
             nextNodes,
             metadata: {
                 selectedRoute: selectedRouteId,
