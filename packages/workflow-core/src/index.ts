@@ -450,3 +450,16 @@ export {
     type RunHarnessOptions,
     type CandidateComparison,
 } from './observability';
+
+// Agent-loop backends (R6) — native only; optional OpenRouter Agent backend
+// lives at the `or3-workflow-core/openrouter-agent` subpath.
+export {
+    type AgentLoopBackend,
+    type AgentLoopInput,
+    type AgentLoopResult,
+    type AgentToolInvocation,
+    type AgentToolExecutor,
+    NativeAgentLoopBackend,
+    nativeAgentLoopBackend,
+    aggregateUsage,
+} from './agent';

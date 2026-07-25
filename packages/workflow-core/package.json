@@ -14,6 +14,10 @@
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
+        },
+        "./openrouter-agent": {
+            "types": "./dist/openrouter-agent.d.ts",
+            "import": "./dist/openrouter-agent.js"
         }
     },
     "scripts": {
@@ -41,6 +45,18 @@
     "dependencies": {
         "@openrouter/sdk": "^1.1.6",
         "zod": "^4.0.0"
+    },
+    "peerDependencies": {
+        "@openrouter/agent": "*",
+        "@opentelemetry/api": ">=1.0.0"
+    },
+    "peerDependenciesMeta": {
+        "@openrouter/agent": {
+            "optional": true
+        },
+        "@opentelemetry/api": {
+            "optional": true
+        }
     },
     "devDependencies": {
         "typescript": "^5.0.0",
