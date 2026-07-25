@@ -38,8 +38,11 @@ function checkModelCapability(
 ): CapabilitySupport {
     switch (capability) {
         case 'tools':
-        case 'parallel-tool-calls':
             return hasParam(model, 'tools') ? 'supported' : 'unsupported';
+        case 'parallel-tool-calls':
+            return hasParam(model, 'parallel_tool_calls')
+                ? 'supported'
+                : 'unsupported';
         case 'structured-output':
             return hasParam(model, 'structured_outputs')
                 ? 'supported'
@@ -158,6 +161,33 @@ export class CapabilityResolver {
                 warnings.push(
                     `Capability "${capability}" is unverified for one or more fallback models; a weaker fallback may be selected.`
                 );
+            }
+        }
+
+        // A fallback is only viable when that same model can satisfy every
+        // required capability. Checking each capability independently can
+        // otherwise accept a chain where model A supports tools only and model
+        // B supports structured output only.
+        const hasViableModel = reports.some((report) => !report.blocked);
+        const hasUnknownModel = reports.some((report) =>
+            report.checks.every((check) => check.support !== 'unsupported')
+        );
+        if (!blocking && !hasViableModel && !hasUnknownModel) {
+            const firstUnsupported = reports
+                .flatMap((report) =>
+                    report.checks.map((check) => ({
+                        modelId: report.modelId,
+                        check,
+                    }))
+                )
+                .find(({ check }) => check.support === 'unsupported');
+            if (firstUnsupported) {
+                blocking = new CapabilityPreflightError({
+                    modelId: firstUnsupported.modelId,
+                    capability: firstUnsupported.check.capability,
+                    evidence: 'catalog',
+                    catalogUnknown: false,
+                });
             }
         }
 

@@ -62,9 +62,9 @@ describe('mapRoutingPolicy', () => {
                 allowFallbacks: false,
                 dataCollection: 'deny',
                 maxPrice: { prompt: 1.5, completion: 3 },
-                sort: 'throughput',
-                preferredMaxLatencySeconds: 2,
-                preferredMinThroughput: 20,
+                sort: { by: 'throughput', partition: 'none' },
+                preferredMaxLatency: { p90: 2, p99: 4 },
+                preferredMinThroughput: { p50: 20, p90: 10 },
                 quantizations: ['fp8'],
             },
             false
@@ -76,9 +76,9 @@ describe('mapRoutingPolicy', () => {
             allowFallbacks: false,
             dataCollection: 'deny',
             maxPrice: { prompt: '1.5', completion: '3' },
-            sort: 'throughput',
-            preferredMaxLatency: 2,
-            preferredMinThroughput: 20,
+            sort: { by: 'throughput', partition: 'none' },
+            preferredMaxLatency: { p90: 2, p99: 4 },
+            preferredMinThroughput: { p50: 20, p90: 10 },
             quantizations: ['fp8'],
         });
     });
@@ -95,9 +95,17 @@ describe('mapRoutingPolicy', () => {
         expect(prefs?.requireParameters).toBe(false);
     });
 
-    it('maps zeroDataRetention to dataCollection deny', () => {
+    it('maps the zeroDataRetention compatibility alias to OpenRouter ZDR', () => {
         expect(mapRoutingPolicy({ zeroDataRetention: true }, false)).toEqual({
-            dataCollection: 'deny',
+            zdr: true,
+        });
+    });
+
+    it('keeps the legacy latency alias working', () => {
+        expect(
+            mapRoutingPolicy({ preferredMaxLatencySeconds: 2 }, false)
+        ).toEqual({
+            preferredMaxLatency: 2,
         });
     });
 });
@@ -130,6 +138,27 @@ describe('CapabilityResolver (tri-state)', () => {
         expect(ok.blocking).toBeNull();
     });
 
+    it('requires one fallback model to support all requested capabilities', () => {
+        const splitRegistry = new ModelRegistry();
+        splitRegistry.register(model('tools/only', ['tools']));
+        splitRegistry.register(
+            model('structured/only', ['structured_outputs'])
+        );
+        const splitResolver = new CapabilityResolver(splitRegistry);
+        const result = splitResolver.preflight(
+            ['tools/only', 'structured/only'],
+            ['tools', 'structured-output']
+        );
+        expect(result.blocking).toBeInstanceOf(CapabilityPreflightError);
+    });
+
+    it('checks parallel tool calls independently from basic tool support', () => {
+        expect(
+            resolver.resolveModel('has/tools', ['parallel-tool-calls']).checks[0]
+                ?.support
+        ).toBe('unsupported');
+    });
+
     it('warns and defers for unknown catalog entries', () => {
         const res = resolver.preflight(['unknown/model'], ['tools']);
         expect(res.blocking).toBeNull();
@@ -138,6 +167,72 @@ describe('CapabilityResolver (tri-state)', () => {
 });
 
 describe('OpenRouterModelGateway request building', () => {
+    it('lazily refreshes and caches unknown model capabilities', async () => {
+        let gets = 0;
+        const registry = new ModelRegistry();
+        const client = fakeClient({
+            model: 'vendor/new-model',
+            choices: [{ message: { content: '{}' } }],
+        });
+        client.models = {
+            async get() {
+                gets++;
+                return {
+                    data: model('vendor/new-model', [
+                        'structured_outputs',
+                    ]),
+                };
+            },
+        };
+        const gateway = createOpenRouterModelGateway(client, {
+            modelRegistry: registry,
+        });
+        const first = await gateway.getModelCapabilities(
+            'vendor/new-model'
+        );
+        const second = await gateway.getModelCapabilities(
+            'vendor/new-model'
+        );
+        expect(first?.supportedParameters).toContain(
+            'structured_outputs'
+        );
+        expect(second?.id).toBe('vendor/new-model');
+        expect(gets).toBe(1);
+    });
+
+    it('refreshes lazily fetched model capabilities after their TTL expires', async () => {
+        let gets = 0;
+        const registry = new ModelRegistry();
+        const client = fakeClient({
+            model: 'vendor/changing-model',
+            choices: [{ message: { content: '{}' } }],
+        });
+        client.models = {
+            async get() {
+                gets++;
+                return {
+                    data: model(
+                        'vendor/changing-model',
+                        gets === 1
+                            ? ['structured_outputs']
+                            : ['tools']
+                    ),
+                };
+            },
+        };
+        const gateway = createOpenRouterModelGateway(client, {
+            modelRegistry: registry,
+            capabilityCatalogTtlMs: 0,
+        });
+
+        await gateway.getModelCapabilities('vendor/changing-model');
+        const refreshed = await gateway.getModelCapabilities(
+            'vendor/changing-model'
+        );
+        expect(refreshed?.supportedParameters).toEqual(['tools']);
+        expect(gets).toBe(2);
+    });
+
     it('preserves the fallback model order and maps routing', async () => {
         const record: { request?: unknown } = {};
         const client = fakeClient(
@@ -195,11 +290,107 @@ describe('OpenRouterModelGateway request building', () => {
             },
         });
         const req = record.request as {
-            chatRequest: { responseFormat?: { type: string }; provider?: { requireParameters?: boolean } };
+            chatRequest: {
+                maxTokens?: number;
+                maxCompletionTokens?: number;
+                responseFormat?: { type: string };
+                provider?: { requireParameters?: boolean };
+            };
         };
+        expect(req.chatRequest.maxTokens).toBeUndefined();
+        expect(req.chatRequest.maxCompletionTokens).toBeUndefined();
         expect(req.chatRequest.responseFormat?.type).toBe('json_schema');
         // requireParameters defaults to true when a capability is required.
         expect(req.chatRequest.provider?.requireParameters).toBe(true);
+    });
+
+    it('maps the portable output limit to max_tokens for provider filtering', async () => {
+        const record: { request?: unknown } = {};
+        const gateway = createOpenRouterModelGateway(
+            fakeClient(
+                {
+                    model: 'm',
+                    choices: [{ message: { content: 'ok' } }],
+                },
+                record
+            ),
+            { modelRegistry: new ModelRegistry() }
+        );
+        await gateway.generate({
+            models: ['m'],
+            messages,
+            generation: { maxOutputTokens: 128 },
+        });
+        const request = record.request as {
+            chatRequest: {
+                maxTokens?: number;
+                maxCompletionTokens?: number;
+            };
+        };
+        expect(request.chatRequest.maxTokens).toBe(128);
+        expect(request.chatRequest.maxCompletionTokens).toBeUndefined();
+    });
+
+    it('maps plugins and parallel tool call capability requirements', async () => {
+        const record: { request?: unknown } = {};
+        const registry = new ModelRegistry();
+        registry.register(model('m', ['tools', 'parallel_tool_calls']));
+        const gateway = createOpenRouterModelGateway(
+            fakeClient(
+                {
+                    model: 'm',
+                    choices: [{ message: { content: 'ok' } }],
+                },
+                record
+            ),
+            { modelRegistry: registry }
+        );
+        await gateway.generate({
+            models: ['m'],
+            messages,
+            parallelToolCalls: true,
+            plugins: [
+                {
+                    id: 'response-healing',
+                    kind: 'response',
+                    config: { enabled: true },
+                },
+            ],
+        });
+        const request = record.request as {
+            chatRequest: {
+                parallelToolCalls?: boolean;
+                plugins?: unknown[];
+                provider?: { requireParameters?: boolean };
+            };
+        };
+        expect(request.chatRequest.parallelToolCalls).toBe(true);
+        expect(request.chatRequest.plugins).toEqual([
+            { id: 'response-healing', enabled: true },
+        ]);
+        expect(request.chatRequest.provider?.requireParameters).toBe(true);
+    });
+
+    it('fails before transport for Responses-only server tools', async () => {
+        const gateway = createOpenRouterModelGateway(
+            fakeClient({
+                model: 'm',
+                choices: [{ message: { content: 'unused' } }],
+            })
+        );
+        await expect(
+            gateway.generate({
+                models: ['m'],
+                messages,
+                tools: [
+                    {
+                        type: 'provider-server',
+                        name: 'openrouter:apply_patch',
+                        transport: 'responses',
+                    },
+                ],
+            })
+        ).rejects.toBeInstanceOf(ProviderCallError);
     });
 });
 
@@ -232,7 +423,6 @@ describe('OpenRouterModelGateway normalization', () => {
             costUsd: 0.0003,
         });
         expect(result.identifiers).toEqual({
-            requestId: 'gen-42',
             generationId: 'gen-42',
         });
         // Not reported → undefined (never fabricated).
@@ -344,6 +534,70 @@ describe('OpenRouterModelGateway streaming', () => {
         expect(result.toolCalls?.[0]?.function.arguments).toBe('{"x":1}');
         expect(result.finishReason).toBe('tool_calls');
         expect(result.usage?.totalTokens).toBe(8);
+    });
+
+    it('captures raw stream chunks only with debug opt-in', async () => {
+        async function* stream() {
+            yield { id: 'gen-1', choices: [{ delta: { content: 'ok' } }] };
+        }
+        const client: OpenRouterV1Client = {
+            chat: {
+                async send() {
+                    return stream();
+                },
+            },
+        };
+        const result = await new OpenRouterModelGateway({ client }).generate({
+            models: ['m'],
+            messages,
+            onTextDelta: () => undefined,
+            debug: { includeRawResponse: true },
+        });
+        expect(result.raw).toEqual({
+            provider: 'openrouter',
+            value: [
+                { id: 'gen-1', choices: [{ delta: { content: 'ok' } }] },
+            ],
+        });
+        expect(result.identifiers).toEqual({ generationId: 'gen-1' });
+    });
+
+    it('extracts the selected provider from OpenRouter metadata', async () => {
+        async function* stream() {
+            yield {
+                choices: [{ delta: { content: 'ok' } }],
+                openrouterMetadata: {
+                    endpoints: {
+                        available: [
+                            {
+                                model: 'm',
+                                provider: 'Provider A',
+                                selected: false,
+                            },
+                            {
+                                model: 'm',
+                                provider: 'Provider B',
+                                selected: true,
+                            },
+                        ],
+                        total: 2,
+                    },
+                },
+            };
+        }
+        const client: OpenRouterV1Client = {
+            chat: {
+                async send() {
+                    return stream();
+                },
+            },
+        };
+        const result = await new OpenRouterModelGateway({ client }).generate({
+            models: ['m'],
+            messages,
+            onTextDelta: () => undefined,
+        });
+        expect(result.provider).toBe('Provider B');
     });
 });
 

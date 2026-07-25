@@ -54,10 +54,7 @@ export function planRetryNode(params: {
 // receipt whose tool name is flagged by the caller as destructive; by default
 // nothing is destructive so retries are non-blocking unless annotated.
 function isDestructive(receipt: ToolReceipt): boolean {
-    return (
-        (receipt as ToolReceipt & { destructive?: boolean }).destructive ===
-        true
-    );
+    return receipt.sideEffect === 'destructive';
 }
 
 /**
@@ -78,5 +75,23 @@ export async function forkRun(
         lastSequence: 0,
     };
     await store.saveSnapshot(forkedSnapshot, 0);
+    if (store.listToolReceipts) {
+        const receipts = await store.listToolReceipts(sourceRunId);
+        for (const receipt of receipts) {
+            await store.putToolReceipt({
+                ...receipt,
+                runId: newRunId,
+            });
+        }
+    }
+    if (store.listToolIntents) {
+        const intents = await store.listToolIntents(sourceRunId);
+        for (const intent of intents) {
+            await store.putToolIntent({
+                ...intent,
+                runId: newRunId,
+            });
+        }
+    }
     return { forked: true, snapshot: forkedSnapshot };
 }

@@ -6,6 +6,7 @@ import {
     createRunId,
     forkRun,
     planRetryNode,
+    snapshotToResumeFrom,
     type RunSnapshot,
     type ToolReceipt,
 } from '../runstore';
@@ -115,9 +116,9 @@ describe('time travel (R7.AC6)', () => {
             callId: 'c1',
             toolName: 'delete',
             authority: 'host-server' as const,
+            sideEffect: 'destructive' as const,
             status: 'succeeded' as const,
             at: 1,
-            destructive: true,
         };
         const blocked = planRetryNode({
             snapshot: snapshot('r', 0),
@@ -141,5 +142,20 @@ describe('time travel (R7.AC6)', () => {
         const { forked, snapshot: forkedSnap } = await forkRun(store, 'r', newId);
         expect(forked).toBe(true);
         expect(forkedSnap?.runId).toBe(newId);
+    });
+});
+
+describe('snapshot resume projection', () => {
+    it('restores typed values without re-queueing a completed node', () => {
+        const completed: RunSnapshot = {
+            ...snapshot('done', 2),
+            status: 'completed',
+            pendingNodes: [],
+            nodeValues: { n1: { answer: 42 } },
+        };
+        const resume = snapshotToResumeFrom(completed);
+        expect(resume.pendingNodes).toEqual([]);
+        expect(resume.startNodeId).toBe('');
+        expect(resume.nodeValues).toEqual({ n1: { answer: 42 } });
     });
 });

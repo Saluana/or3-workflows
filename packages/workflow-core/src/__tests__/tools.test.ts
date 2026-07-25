@@ -13,6 +13,7 @@ import {
     type ToolExecutionPolicy,
     type ToolReceipt,
 } from '../tools';
+import { InMemoryRunStore } from '../runstore';
 
 function tool(
     name: string,
@@ -206,6 +207,119 @@ describe('executor (R5.AC4, R5.AC5)', () => {
         expect(exec).not.toHaveBeenCalled();
     });
 
+    it('reuses a receipt by a host-derived idempotency key', async () => {
+        const exec = vi.fn(async () => 'fresh');
+        const t: WorkflowTool = {
+            ...tool('once', {}, exec),
+            idempotencyKey: (input) =>
+                `once:${JSON.stringify(input)}`,
+        };
+        const prior: ToolReceipt = {
+            runId: 'r',
+            callId: 'old-provider-call-id',
+            toolName: 'once',
+            authority: 'host-client',
+            sideEffect: 'reversible',
+            idempotencyKey: 'once:{"x":1}',
+            status: 'succeeded',
+            result: 'cached',
+            at: 1,
+        };
+        const { outcomes } = await executeToolBatch(
+            [{ callId: 'new-provider-call-id', toolName: 'once', input: { x: 1 } }],
+            {
+                runId: 'r',
+                nodeId: 'n',
+                signal,
+                resolve: () => t,
+                receiptStore: {
+                    getToolReceipt: async () => null,
+                    getToolReceiptByIdempotencyKey: async () => prior,
+                },
+            }
+        );
+        expect(outcomes[0].status).toBe('reused');
+        expect(outcomes[0].output).toBe('cached');
+        expect(exec).not.toHaveBeenCalled();
+    });
+
+    it('rejects a reused call id when its validated input changed', async () => {
+        const store = new InMemoryRunStore();
+        const exec = vi.fn(async () => 'done');
+        const once = tool('once', {}, exec);
+        const options = {
+            runId: 'collision-run',
+            nodeId: 'node',
+            signal,
+            resolve: () => once,
+            receiptStore: store,
+        };
+
+        await executeToolBatch(
+            [{ callId: 'stable-id', toolName: 'once', input: { value: 1 } }],
+            options
+        );
+        await expect(
+            executeToolBatch(
+                [
+                    {
+                        callId: 'stable-id',
+                        toolName: 'once',
+                        input: { value: 2 },
+                    },
+                ],
+                options
+            )
+        ).rejects.toThrow('identity collision');
+        expect(exec).toHaveBeenCalledOnce();
+    });
+
+    it('finishes a started intent from a committed receipt after restart', async () => {
+        const store = new InMemoryRunStore();
+        const originalPutIntent = store.putToolIntent.bind(store);
+        let crashBeforeIntentCommit = true;
+        store.putToolIntent = async (intent) => {
+            if (
+                crashBeforeIntentCommit &&
+                intent.status === 'completed'
+            ) {
+                crashBeforeIntentCommit = false;
+                throw new Error(
+                    'simulated crash after receipt commit'
+                );
+            }
+            await originalPutIntent(intent);
+        };
+        const exec = vi.fn(async () => 'external-result');
+        const once = tool('once', {}, exec);
+        const call = {
+            callId: 'committed-call',
+            toolName: 'once',
+            input: { value: 1 },
+        };
+        const options = {
+            runId: 'receipt-recovery-run',
+            nodeId: 'node',
+            signal,
+            resolve: () => once,
+            receiptStore: store,
+        };
+
+        await expect(
+            executeToolBatch([call], options)
+        ).rejects.toThrow('simulated crash');
+        const resumed = await executeToolBatch([call], options);
+
+        expect(resumed.outcomes[0]?.status).toBe('reused');
+        expect(exec).toHaveBeenCalledOnce();
+        expect(
+            await store.getToolIntent(
+                'receipt-recovery-run',
+                'committed-call'
+            )
+        ).toMatchObject({ status: 'completed' });
+    });
+
     it('gates approval-required tools through the approval gate', async () => {
         const t = tool('danger', { approval: 'always' }, async () => 'done');
         const gate = vi.fn(async () => false);
@@ -221,6 +335,165 @@ describe('executor (R5.AC4, R5.AC5)', () => {
         );
         expect(gate).toHaveBeenCalled();
         expect(outcomes[0].status).toBe('rejected');
+    });
+
+    it('persists a started intent before invoking an external side effect', async () => {
+        const store = new InMemoryRunStore();
+        const exec = vi.fn(async (_input, context) => {
+            const intent = await store.getToolIntent(
+                context.runId,
+                context.callId
+            );
+            expect(intent?.status).toBe('started');
+            return 'charged';
+        });
+        const charge = tool(
+            'charge',
+            { sideEffect: 'destructive' },
+            exec
+        );
+        const { outcomes } = await executeToolBatch(
+            [{ callId: 'charge-1', toolName: 'charge', input: {} }],
+            {
+                runId: 'durable-run',
+                nodeId: 'billing',
+                signal,
+                resolve: () => charge,
+                receiptStore: store,
+            }
+        );
+        expect(outcomes[0]?.status).toBe('succeeded');
+        expect(
+            await store.getToolIntent('durable-run', 'charge-1')
+        ).toMatchObject({ status: 'completed' });
+    });
+
+    it('reconciles an ambiguous restart without replaying the side effect', async () => {
+        const store = new InMemoryRunStore();
+        const originalPut = store.putToolReceipt.bind(store);
+        let failReceiptWrite = true;
+        store.putToolReceipt = async (receipt) => {
+            if (failReceiptWrite) {
+                failReceiptWrite = false;
+                throw new Error('simulated crash before receipt commit');
+            }
+            await originalPut(receipt);
+        };
+        const exec = vi.fn(async () => 'external-result');
+        const charge = tool(
+            'charge',
+            { sideEffect: 'destructive' },
+            exec
+        );
+        const options = {
+            runId: 'restart-run',
+            nodeId: 'billing',
+            signal,
+            resolve: () => charge,
+            receiptStore: store,
+        };
+
+        await expect(
+            executeToolBatch(
+                [
+                    {
+                        callId: 'charge-1',
+                        toolName: 'charge',
+                        input: { cents: 50 },
+                    },
+                ],
+                options
+            )
+        ).rejects.toThrow('simulated crash');
+        expect(exec).toHaveBeenCalledOnce();
+
+        const resumed = await executeToolBatch(
+            [
+                {
+                    callId: 'charge-1',
+                    toolName: 'charge',
+                    input: { cents: 50 },
+                },
+            ],
+            {
+                ...options,
+                reconciler: async () => ({
+                    action: 'completed',
+                    output: 'recovered-result',
+                }),
+            }
+        );
+        expect(resumed.outcomes[0]).toMatchObject({
+            status: 'reconciled',
+            output: 'recovered-result',
+        });
+        expect(exec).toHaveBeenCalledOnce();
+    });
+
+    it('reconciles a failed side-effect intent when its receipt is unavailable', async () => {
+        const store = new InMemoryRunStore();
+        const exec = vi.fn(async () => {
+            throw new Error('provider disconnected after submission');
+        });
+        const charge = tool(
+            'charge',
+            { sideEffect: 'destructive' },
+            exec
+        );
+        const call = {
+            callId: 'charge-ambiguous',
+            toolName: 'charge',
+            input: { cents: 75 },
+        };
+        const options = {
+            runId: 'failed-intent-run',
+            nodeId: 'billing',
+            signal,
+            resolve: () => charge,
+            receiptStore: store,
+        };
+
+        const first = await executeToolBatch([call], options);
+        expect(first.outcomes[0]?.status).toBe('failed');
+        expect(exec).toHaveBeenCalledOnce();
+
+        store.getToolReceipt = async () => undefined;
+        const resumed = await executeToolBatch([call], {
+            ...options,
+            reconciler: async () => ({
+                action: 'completed',
+                output: 'confirmed externally',
+            }),
+        });
+        expect(resumed.outcomes[0]).toMatchObject({
+            status: 'reconciled',
+            output: 'confirmed externally',
+        });
+        expect(exec).toHaveBeenCalledOnce();
+    });
+
+    it('enforces tool permission scopes in the executor', async () => {
+        const exec = vi.fn(async () => 'secret');
+        const scoped = tool(
+            'admin-read',
+            { permissions: ['admin:read'] },
+            exec
+        );
+        const { outcomes } = await executeToolBatch(
+            [{ callId: 'c1', toolName: 'admin-read', input: {} }],
+            {
+                runId: 'r',
+                nodeId: 'n',
+                signal,
+                resolve: () => scoped,
+                grantedPermissions: ['user:read'],
+            }
+        );
+        expect(outcomes[0]).toMatchObject({
+            status: 'rejected',
+            error: 'missing-permissions:admin:read',
+        });
+        expect(exec).not.toHaveBeenCalled();
     });
 });
 

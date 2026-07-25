@@ -106,25 +106,29 @@ export function gatewayAsLLMProvider(gateway: ModelGateway): LLMProvider {
                 generation: optionsToGeneration(options),
                 tools: toolsToDescriptors(options?.tools),
                 toolChoice: options?.toolChoice,
+                parallelToolCalls: options?.parallelToolCalls,
                 onTextDelta: options?.onToken,
                 onReasoningDelta: options?.onReasoning,
                 signal: options?.signal,
             };
             const result = await gateway.generate(request);
             const toolCalls: ToolCallResult[] | undefined = result.toolCalls;
+            const legacyUsage =
+                typeof result.usage?.inputTokens === 'number' &&
+                typeof result.usage.outputTokens === 'number'
+                    ? {
+                          promptTokens: result.usage.inputTokens,
+                          completionTokens: result.usage.outputTokens,
+                          totalTokens:
+                              result.usage.totalTokens ??
+                              result.usage.inputTokens +
+                                  result.usage.outputTokens,
+                      }
+                    : undefined;
             return {
                 content: result.content,
                 toolCalls,
-                usage: result.usage
-                    ? {
-                          promptTokens: result.usage.inputTokens ?? 0,
-                          completionTokens: result.usage.outputTokens ?? 0,
-                          totalTokens:
-                              result.usage.totalTokens ??
-                              (result.usage.inputTokens ?? 0) +
-                                  (result.usage.outputTokens ?? 0),
-                      }
-                    : undefined,
+                usage: legacyUsage,
                 finishReason: result.finishReason,
             };
         },

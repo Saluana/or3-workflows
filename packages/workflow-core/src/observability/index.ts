@@ -37,4 +37,7 @@ export {
     type EvaluationReport,
     type RunHarnessOptions,
     type CandidateComparison,
+    type EvaluationArtifact,
+    type EvaluationArtifactStore,
+    InMemoryEvaluationArtifactStore,
 } from './evaluation';

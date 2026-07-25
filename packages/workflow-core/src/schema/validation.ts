@@ -7,6 +7,7 @@
  * typed error. Missing repair budget never loops forever.
  */
 import { z } from 'zod';
+import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020.js';
 import type { JsonValue } from '../gateway/types';
 import type {
     SchemaRef,
@@ -17,6 +18,52 @@ import type {
 import { SchemaRegistry, schemaRegistry } from './SchemaRegistry';
 
 const MAX_ISSUES = 20;
+const jsonSchemaValidator = new Ajv2020({
+    allErrors: true,
+    strict: false,
+    validateFormats: false,
+});
+const compiledSchemas = new WeakMap<object, ValidateFunction>();
+
+function validateJsonSchema(
+    value: JsonValue,
+    schema: Record<string, unknown>
+): { ok: true } | { ok: false; issues: StructuredValidationIssue[] } {
+    try {
+        let validate = compiledSchemas.get(schema);
+        if (!validate) {
+            validate = jsonSchemaValidator.compile(schema);
+            compiledSchemas.set(schema, validate);
+        }
+        if (validate(value)) return { ok: true };
+        return {
+            ok: false,
+            issues: boundIssues(
+                (validate.errors ?? []).map((issue) => ({
+                    path: issue.instancePath
+                        .replace(/^\//, '')
+                        .replace(/\//g, '.'),
+                    message: issue.message ?? 'JSON Schema validation failed',
+                    code: issue.keyword,
+                }))
+            ),
+        };
+    } catch (error) {
+        return {
+            ok: false,
+            issues: [
+                {
+                    path: '',
+                    message:
+                        error instanceof Error
+                            ? `Invalid JSON Schema: ${error.message}`
+                            : 'Invalid JSON Schema',
+                    code: 'invalid_schema',
+                },
+            ],
+        };
+    }
+}
 
 function boundIssues(
     issues: StructuredValidationIssue[]
@@ -41,9 +88,9 @@ export function parseJsonCandidate(
 /**
  * Validate an already-parsed JSON value against the schema referenced by a spec.
  *
- * When no Zod schema is registered for `schemaId@version`, validation is a
- * structural pass-through (the value is accepted as-is) so hosts that persist
- * only JSON Schema still receive typed values without a runtime schema.
+ * When no Zod schema is registered for `schemaId@version`, the serializable
+ * JSON Schema is validated with Ajv. Inline/schema-only workflows therefore
+ * retain the same runtime guarantee as code-first Zod workflows.
  */
 export function validateStructuredValue(
     value: JsonValue,
@@ -56,7 +103,10 @@ export function validateStructuredValue(
     };
     const registered = registry.get(spec.schemaId, spec.schemaVersion);
     if (!registered) {
-        return { ok: true, value, schema };
+        const validated = validateJsonSchema(value, spec.jsonSchema);
+        return validated.ok
+            ? { ok: true, value, schema }
+            : { ok: false, schema, issues: validated.issues };
     }
     const parsed = registered.schema.safeParse(value);
     if (parsed.success) {

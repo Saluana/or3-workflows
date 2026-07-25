@@ -280,6 +280,8 @@ export {
     type GenerationSettings,
     type DataCollectionPolicy,
     type MaxPricePolicy,
+    type ProviderPercentileCutoffs,
+    type ProviderSortPolicy,
     type ProviderRoutingPolicy,
     type ToolChoice,
     type ModelToolDescriptor,
@@ -344,6 +346,7 @@ export {
     extractProvider,
     toModelInfo,
     // Default models
+    DEFAULT_WORKFLOW_MODEL,
     DEFAULT_MODELS,
     registerDefaultModels,
 } from './models';
@@ -384,6 +387,9 @@ export {
     type ToolCallPlan,
     type ToolBatchPlan,
     type ToolReceipt,
+    type ToolIntent,
+    type ToolReconciler,
+    type ToolReconciliationDecision,
     type ToolCallOutcome,
     type ToolCallInput,
     type LegacyAdapterOptions,
@@ -400,6 +406,8 @@ export {
     toModelToolDescriptor,
     WorkflowToolRegistry,
     executeToolBatch,
+    ToolReconciliationRequiredError,
+    isToolReconciliationRequiredError,
 } from './tools';
 
 // Durable run journal (R7)
@@ -454,6 +462,9 @@ export {
     type EvaluationReport,
     type RunHarnessOptions,
     type CandidateComparison,
+    type EvaluationArtifact,
+    type EvaluationArtifactStore,
+    InMemoryEvaluationArtifactStore,
 } from './observability';
 
 // Agent-loop backends (R6) — native only; optional OpenRouter Agent backend

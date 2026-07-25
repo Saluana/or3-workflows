@@ -1,4 +1,12 @@
-import { ref, readonly, inject, provide, type InjectionKey, type Ref } from 'vue';
+import {
+    ref,
+    readonly,
+    inject,
+    provide,
+    hasInjectionContext,
+    type InjectionKey,
+    type Ref,
+} from 'vue';
 
 type ExecutionCache = Map<string, string>;
 
@@ -46,6 +54,8 @@ function useExecutionCacheFrom(cache: Ref<ExecutionCache>) {
 }
 
 export function useExecutionCache() {
-    const cache = inject(EXECUTION_CACHE_KEY, fallbackCache);
+    const cache = hasInjectionContext()
+        ? inject(EXECUTION_CACHE_KEY, fallbackCache)
+        : fallbackCache;
     return useExecutionCacheFrom(cache);
 }

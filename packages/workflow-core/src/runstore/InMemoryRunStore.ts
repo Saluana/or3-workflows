@@ -11,6 +11,7 @@ import type {
     RunStore,
     ToolReceipt,
 } from './types';
+import type { ToolIntent } from '../tools';
 import { ConcurrentRunWriterError, RUN_SCHEMA_VERSION } from './types';
 
 interface RunState {
@@ -18,6 +19,7 @@ interface RunState {
     snapshot?: RunSnapshot;
     nextSequence: number;
     receipts: Map<string, ToolReceipt>;
+    intents: Map<string, ToolIntent>;
 }
 
 export class InMemoryRunStore implements RunStore {
@@ -30,6 +32,7 @@ export class InMemoryRunStore implements RunStore {
                 events: [],
                 nextSequence: 0,
                 receipts: new Map(),
+                intents: new Map(),
             };
             this.runs.set(runId, state);
         }
@@ -98,8 +101,38 @@ export class InMemoryRunStore implements RunStore {
         return this.runs.get(runId)?.receipts.get(callId) ?? null;
     }
 
+    async getToolReceiptByIdempotencyKey(
+        runId: string,
+        idempotencyKey: string
+    ): Promise<ToolReceipt | null> {
+        return (
+            [...(this.runs.get(runId)?.receipts.values() ?? [])].find(
+                (receipt) => receipt.idempotencyKey === idempotencyKey
+            ) ?? null
+        );
+    }
+
+    async listToolReceipts(runId: string): Promise<ToolReceipt[]> {
+        return [...(this.runs.get(runId)?.receipts.values() ?? [])];
+    }
+
     async putToolReceipt(receipt: ToolReceipt): Promise<void> {
         this.getOrCreate(receipt.runId).receipts.set(receipt.callId, receipt);
+    }
+
+    async getToolIntent(
+        runId: string,
+        callId: string
+    ): Promise<ToolIntent | null> {
+        return this.runs.get(runId)?.intents.get(callId) ?? null;
+    }
+
+    async listToolIntents(runId: string): Promise<ToolIntent[]> {
+        return [...(this.runs.get(runId)?.intents.values() ?? [])];
+    }
+
+    async putToolIntent(intent: ToolIntent): Promise<void> {
+        this.getOrCreate(intent.runId).intents.set(intent.callId, intent);
     }
 
     /** All persisted events for a run (test/inspection helper). */

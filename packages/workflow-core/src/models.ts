@@ -56,6 +56,9 @@
  */
 type OpenString<TKnown extends string> = TKnown | (string & {});
 
+/** One compatibility-safe default used by the core runtime and visual editor. */
+export const DEFAULT_WORKFLOW_MODEL = 'openai/gpt-4o-mini';
+
 /** Supported model input modalities (open union). */
 export type ModelInputModality = OpenString<
     'text' | 'image' | 'audio' | 'video' | 'file'
@@ -74,6 +77,7 @@ export type ModelParameter = OpenString<
     | 'top_a'
     | 'min_p'
     | 'max_tokens'
+    | 'max_completion_tokens'
     | 'frequency_penalty'
     | 'presence_penalty'
     | 'repetition_penalty'
@@ -85,8 +89,10 @@ export type ModelParameter = OpenString<
     | 'response_format'
     | 'structured_outputs'
     | 'tools'
+    | 'parallel_tool_calls'
     | 'tool_choice'
     | 'reasoning'
+    | 'reasoning_effort'
     | 'include_reasoning'
 >;
 

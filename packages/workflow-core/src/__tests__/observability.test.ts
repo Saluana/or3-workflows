@@ -8,11 +8,18 @@ import {
     runEvaluationSuite,
     summarizeEvaluation,
     compareCandidates,
+    InMemoryEvaluationArtifactStore,
     type EvaluationCase,
     type SpanLike,
     type TracerLike,
 } from '../observability';
 import type { WorkflowData } from '../types';
+import { OpenRouterExecutionAdapter } from '../execution';
+import type {
+    ModelGateway,
+    ModelRequest,
+    WorkflowEventEnvelope,
+} from '../index';
 
 describe('event v2 envelope + legacy projection (R8.AC1)', () => {
     it('assigns stable run/sequence correlation', () => {
@@ -35,7 +42,13 @@ describe('event v2 envelope + legacy projection (R8.AC1)', () => {
         );
         expect(legacy?.type).toBe('node_finish');
         const v2only = projectToLegacyEvent(
-            seq.envelope({ type: 'model_start', nodeId: 'n', requestedModels: ['m'] })
+            seq.envelope({
+                type: 'model_start',
+                callId: 'call-1',
+                nodeId: 'n',
+                requestedModels: ['m'],
+                transport: 'chat',
+            })
         );
         expect(v2only).toBeNull();
     });
@@ -63,6 +76,77 @@ describe('redaction defaults (R8.AC4)', () => {
         expect((finish.event as { output: string }).output.length).toBeLessThan(
             20
         );
+    });
+
+    it('redacts completion results, HITL context, annotations, and idempotency keys', () => {
+        const seq = new RunSequencer('r');
+        const done = redactEnvelope(
+            seq.envelope({
+                type: 'done',
+                result: {
+                    success: true,
+                    output: 'final secret',
+                    finalOutput: 'final secret',
+                    nodeOutputs: { agent: 'node secret' },
+                    executionOrder: ['agent'],
+                    duration: 1,
+                    sessionMessages: [
+                        { role: 'user', content: 'prompt secret' },
+                    ],
+                    modelCalls: [
+                        {
+                            callId: 'call',
+                            nodeId: 'agent',
+                            requestedModels: ['model'],
+                            transport: 'chat',
+                            annotations: [
+                                {
+                                    type: 'url_citation',
+                                    content: 'provider secret',
+                                },
+                            ],
+                        },
+                    ],
+                },
+            })
+        );
+        const hitl = redactEnvelope(
+            seq.envelope({
+                type: 'hitl_pause',
+                resumeToken: 'resume',
+                request: {
+                    id: 'approval',
+                    nodeId: 'agent',
+                    nodeLabel: 'Agent',
+                    mode: 'review',
+                    prompt: 'Review this secret',
+                    context: {
+                        input: 'input secret',
+                        output: 'output secret',
+                        workflowName: 'Workflow',
+                    },
+                    createdAt: new Date(0).toISOString(),
+                },
+            })
+        );
+        const intent = redactEnvelope(
+            seq.envelope({
+                type: 'tool_intent',
+                callId: 'call',
+                toolName: 'charge',
+                nodeId: 'agent',
+                idempotencyKey: 'customer-secret',
+            })
+        );
+
+        expect(isSafeForExport(done)).toBe(true);
+        expect(isSafeForExport(hitl)).toBe(true);
+        expect(isSafeForExport(intent)).toBe(true);
+        expect(
+            done.event.type === 'done'
+                ? done.event.result.modelCalls?.[0]?.annotations
+                : undefined
+        ).toEqual([{ type: 'url_citation' }]);
     });
 });
 
@@ -94,6 +178,174 @@ describe('OpenTelemetry adapter (R8.AC3)', () => {
         adapter.handle(seq.envelope({ type: 'node_finish', nodeId: 'n', output: 'x' }));
         expect(tracer.startSpan).toHaveBeenCalled();
         expect(ended.length).toBeGreaterThan(0);
+    });
+
+    it('keeps equal node ids in different subflow paths on separate spans', () => {
+        const spans: SpanLike[] = [];
+        const tracer: TracerLike = {
+            startSpan: vi.fn(() => {
+                const span: SpanLike = {
+                    setAttribute: vi.fn(),
+                    addEvent: vi.fn(),
+                    setStatus: vi.fn(),
+                    end: vi.fn(),
+                };
+                spans.push(span);
+                return span;
+            }),
+        };
+        const adapter = new OtelWorkflowAdapter({ tracer });
+        const seq = new RunSequencer('r');
+        adapter.handle(
+            seq.envelope(
+                { type: 'node_start', nodeId: 'worker' },
+                { path: ['branch-a'] }
+            )
+        );
+        adapter.handle(
+            seq.envelope(
+                { type: 'node_start', nodeId: 'worker' },
+                { path: ['branch-b'] }
+            )
+        );
+        adapter.handle(
+            seq.envelope(
+                {
+                    type: 'node_finish',
+                    nodeId: 'worker',
+                    output: 'a',
+                },
+                { path: ['branch-a'] }
+            )
+        );
+        adapter.handle(
+            seq.envelope(
+                {
+                    type: 'node_finish',
+                    nodeId: 'worker',
+                    output: 'b',
+                },
+                { path: ['branch-b'] }
+            )
+        );
+
+        expect(spans).toHaveLength(2);
+        expect(spans[0]?.end).toHaveBeenCalledOnce();
+        expect(spans[1]?.end).toHaveBeenCalledOnce();
+    });
+});
+
+describe('execution event bridge', () => {
+    it('records fallback routing, actual model, cost, and redacted V2 output', async () => {
+        const requests: ModelRequest[] = [];
+        const gateway: ModelGateway = {
+            async generate(request) {
+                requests.push(request);
+                return {
+                    requestedModels: request.models,
+                    actualModel: 'mock/fallback',
+                    provider: 'MockProvider',
+                    assistantMessage: {
+                        role: 'assistant',
+                        content: 'secret output',
+                    },
+                    content: 'secret output',
+                    finishReason: 'stop',
+                    usage: {
+                        inputTokens: 4,
+                        outputTokens: 2,
+                        totalTokens: 6,
+                        costUsd: 0.002,
+                    },
+                    identifiers: { generationId: 'gen-1' },
+                    timing: {
+                        startedAt: 1,
+                        completedAt: 3,
+                        totalMs: 2,
+                    },
+                };
+            },
+            async getModelCapabilities() {
+                return null;
+            },
+        };
+        const events: WorkflowEventEnvelope[] = [];
+        const workflow: WorkflowData = {
+            meta: { version: '2.0.0', name: 'telemetry' },
+            nodes: [
+                {
+                    id: 'start',
+                    type: 'start',
+                    position: { x: 0, y: 0 },
+                    data: { label: 'Start' },
+                },
+                {
+                    id: 'agent',
+                    type: 'agent',
+                    position: { x: 1, y: 0 },
+                    data: {
+                        label: 'Agent',
+                        prompt: 'Answer',
+                        model: 'mock/primary',
+                        modelRequest: {
+                            version: 1,
+                            models: [
+                                'mock/primary',
+                                'mock/fallback',
+                            ],
+                        },
+                    },
+                },
+            ] as WorkflowData['nodes'],
+            edges: [
+                {
+                    id: 'start-agent',
+                    source: 'start',
+                    target: 'agent',
+                },
+            ],
+        };
+        const adapter = new OpenRouterExecutionAdapter(gateway, {
+            preflight: false,
+            onEventV2: (event) => events.push(event),
+        });
+        const result = await adapter.execute(
+            workflow,
+            { text: 'hello' },
+            {
+                onNodeStart: vi.fn(),
+                onNodeFinish: vi.fn(),
+                onNodeError: vi.fn(),
+                onToken: vi.fn(),
+            }
+        );
+
+        expect(result.success).toBe(true);
+        expect(requests[0]?.models).toEqual([
+            'mock/primary',
+            'mock/fallback',
+        ]);
+        expect(result.modelCalls?.[0]).toMatchObject({
+            actualModel: 'mock/fallback',
+            provider: 'MockProvider',
+            identifiers: { generationId: 'gen-1' },
+        });
+        expect(result.costUsd).toBe(0.002);
+        const finish = events.find(
+            (event) =>
+                event.event.type === 'node_finish' &&
+                event.event.nodeId === 'agent'
+        );
+        expect(
+            finish?.event.type === 'node_finish'
+                ? finish.event.output
+                : undefined
+        ).toBe('[redacted]');
+        expect(
+            events.some(
+                (event) => event.event.type === 'model_finish'
+            )
+        ).toBe(true);
     });
 });
 
@@ -160,5 +412,20 @@ describe('evaluation harness (R8.AC5, R8.AC6)', () => {
             ],
         });
         expect(cmp.recommendation).toBe('b');
+    });
+
+    it('persists isolated evaluation artifacts through a host store', async () => {
+        const store = new InMemoryEvaluationArtifactStore();
+        await runEvaluationSuite(
+            cases,
+            async () => ({
+                output: 'hello',
+                durationMs: 1,
+            }),
+            { artifactStore: store, suiteId: 'regression-1' }
+        );
+        const artifacts = await store.list('regression-1');
+        expect(artifacts).toHaveLength(1);
+        expect(artifacts[0]?.result.caseId).toBe('c1');
     });
 });

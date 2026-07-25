@@ -10,8 +10,10 @@ import type {
     ValidationWarning,
 } from '../types';
 import { estimateTokenUsage } from '../compaction';
+import { DEFAULT_WORKFLOW_MODEL } from '../models';
+import { callModelForNode } from './modelGatewayCall';
 
-const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
+const DEFAULT_MODEL = DEFAULT_WORKFLOW_MODEL;
 
 /**
  * While Loop node extension definition.
@@ -154,6 +156,7 @@ export const WhileLoopExtension: NodeExtension = {
                 }
 
                 const model =
+                    data.conditionModelRequest?.models[0] ||
                     data.conditionModel ||
                     context.defaultModel ||
                     DEFAULT_MODEL;
@@ -180,10 +183,17 @@ Respond with only "continue" or "done".`;
                     { role: 'user', content: prompt },
                 ];
 
-                const result = await provider.chat(model, messages, {
-                    temperature: 0,
-                    maxTokens: 10,
-                    signal: context.signal,
+                const result = await callModelForNode({
+                    context,
+                    nodeId: node.id,
+                    provider,
+                    legacyModel: model,
+                    modelRequest: data.conditionModelRequest,
+                    messages,
+                    generation: {
+                        temperature: 0,
+                        maxOutputTokens: 10,
+                    },
                 });
 
                 if (context.tokenCounter && context.onTokenUsage) {
@@ -198,9 +208,15 @@ Respond with only "continue" or "done".`;
                     if (result.usage) {
                         usage = {
                             ...usage,
-                            promptTokens: result.usage.promptTokens,
-                            completionTokens: result.usage.completionTokens,
-                            totalTokens: result.usage.totalTokens,
+                            promptTokens:
+                                result.usage.inputTokens ??
+                                usage.promptTokens,
+                            completionTokens:
+                                result.usage.outputTokens ??
+                                usage.completionTokens,
+                            totalTokens:
+                                result.usage.totalTokens ??
+                                usage.totalTokens,
                         };
                     }
 

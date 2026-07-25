@@ -9,12 +9,12 @@
  */
 import type { ChatMessage } from '../types';
 import type { JsonValue } from '../gateway/types';
-import type { ToolReceipt } from '../tools/types';
+import type { ToolIntent, ToolReceipt } from '../tools/types';
 
-export type { ToolReceipt } from '../tools/types';
+export type { ToolIntent, ToolReceipt } from '../tools/types';
 
 /** Current persisted-run schema version. */
-export const RUN_SCHEMA_VERSION = 1;
+export const RUN_SCHEMA_VERSION = 2;
 
 /** Lifecycle status of a run. */
 export type RunStatus =
@@ -74,6 +74,9 @@ export interface ReconciliationState {
     callId: string;
     toolName: string;
     at: number;
+    nodeId?: string;
+    sideEffect?: import('../tools').ToolSideEffect;
+    idempotencyKey?: string;
 }
 
 /** Top-level run record used for listing / authorization. */
@@ -113,8 +116,21 @@ export interface RunStore {
     currentSequence(runId: string): Promise<number>;
     /** Look up a tool receipt for idempotent replay. */
     getToolReceipt(runId: string, callId: string): Promise<ToolReceipt | null>;
+    /** Look up a receipt by a host-derived idempotency key. */
+    getToolReceiptByIdempotencyKey?(
+        runId: string,
+        idempotencyKey: string
+    ): Promise<ToolReceipt | null>;
+    /** Enumerate receipts when forking or inspecting a run. */
+    listToolReceipts?(runId: string): Promise<ToolReceipt[]>;
     /** Persist a tool receipt. */
     putToolReceipt(receipt: ToolReceipt): Promise<void>;
+    /** Look up the durable pre-execution intent for a call. */
+    getToolIntent(runId: string, callId: string): Promise<ToolIntent | null>;
+    /** Enumerate intents for inspection/fork/reconciliation. */
+    listToolIntents?(runId: string): Promise<ToolIntent[]>;
+    /** Persist or transition a tool intent before/after external execution. */
+    putToolIntent(intent: ToolIntent): Promise<void>;
 }
 
 /** Thrown when a writer presents a stale `expectedSequence`. */

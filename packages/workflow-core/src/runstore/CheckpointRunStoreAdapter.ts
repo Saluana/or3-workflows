@@ -17,6 +17,7 @@ import type {
     PersistedRunEvent,
     RunSnapshot,
     RunStore,
+    ToolIntent,
     ToolReceipt,
 } from './types';
 import { RUN_SCHEMA_VERSION } from './types';
@@ -82,6 +83,7 @@ export class CheckpointRunStoreAdapter implements RunStore {
     private readonly nextSeq = new Map<string, number>();
     private readonly events = new Map<string, PersistedRunEvent[]>();
     private readonly receipts = new Map<string, ToolReceipt>();
+    private readonly intents = new Map<string, ToolIntent>();
 
     constructor(private readonly checkpoints: CheckpointAdapter) {}
 
@@ -142,6 +144,42 @@ export class CheckpointRunStoreAdapter implements RunStore {
 
     async putToolReceipt(receipt: ToolReceipt): Promise<void> {
         this.receipts.set(`${receipt.runId}:${receipt.callId}`, receipt);
+    }
+
+    async getToolReceiptByIdempotencyKey(
+        runId: string,
+        idempotencyKey: string
+    ): Promise<ToolReceipt | null> {
+        return (
+            [...this.receipts.values()].find(
+                (receipt) =>
+                    receipt.runId === runId &&
+                    receipt.idempotencyKey === idempotencyKey
+            ) ?? null
+        );
+    }
+
+    async listToolReceipts(runId: string): Promise<ToolReceipt[]> {
+        return [...this.receipts.values()].filter(
+            (receipt) => receipt.runId === runId
+        );
+    }
+
+    async getToolIntent(
+        runId: string,
+        callId: string
+    ): Promise<ToolIntent | null> {
+        return this.intents.get(`${runId}:${callId}`) ?? null;
+    }
+
+    async putToolIntent(intent: ToolIntent): Promise<void> {
+        this.intents.set(`${intent.runId}:${intent.callId}`, intent);
+    }
+
+    async listToolIntents(runId: string): Promise<ToolIntent[]> {
+        return [...this.intents.values()].filter(
+            (intent) => intent.runId === runId
+        );
     }
 }
 

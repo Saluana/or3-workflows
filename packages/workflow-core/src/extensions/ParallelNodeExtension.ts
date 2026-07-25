@@ -13,15 +13,17 @@ import type {
 } from '../types';
 import { estimateTokenUsage } from '../compaction';
 import {
-    type ToolForLLM,
     buildUserContentWithAttachments,
 } from './shared';
+import type { ModelToolDescriptor } from '../gateway';
 import {
     buildToolMeta,
     runValidatedToolLoop,
 } from './runValidatedToolLoop';
+import { DEFAULT_WORKFLOW_MODEL } from '../models';
+import { callModelForNode } from './modelGatewayCall';
 
-const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
+const DEFAULT_MODEL = DEFAULT_WORKFLOW_MODEL;
 
 /** Default maximum number of tool call iterations */
 const DEFAULT_MAX_TOOL_ITERATIONS = 10;
@@ -133,22 +135,29 @@ export const ParallelNodeExtension: NodeExtension = {
 
         // Prepare global tools map
         const globalTools = context.tools || [];
-        const toolMeta = buildToolMeta(globalTools);
+        const workflowTools = context.workflowTools || [];
+        const toolMeta = buildToolMeta(globalTools, workflowTools);
 
         // Execute all branches internally using their model/prompt configs
         // Branches are internal LLM calls, not external node connections
         const branchExecutions = branches.map((branch) => {
             // Use branch-specific model/prompt or fall back to defaults
-            const branchModel = branch.model || data.model || DEFAULT_MODEL;
+            const branchModel =
+                branch.modelRequest?.models[0] ||
+                branch.model ||
+                data.modelRequest?.models[0] ||
+                data.model ||
+                DEFAULT_MODEL;
             const branchPrompt =
                 branch.prompt || 'You are a helpful assistant.';
 
             // Prepare tools for this branch
             const branchToolNames = branch.tools || [];
-            let toolsForLLM: ToolForLLM[] | undefined;
+            let toolsForLLM: ModelToolDescriptor[] | undefined;
 
             if (branchToolNames.length > 0) {
-                toolsForLLM = branchToolNames.map((name): ToolForLLM => {
+                toolsForLLM = branchToolNames.map(
+                    (name): ModelToolDescriptor => {
                     const globalTool = globalTools.find(
                         (t) => t.function.name === name
                     );
@@ -156,6 +165,41 @@ export const ParallelNodeExtension: NodeExtension = {
                         return {
                             type: 'function',
                             function: globalTool.function,
+                        };
+                    }
+                    const workflowTool = workflowTools.find(
+                        (tool) => tool.descriptor.name === name
+                    );
+                    const permissionsAllowed =
+                        branch.permissions === undefined ||
+                        (workflowTool?.descriptor.permissions ?? []).every(
+                            (permission) =>
+                                branch.permissions!.includes(permission)
+                        );
+                    if (workflowTool && permissionsAllowed) {
+                        if (
+                            workflowTool.descriptor.authority ===
+                            'provider-server'
+                        ) {
+                            return {
+                                type: 'provider-server',
+                                name,
+                                transport:
+                                    workflowTool.descriptor.transport ??
+                                    'either',
+                                config:
+                                    workflowTool.descriptor.providerConfig,
+                            };
+                        }
+                        return {
+                            type: 'function',
+                            function: {
+                                name,
+                                description:
+                                    workflowTool.descriptor.description,
+                                parameters:
+                                    workflowTool.descriptor.inputSchema,
+                            },
                         };
                     }
                     return { type: 'function', function: { name } };
@@ -173,6 +217,7 @@ export const ParallelNodeExtension: NodeExtension = {
                 const branchContext: ExecutionContext = {
                     ...context,
                     signal: branchAbort.signal,
+                    permissions: branch.permissions ?? context.permissions,
                     onToolCallEvent: (event) => {
                         context.onToolCallEvent?.({
                             ...event,
@@ -185,7 +230,9 @@ export const ParallelNodeExtension: NodeExtension = {
                 let supportsImages = false;
                 if (context.attachments && context.attachments.length > 0) {
                     const capabilities =
-                        await provider.getModelCapabilities(branchModel);
+                        await (
+                            context.modelGateway ?? provider
+                        ).getModelCapabilities(branchModel);
                     supportsImages =
                         capabilities?.inputModalities?.includes('image') ??
                         false;
@@ -219,6 +266,8 @@ export const ParallelNodeExtension: NodeExtension = {
                 const result = await runValidatedToolLoop({
                     provider,
                     model: branchModel,
+                    modelRequest:
+                        branch.modelRequest ?? data.modelRequest,
                     messages,
                     toolsForLLM,
                     toolMeta,
@@ -353,7 +402,10 @@ export const ParallelNodeExtension: NodeExtension = {
                 );
             }
 
-            const mergeModel = data.model || DEFAULT_MODEL;
+            const mergeModel =
+                data.modelRequest?.models[0] ||
+                data.model ||
+                DEFAULT_MODEL;
             const mergePrompt = data.prompt;
 
             const mergeMessages: ChatMessage[] = [
@@ -370,9 +422,14 @@ export const ParallelNodeExtension: NodeExtension = {
             context.onBranchStart?.(mergeBranchId, mergeBranchLabel);
 
             let mergeContent = '';
-            const result = await provider.chat(mergeModel, mergeMessages, {
-                signal: context.signal,
-                onToken: (token) => {
+            const result = await callModelForNode({
+                context,
+                nodeId: `${node.id}:merge`,
+                provider,
+                legacyModel: mergeModel,
+                modelRequest: data.modelRequest,
+                messages: mergeMessages,
+                onTextDelta: (token) => {
                     mergeContent += token;
                     // Stream to both the main output and the merge branch
                     context.onToken?.(token);
@@ -393,7 +450,7 @@ export const ParallelNodeExtension: NodeExtension = {
 
             if (context.tokenCounter && context.onTokenUsage) {
                 let usage = estimateTokenUsage({
-                    model: mergeModel,
+                    model: result.actualModel ?? mergeModel,
                     messages: mergeMessages,
                     output: result.content || '',
                     tokenCounter: context.tokenCounter,
@@ -403,9 +460,15 @@ export const ParallelNodeExtension: NodeExtension = {
                 if (result.usage) {
                     usage = {
                         ...usage,
-                        promptTokens: result.usage.promptTokens,
-                        completionTokens: result.usage.completionTokens,
-                        totalTokens: result.usage.totalTokens,
+                        promptTokens:
+                            result.usage.inputTokens ??
+                            usage.promptTokens,
+                        completionTokens:
+                            result.usage.outputTokens ??
+                            usage.completionTokens,
+                        totalTokens:
+                            result.usage.totalTokens ??
+                            usage.totalTokens,
                     };
                 }
 

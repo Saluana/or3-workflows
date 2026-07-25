@@ -105,6 +105,12 @@ export type ReasoningEffort =
 export interface ReasoningConfig {
     enabled?: boolean;
     effort?: ReasoningEffort;
+    /** Request a provider-generated reasoning summary. */
+    summary?: 'auto' | 'concise' | 'detailed';
+    /**
+     * @deprecated OpenRouter's current Chat SDK no longer accepts a reasoning
+     * token budget. Use `effort` instead.
+     */
     maxTokens?: number;
 }
 
@@ -140,6 +146,28 @@ export interface MaxPricePolicy {
     audio?: number;
 }
 
+/** Percentile cutoffs accepted by OpenRouter routing preferences. */
+export interface ProviderPercentileCutoffs {
+    p50?: number;
+    p75?: number;
+    p90?: number;
+    p99?: number;
+}
+
+export type ProviderSortPolicy =
+    | 'price'
+    | 'throughput'
+    | 'latency'
+    | 'exacto'
+    | {
+          by?: 'price' | 'throughput' | 'latency' | 'exacto';
+          /**
+           * `model` preserves model fallback priority; `none` sorts endpoints
+           * across all fallback models together.
+           */
+          partition?: 'model' | 'none';
+      };
+
 /**
  * Provider routing policy (R3). Maps to OpenRouter provider preferences at the
  * adapter boundary without reading any SDK private fields.
@@ -160,16 +188,20 @@ export interface ProviderRoutingPolicy {
     requireParameters?: boolean;
     /** Data-collection / training policy. */
     dataCollection?: DataCollectionPolicy;
-    /** Convenience alias: require zero-data-retention providers (implies deny). */
+    /** Require OpenRouter zero-data-retention endpoints. */
+    zdr?: boolean;
+    /** @deprecated Use `zdr`. Retained as a compatibility alias. */
     zeroDataRetention?: boolean;
     /** Maximum price limits (USD per million tokens / per unit). */
     maxPrice?: MaxPricePolicy;
     /** Sorting strategy when `order` is not specified. */
-    sort?: 'price' | 'throughput' | 'latency';
-    /** Preferred (soft) maximum latency in seconds. */
+    sort?: ProviderSortPolicy;
+    /** Preferred (soft) maximum latency in seconds, optionally by percentile. */
+    preferredMaxLatency?: number | ProviderPercentileCutoffs;
+    /** @deprecated Use `preferredMaxLatency`. */
     preferredMaxLatencySeconds?: number;
-    /** Preferred (soft) minimum throughput in tokens/sec. */
-    preferredMinThroughput?: number;
+    /** Preferred (soft) minimum throughput in tokens/sec, optionally by percentile. */
+    preferredMinThroughput?: number | ProviderPercentileCutoffs;
     /** Quantization levels to allow. */
     quantizations?: string[];
 }
@@ -214,6 +246,8 @@ export interface ProviderPluginDescriptor {
 export interface ModelRequest {
     /** Non-empty, priority-ordered model list (R2.AC1). */
     models: NonEmptyModels;
+    /** Requested provider transport. The default gateway transport is `chat`. */
+    transport?: 'chat' | 'responses';
     messages: ChatMessage[];
     generation?: GenerationSettings;
     routing?: ProviderRoutingPolicy;
@@ -289,6 +323,27 @@ export interface ModelCallResult {
     annotations?: ProviderAnnotation[];
     /** Present only when `request.debug.includeRawResponse` was set (R2.AC4). */
     raw?: { provider: string; value: unknown };
+}
+
+/** One normalized model attempt captured in the run result and telemetry. */
+export interface ModelCallRecord {
+    callId: string;
+    nodeId: string;
+    requestedModels: readonly string[];
+    transport: 'chat' | 'responses';
+    actualModel?: string;
+    provider?: string;
+    finishReason?: FinishReason;
+    usage?: ModelUsage;
+    identifiers?: ModelIdentifiers;
+    timing?: ModelTiming;
+    annotations?: ProviderAnnotation[];
+    error?: {
+        name: string;
+        message: string;
+        retryable?: boolean;
+        statusCode?: number;
+    };
 }
 
 // ============================================================================

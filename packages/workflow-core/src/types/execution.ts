@@ -197,6 +197,8 @@ export interface LLMProvider {
             maxTokens?: number;
             /** Tool definitions for function calling */
             tools?: ToolDefinition[];
+            /** Whether the model may emit parallel tool calls. */
+            parallelToolCalls?: boolean;
             /** Control tool selection behavior */
             toolChoice?:
                 | 'auto'
@@ -566,6 +568,12 @@ export interface ExecutionResult {
     /** Per-request token usage details (estimated). */
     tokenUsageDetails?: Array<TokenUsageDetails & { nodeId: string }>;
 
+    /** Provider-neutral model attempt records, including actual routing/cost. */
+    modelCalls?: import('../gateway').ModelCallRecord[];
+
+    /** Sum of provider-reported model cost. Undefined when no call reports cost. */
+    costUsd?: number;
+
     /** Session messages captured during execution (for resume). */
     sessionMessages?: ChatMessage[];
 
@@ -586,7 +594,7 @@ export interface ExecutionResult {
      * `resumeToken` is typically the checkpoint id.
      */
     pause?: {
-        type: 'hitl' | 'budget' | 'manual' | 'error';
+        type: 'hitl' | 'budget' | 'reconciliation' | 'manual' | 'error';
         resumeToken: string;
         reason?: string;
         hitlRequest?: HITLRequest;
@@ -669,6 +677,18 @@ export interface TokenUsageDetails extends TokenUsage {
 export interface ExecutionOptions {
     /** Global tools available to all agents */
     tools?: ToolDefinition[];
+    /** Typed, policy-aware tools available to all agents. */
+    workflowTools?: import('../tools').WorkflowTool[];
+    /** Local executor policy, independent from model tool-call parallelism. */
+    toolExecutionPolicy?: import('../tools').ToolExecutionPolicy;
+    /** Approval callback for tools gated by policy. */
+    toolApprovalGate?: import('../tools').ToolApprovalGate;
+    /** Resolve uncertain side effects discovered while resuming a durable run. */
+    toolReconciler?: import('../tools').ToolReconciler;
+    /** Whether models may emit parallel tool calls. */
+    parallelToolCalls?: boolean;
+    /** Optional loop backends keyed by backend id. Native remains the default. */
+    agentBackends?: Record<string, import('../agent').AgentLoopBackend>;
     /** Fallback model when node doesn't specify one */
     defaultModel?: string;
     /** Maximum retry attempts for failed API calls */
@@ -828,6 +848,18 @@ export interface ExecutionOptions {
     onEvent?: import('../events').WorkflowEventHandler;
 
     /**
+     * Privacy-redacted v2 event stream with run/sequence/path correlation.
+     * Legacy `onEvent` remains unredacted and source-compatible.
+     */
+    onEventV2?: import('../observability').WorkflowEventV2Handler;
+
+    /** Redaction policy for exported v2 events. Defaults to privacy-safe. */
+    eventRedaction?: import('../observability').RedactionOptions;
+
+    /** Optional OpenTelemetry event sink. No SDK is loaded by core. */
+    otel?: import('../observability').OtelWorkflowAdapter;
+
+    /**
      * Parent abort signal for nested/subflow adapters.
      * When aborted, the child adapter's controller aborts too.
      * @internal
@@ -848,6 +880,8 @@ export interface ResumeFromOptions {
     startNodeId: string;
     /** Per-node outputs collected so far. */
     nodeOutputs: Record<string, string>;
+    /** Per-node typed values collected so far. */
+    nodeValues?: Record<string, import('../gateway/types').JsonValue>;
     /** Execution order captured up to the failure point. */
     executionOrder?: string[];
     /** Last active node before failure. */
@@ -876,6 +910,11 @@ export interface ResumeFromOptions {
 export interface ExecutionContext {
     /** Input text for the current execution step */
     input: string;
+    /**
+     * Typed value from the single upstream node, when that node emitted one.
+     * `input` remains the stable string projection for backwards compatibility.
+     */
+    value?: import('../gateway/types').JsonValue;
     /** Conversation history */
     history: ChatMessage[];
     /** Long-term memory adapter (developer-provided or default) */
@@ -943,6 +982,55 @@ export interface ExecutionContext {
     maxSubflowDepth?: number;
     /** Global tools available to all agents (with handlers for execution) */
     tools?: ExecutableToolDefinition[];
+    /** Typed, policy-aware tools available to all agents. */
+    workflowTools?: import('../tools').WorkflowTool[];
+    /** Local executor policy, independent from model tool-call parallelism. */
+    toolExecutionPolicy?: import('../tools').ToolExecutionPolicy;
+    /** Approval callback for tools gated by policy. */
+    toolApprovalGate?: import('../tools').ToolApprovalGate;
+    toolReconciler?: import('../tools').ToolReconciler;
+    /** Whether models may emit parallel tool calls. */
+    parallelToolCalls?: boolean;
+    /** Permissions granted to this node (`undefined` preserves legacy access). */
+    permissions?: string[];
+    /** Provider-neutral gateway used by every native LLM-backed extension. */
+    modelGateway?: import('../gateway').ModelGateway;
+    /** Explicitly configured agent-loop backends. */
+    agentBackends?: Record<string, import('../agent').AgentLoopBackend>;
+    /** Allocate a stable per-run model-call identifier. */
+    createModelCallId?: (nodeId: string) => string;
+    /** Model lifecycle hooks used by the v2 event bridge/run aggregation. */
+    onModelCallStart?: (
+        callId: string,
+        nodeId: string,
+        request: import('../gateway').ModelRequest
+    ) => void;
+    onModelCallFinish?: (
+        callId: string,
+        nodeId: string,
+        request: import('../gateway').ModelRequest,
+        result: import('../gateway').ModelCallResult
+    ) => void;
+    onModelCallError?: (
+        callId: string,
+        nodeId: string,
+        request: import('../gateway').ModelRequest,
+        error: Error
+    ) => void;
+    /** Tool journal lifecycle hooks used by telemetry. */
+    onToolIntent?: (intent: import('../tools').ToolIntent) => void;
+    onToolApproval?: (event: {
+        callId: string;
+        toolName: string;
+        approved: boolean;
+    }) => void;
+    onToolReceipt?: (
+        receipt: import('../tools').ToolReceipt,
+        reused?: boolean
+    ) => void;
+    /** Durable run identity and receipt store for tool replay safety. */
+    runId?: string;
+    runStore?: import('../runstore').RunStore;
     /** Maximum tool call iterations (from node or global options) */
     maxToolIterations?: number;
     /** Behavior when max tool iterations is reached */
@@ -991,7 +1079,7 @@ export interface ExecutionContext {
     /**
      * Record one LLM chat round (+ optional actual token count) toward stop policy.
      */
-    recordLlmStep?: (tokens?: number) => void;
+    recordLlmStep?: (tokens?: number, costUsd?: number) => void;
 }
 
 /** Execution adapter interface */

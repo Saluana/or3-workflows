@@ -37,6 +37,8 @@ export interface AgentLoopInput {
     toolChoice?: ToolChoice;
     parallelToolCalls?: boolean;
     generation?: GenerationSettings;
+    routing?: import('../gateway/types').ProviderRoutingPolicy;
+    plugins?: import('../gateway/types').ProviderPluginDescriptor[];
     /** Maximum model turns before the loop stops (budget). */
     maxIterations: number;
     signal?: AbortSignal;

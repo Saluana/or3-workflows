@@ -42,6 +42,8 @@ export interface ToolDescriptor {
      * server tools have no local `execute` — the model request runs them.
      */
     transport?: 'chat' | 'responses' | 'either';
+    /** Provider request configuration for `provider-server` tools. */
+    providerConfig?: Record<string, unknown>;
 }
 
 /** Context passed into every local tool execution (R5.AC5, R2.AC5). */
@@ -114,7 +116,11 @@ export interface ToolReceipt {
     callId: string;
     toolName: string;
     authority: ToolAuthority;
+    /** Side-effect policy captured at execution time for safe retry planning. */
+    sideEffect?: ToolSideEffect;
     idempotencyKey?: string;
+    /** Validated-input fingerprint for call-id collision detection. */
+    inputFingerprint?: string;
     status: 'succeeded' | 'failed' | 'uncertain';
     /** Serialized output (or a reference the host can resolve). */
     result?: string;
@@ -122,11 +128,63 @@ export interface ToolReceipt {
     at: number;
 }
 
+/** Durable record written before an external tool is allowed to execute. */
+export interface ToolIntent {
+    runId: string;
+    nodeId: string;
+    callId: string;
+    toolName: string;
+    authority: ToolAuthority;
+    sideEffect: ToolSideEffect;
+    idempotencyKey?: string;
+    /** Non-reversible fingerprint of the validated input. */
+    inputFingerprint: string;
+    attempt: number;
+    status:
+        | 'prepared'
+        | 'started'
+        | 'completed'
+        | 'failed'
+        | 'reconciliation_required';
+    preparedAt: number;
+    startedAt?: number;
+    completedAt?: number;
+    updatedAt: number;
+    error?: string;
+}
+
+/** Host decision for an uncertain side effect discovered during resume. */
+export type ToolReconciliationDecision =
+    | {
+          action: 'completed';
+          /** External result recovered from the authoritative system. */
+          output: unknown;
+      }
+    | {
+          action: 'retry';
+          /** Human/host assertion that replay is safe. */
+          reason?: string;
+      }
+    | { action: 'failed'; error: string }
+    | { action: 'pause'; reason?: string };
+
+/** Host hook used to reconcile a prepared/started call without a receipt. */
+export type ToolReconciler = (params: {
+    intent: ToolIntent;
+    input: unknown;
+    signal: AbortSignal;
+}) => Promise<ToolReconciliationDecision>;
+
 /** Result of running a single tool call through the executor. */
 export interface ToolCallOutcome {
     callId: string;
     toolName: string;
-    status: 'succeeded' | 'failed' | 'rejected' | 'reused';
+    status:
+        | 'succeeded'
+        | 'failed'
+        | 'rejected'
+        | 'reused'
+        | 'reconciled';
     output: string;
     error?: string;
     receipt?: ToolReceipt;

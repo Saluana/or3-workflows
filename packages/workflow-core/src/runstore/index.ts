@@ -13,6 +13,7 @@ export {
     type RunRecord,
     type RunStore,
     type ToolReceipt,
+    type ToolIntent,
 } from './types';
 export { InMemoryRunStore } from './InMemoryRunStore';
 export {

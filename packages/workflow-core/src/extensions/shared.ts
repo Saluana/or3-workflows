@@ -108,4 +108,5 @@ export interface ToolLoopResult {
     finalContent: string;
     iterations: number;
     messages: import('../types').ChatMessage[];
+    stoppedOnMaxIterations: boolean;
 }

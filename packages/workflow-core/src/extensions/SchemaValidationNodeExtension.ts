@@ -20,6 +20,7 @@ import type { JsonValue } from '../gateway/types';
 import {
     parseValidateRepair,
     StructuredValidationError,
+    validateStructuredValue,
 } from '../schema/validation';
 import { projectValueToString } from '../schema/projection';
 import { schemaRegistry, SchemaRegistry } from '../schema/SchemaRegistry';
@@ -92,11 +93,14 @@ export function createSchemaValidationNodeExtension(
                     'Schema Validation node requires a "spec" (StructuredOutputSpec).'
                 );
             }
-            const result = await parseValidateRepair(
-                coerceCandidate(context.input),
-                data.spec,
-                { registry }
-            );
+            const result =
+                context.value !== undefined
+                    ? validateStructuredValue(context.value, data.spec, registry)
+                    : await parseValidateRepair(
+                          coerceCandidate(context.input),
+                          data.spec,
+                          { registry }
+                      );
 
             if (!result.ok) {
                 if (data.onInvalid === 'route') {

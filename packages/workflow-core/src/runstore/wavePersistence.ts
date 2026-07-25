@@ -7,7 +7,12 @@
  */
 import type { ChatMessage } from '../types';
 import type { JsonValue } from '../gateway/types';
-import type { RunSnapshot, RunStatus, RunStore } from './types';
+import type {
+    ReconciliationState,
+    RunSnapshot,
+    RunStatus,
+    RunStore,
+} from './types';
 import { RUN_SCHEMA_VERSION } from './types';
 import type { ResumeFromOptions } from '../types/execution';
 
@@ -26,6 +31,7 @@ export interface WaveBoundaryState {
     nodeValues?: Record<string, JsonValue>;
     transcript: ChatMessage[];
     subflowPath?: string[];
+    reconciliation?: ReconciliationState;
 }
 
 /** Build a RunSnapshot for the current wave boundary. */
@@ -49,6 +55,7 @@ export function buildWaveSnapshot(
         transcript: [...state.transcript],
         subflowPath: [...(state.subflowPath ?? [])],
         lastSequence: sequence,
+        reconciliation: state.reconciliation,
     };
 }
 
@@ -65,10 +72,14 @@ export async function persistWaveBoundary(
         {
             runId: state.runId,
             version: RUN_SCHEMA_VERSION,
-            type: 'wave_boundary',
+            type:
+                !state.status || state.status === 'running'
+                    ? 'wave_boundary'
+                    : `run_${state.status}`,
             path: state.subflowPath,
             at: Date.now(),
             payload: {
+                status: state.status ?? 'running',
                 completedCount: state.completedNodes.length,
                 pendingCount: state.pendingNodes.length,
             },
@@ -86,15 +97,13 @@ export function snapshotToResumeFrom(snapshot: RunSnapshot): ResumeFromOptions {
     const last =
         snapshot.completedNodes[snapshot.completedNodes.length - 1] ??
         snapshot.pendingNodes[0];
-    const pending =
-        snapshot.pendingNodes.length > 0
-            ? [...snapshot.pendingNodes]
-            : last
-              ? [last]
-              : [];
+    const pending = [...snapshot.pendingNodes];
     return {
-        startNodeId: pending[0] ?? last ?? '',
+        startNodeId: pending[0] ?? '',
         nodeOutputs: { ...snapshot.nodeOutputs },
+        nodeValues: snapshot.nodeValues
+            ? { ...snapshot.nodeValues }
+            : undefined,
         executionOrder: [...snapshot.completedNodes],
         lastActiveNodeId: last,
         sessionMessages: [...snapshot.transcript],

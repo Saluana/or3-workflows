@@ -3,7 +3,6 @@ import type {
     LLMProvider,
     ChatMessage,
     ModelCapabilities,
-    ChatMessageContentPart,
     ToolDefinition,
     ToolCallResult,
 } from '../types';
@@ -13,6 +12,7 @@ type ChatOptions = {
     temperature?: number;
     maxTokens?: number;
     tools?: ToolDefinition[];
+    parallelToolCalls?: boolean;
     toolChoice?:
         | 'auto'
         | 'none'
@@ -73,19 +73,6 @@ interface StreamChunk {
     };
 }
 
-type OpenRouterContentPart =
-    | { type: 'text'; text: string }
-    | {
-          type: 'image_url';
-          image_url: { url: string; detail?: 'auto' | 'low' | 'high' };
-      }
-    | { type: 'file'; file: { filename?: string; file_data: string } };
-
-type OpenRouterMessage = {
-    role: string;
-    content: string | OpenRouterContentPart[];
-};
-
 type FinishReason =
     | 'stop'
     | 'length'
@@ -138,9 +125,8 @@ function extractUsage(chunkUsage: StreamChunk['usage']): ChatResult['usage'] {
 /**
  * @deprecated Prefer {@link OpenRouterModelGateway} (via
  * `createOpenRouterModelGateway`). This legacy provider is retained for the
- * deprecation window and remains the fallback when an adapter is constructed
- * with a raw OpenRouter client. Unlike the gateway it may use raw fetch for
- * file-part payloads; new code should construct a gateway with explicit options.
+ * deprecation window. It uses only the SDK's public v1 request and
+ * `RequestOptions` surfaces; new code should construct a gateway directly.
  */
 export class OpenRouterLLMProvider implements LLMProvider {
     private modelCapabilitiesCache: Map<string, ModelCapabilities | null> =
@@ -156,33 +142,25 @@ export class OpenRouterLLMProvider implements LLMProvider {
         messages: ChatMessage[],
         options?: ChatOptions
     ): Promise<ChatResult> {
-        // The SDK schema does not accept file content parts yet, so use raw fetch when needed.
-        if (this.hasFileParts(messages)) {
-            return this.chatWithFilesViaFetch(model, messages, options);
-        }
-
-        // Prefer abortable fetch when a signal is provided — SDK stream path
-        // cannot cancel the underlying HTTP request mid-flight.
-        // Fall back to SDK when we can't resolve an API key (e.g. mocked clients).
-        if (options?.signal) {
-            const apiKey = await this.resolveApiKey();
-            if (apiKey) {
-                return this.chatViaFetch(model, messages, options);
-            }
-        }
-
-        const stream = (await this.client.chat.send({
-            model,
-            messages: messages as any, // OpenRouter SDK types might differ slightly
-            stream: true,
-            // Request usage on the final stream chunk when supported
-            stream_options: { include_usage: true },
-            temperature: options?.temperature,
-            maxTokens: options?.maxTokens,
-            tools: options?.tools,
-            toolChoice: options?.toolChoice,
-            responseFormat: options?.responseFormat,
-        } as any)) as unknown as AsyncIterable<StreamChunk>;
+        const stream = (await this.client.chat.send(
+            {
+                chatRequest: {
+                    models: [model],
+                    messages: messages as any,
+                    stream: true,
+                    streamOptions: { includeUsage: true },
+                    temperature: options?.temperature,
+                    maxTokens: options?.maxTokens,
+                    tools: options?.tools,
+                    toolChoice: options?.toolChoice,
+                    parallelToolCalls: options?.parallelToolCalls,
+                    responseFormat: options?.responseFormat
+                        ? this.toSdkResponseFormat(options.responseFormat)
+                        : undefined,
+                },
+            } as any,
+            options?.signal ? { signal: options.signal } : undefined
+        )) as unknown as AsyncIterable<StreamChunk>;
 
         let content = '';
         let finishReason: string | null | undefined;
@@ -267,351 +245,13 @@ export class OpenRouterLLMProvider implements LLMProvider {
         };
     }
 
-    /**
-     * Abortable streaming chat via raw fetch (used when AbortSignal is set).
-     */
-    private async chatViaFetch(
-        model: string,
-        messages: ChatMessage[],
-        options?: ChatOptions
-    ): Promise<ChatResult> {
-        return this.chatWithFilesViaFetch(model, messages, options);
-    }
-
-    private hasFileParts(messages: ChatMessage[]): boolean {
-        return messages.some((message) => {
-            const content = message.content;
-            if (!Array.isArray(content)) return false;
-            return content.some(
-                (part) => (part as { type?: string }).type === 'file'
-            );
-        });
-    }
-
-    private normalizeMessages(messages: ChatMessage[]): OpenRouterMessage[] {
-        return messages.map((message) => {
-            if (!Array.isArray(message.content)) {
-                return { role: message.role, content: message.content };
-            }
-
-            const parts = message.content
-                .map((part) => this.normalizeContentPart(part))
-                .filter(Boolean) as OpenRouterContentPart[];
-
-            return {
-                role: message.role,
-                content: parts.length ? parts : '',
-            };
-        });
-    }
-
-    private normalizeContentPart(
-        part: ChatMessageContentPart
-    ): OpenRouterContentPart | null {
-        if (part.type === 'text') {
-            return typeof part.text === 'string'
-                ? { type: 'text', text: part.text }
-                : null;
-        }
-        if (part.type === 'image_url') {
-            const url = part.imageUrl?.url;
-            if (!url) return null;
-            const imageUrl: { url: string; detail?: 'auto' | 'low' | 'high' } =
-                { url };
-            if (part.imageUrl.detail) {
-                imageUrl.detail = part.imageUrl.detail;
-            }
-            return { type: 'image_url', image_url: imageUrl };
-        }
-        if (part.type === 'file') {
-            const fileData = part.file?.fileData;
-            if (!fileData) return null;
-            const file: { filename?: string; file_data: string } = {
-                file_data: fileData,
-            };
-            if (part.file?.filename) {
-                file.filename = part.file.filename;
-            }
-            return { type: 'file', file };
-        }
-        return null;
-    }
-
-    private async resolveApiKey(): Promise<string | null> {
-        const raw = (this.client as { _options?: { apiKey?: unknown } })
-            ?._options?.apiKey;
-        if (!raw) return null;
-        if (typeof raw === 'string') return raw;
-        if (typeof raw === 'function') {
-            try {
-                const resolved = await raw();
-                return typeof resolved === 'string' ? resolved : null;
-            } catch {
-                return null;
-            }
-        }
-        return null;
-    }
-
-    private getBaseUrl(): string {
-        const base = (this.client as { _baseURL?: URL })._baseURL;
-        if (base) {
-            const baseString = base.toString();
-            return baseString.endsWith('/') ? baseString : `${baseString}/`;
-        }
-        return 'https://openrouter.ai/api/v1/';
-    }
-
-    private async chatWithFilesViaFetch(
-        model: string,
-        messages: ChatMessage[],
-        options?: ChatOptions
-    ): Promise<ChatResult> {
-        const apiKey = await this.resolveApiKey();
-        if (!apiKey) {
-            throw new Error('OpenRouter API key is missing');
-        }
-
-        const baseUrl = this.getBaseUrl();
-        const url = new URL('chat/completions', baseUrl).toString();
-
-        const body: Record<string, unknown> = {
-            model,
-            messages: this.normalizeMessages(messages),
-            stream: true,
-            stream_options: { include_usage: true },
-        };
-
-        if (typeof options?.temperature === 'number') {
-            body.temperature = options.temperature;
-        }
-        if (typeof options?.maxTokens === 'number') {
-            body.max_tokens = options.maxTokens;
-        }
-        if (options?.tools) {
-            body.tools = options.tools;
-        }
-        if (options?.toolChoice) {
-            body.tool_choice = options.toolChoice;
-        }
-        if (options?.responseFormat) {
-            body.response_format = this.toOpenAIResponseFormat(
-                options.responseFormat
-            );
-        }
-
-        const headers: Record<string, string> = {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-            Accept: 'text/event-stream',
-        };
-
-        const clientOptions = (
-            this.client as {
-                _options?: { httpReferer?: string; xTitle?: string };
-            }
-        )._options;
-        if (clientOptions?.httpReferer) {
-            headers['HTTP-Referer'] = clientOptions.httpReferer;
-        }
-        if (clientOptions?.xTitle) {
-            headers['X-Title'] = clientOptions.xTitle;
-        }
-
-        const response = await fetch(url, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(body),
-            signal: options?.signal,
-        });
-
-        if (!response.ok || !response.body) {
-            let responseText = '<no-body>';
-            try {
-                responseText = await response.text();
-            } catch {
-                // ignore read errors
-            }
-            throw new Error(
-                `OpenRouter request failed ${response.status} ${
-                    response.statusText
-                }: ${responseText.slice(0, 300)}`
-            );
-        }
-
-        let content = '';
-        let finishReason: string | null | undefined;
-        let usage: ChatResult['usage'];
-        const toolCallsMap = new Map<number, ToolCallResult>();
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        const pushText = (text: string) => {
-            content += text;
-            if (options?.onToken) options.onToken(text);
-        };
-
-        const pushReasoning = (text: string) => {
-            if (options?.onReasoning) options.onReasoning(text);
-        };
-
-        try {
-            for (;;) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                if (options?.signal?.aborted) {
-                    await reader.cancel().catch(() => undefined);
-                    throw new Error('Request cancelled');
-                }
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-
-                for (const raw of lines) {
-                    const line = raw.trim();
-                    if (!line.startsWith('data:')) continue;
-                    const data = line.replace(/^data:\s*/, '');
-                    if (!data) continue;
-                    if (data === '[DONE]') {
-                        continue;
-                    }
-
-                    let parsed: StreamChunk | null = null;
-                    try {
-                        parsed = JSON.parse(data) as StreamChunk;
-                    } catch (error) {
-                        if (this.debug) {
-                            console.warn(
-                                '[OpenRouter] Failed to parse SSE chunk',
-                                error
-                            );
-                        }
-                        continue;
-                    }
-
-                    if (parsed.usage) {
-                        usage = extractUsage(parsed.usage);
-                    }
-
-                    const choices = parsed.choices || [];
-                    for (const choice of choices) {
-                        if (choice.finish_reason || choice.finishReason) {
-                            finishReason =
-                                choice.finish_reason ?? choice.finishReason;
-                        }
-
-                        const delta = choice.delta || {};
-
-                        const reasoningDetails = (
-                            delta as {
-                                reasoning_details?: Array<{
-                                    type?: string;
-                                    text?: string;
-                                    summary?: string;
-                                }>;
-                            }
-                        ).reasoning_details;
-                        const firstReasoning = reasoningDetails?.[0];
-                        if (firstReasoning?.type === 'reasoning.text') {
-                            if (firstReasoning.text)
-                                pushReasoning(firstReasoning.text);
-                        } else if (
-                            firstReasoning?.type === 'reasoning.summary'
-                        ) {
-                            if (firstReasoning.summary)
-                                pushReasoning(firstReasoning.summary);
-                        } else if (
-                            typeof (delta as { reasoning?: unknown })
-                                .reasoning === 'string'
-                        ) {
-                            pushReasoning(
-                                (delta as { reasoning: string }).reasoning
-                            );
-                        }
-
-                        const deltaContent = delta.content;
-                        if (typeof deltaContent === 'string' && deltaContent) {
-                            pushText(deltaContent);
-                        } else if (Array.isArray(deltaContent)) {
-                            for (const part of deltaContent) {
-                                const text = (
-                                    part as { type?: string; text?: string }
-                                ).text;
-                                if (
-                                    (part as { type?: string }).type ===
-                                        'text' &&
-                                    typeof text === 'string'
-                                ) {
-                                    pushText(text);
-                                }
-                            }
-                        }
-
-                        if (
-                            typeof (delta as { text?: unknown }).text ===
-                            'string'
-                        ) {
-                            pushText((delta as { text: string }).text);
-                        }
-
-                        const toolCalls =
-                            (delta as { tool_calls?: unknown }).tool_calls ||
-                            (delta as { toolCalls?: unknown }).toolCalls;
-
-                        if (Array.isArray(toolCalls)) {
-                            for (const toolCall of toolCalls) {
-                                const index = toolCall.index;
-                                if (!toolCallsMap.has(index)) {
-                                    toolCallsMap.set(index, {
-                                        id: toolCall.id || '',
-                                        type: 'function' as const,
-                                        function: {
-                                            name:
-                                                toolCall.function?.name || '',
-                                            arguments:
-                                                toolCall.function?.arguments ||
-                                                '',
-                                        },
-                                    });
-                                } else {
-                                    const current = toolCallsMap.get(index)!;
-                                    if (toolCall.id) current.id = toolCall.id;
-                                    if (toolCall.function?.name)
-                                        current.function.name =
-                                            toolCall.function.name;
-                                    if (toolCall.function?.arguments)
-                                        current.function.arguments +=
-                                            toolCall.function.arguments;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        } finally {
-            reader.releaseLock();
-        }
-
-        const toolCalls = Array.from(toolCallsMap.values());
-
-        return {
-            content,
-            toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-            usage,
-            finishReason: normalizeFinishReason(finishReason),
-        };
-    }
-
-    private toOpenAIResponseFormat(
+    private toSdkResponseFormat(
         format: NonNullable<ChatOptions['responseFormat']>
     ): Record<string, unknown> {
         if (format.type === 'json_schema') {
             return {
                 type: 'json_schema',
-                json_schema: {
+                jsonSchema: {
                     name: format.json_schema.name,
                     description: format.json_schema.description,
                     schema: format.json_schema.schema,

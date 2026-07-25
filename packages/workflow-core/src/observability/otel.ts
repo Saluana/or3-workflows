@@ -51,6 +51,8 @@ export class OtelWorkflowAdapter {
     private readonly prefix: string;
     private readonly errorCounter?: CounterLike;
     private readonly modelCounter?: CounterLike;
+    private readonly tokenCounter?: CounterLike;
+    private readonly costCounter?: CounterLike;
 
     constructor(private readonly options: OtelAdapterOptions = {}) {
         this.prefix = options.prefix ?? 'or3.workflow';
@@ -60,6 +62,12 @@ export class OtelWorkflowAdapter {
         this.modelCounter = options.meter?.createCounter(
             `${this.prefix}.model_calls`
         );
+        this.tokenCounter = options.meter?.createCounter(
+            `${this.prefix}.tokens`
+        );
+        this.costCounter = options.meter?.createCounter(
+            `${this.prefix}.cost_usd`
+        );
     }
 
     /** True when a real tracer or meter is attached. */
@@ -67,8 +75,8 @@ export class OtelWorkflowAdapter {
         return Boolean(this.options.tracer || this.options.meter);
     }
 
-    private key(runId: string, id: string): string {
-        return `${runId}:${id}`;
+    private key(runId: string, id: string, path: string[]): string {
+        return `${runId}:${path.join('/')}:${id}`;
     }
 
     /** Feed a v2 envelope to the adapter. Safe to call without a tracer. */
@@ -89,36 +97,94 @@ export class OtelWorkflowAdapter {
                         [`${this.prefix}.node_id`]: event.nodeId,
                     },
                 });
-                this.spans.set(this.key(runId, event.nodeId), span);
+                this.spans.set(
+                    this.key(runId, event.nodeId, path),
+                    span
+                );
                 break;
             }
             case 'node_finish': {
-                const span = this.spans.get(this.key(runId, event.nodeId));
+                const key = this.key(runId, event.nodeId, path);
+                const span = this.spans.get(key);
                 span?.setStatus({ code: 1 });
                 span?.end();
-                this.spans.delete(this.key(runId, event.nodeId));
+                this.spans.delete(key);
                 break;
             }
             case 'node_error': {
                 this.errorCounter?.add(1, baseAttrs);
-                const span = this.spans.get(this.key(runId, event.nodeId));
+                const key = this.key(runId, event.nodeId, path);
+                const span = this.spans.get(key);
                 span?.setStatus({ code: 2, message: event.error.message });
                 span?.end();
-                this.spans.delete(this.key(runId, event.nodeId));
+                this.spans.delete(key);
                 break;
             }
             case 'model_start': {
                 this.modelCounter?.add(1, baseAttrs);
-                tracer
-                    ?.startSpan('gen_ai.chat', {
+                const span = tracer?.startSpan('gen_ai.chat', {
                         attributes: {
                             ...baseAttrs,
+                            [`${this.prefix}.node_id`]: event.nodeId,
+                            [`${this.prefix}.call_id`]: event.callId,
+                            [`${this.prefix}.transport`]: event.transport,
                             // GenAI semantic conventions (unstable).
                             'gen_ai.request.model':
                                 event.requestedModels[0],
                         },
-                    })
-                    .end();
+                    });
+                if (span) {
+                    this.spans.set(
+                        this.key(runId, event.callId, path),
+                        span
+                    );
+                }
+                break;
+            }
+            case 'model_finish': {
+                const attrs = {
+                    ...baseAttrs,
+                    model: event.actualModel ?? 'unknown',
+                    provider: event.provider ?? 'unknown',
+                };
+                if (event.usage?.totalTokens) {
+                    this.tokenCounter?.add(
+                        event.usage.totalTokens,
+                        attrs
+                    );
+                }
+                if (event.usage?.costUsd) {
+                    this.costCounter?.add(event.usage.costUsd, attrs);
+                }
+                const key = this.key(runId, event.callId, path);
+                const span = this.spans.get(key);
+                if (event.actualModel) {
+                    span?.setAttribute(
+                        'gen_ai.response.model',
+                        event.actualModel
+                    );
+                }
+                if (event.provider) {
+                    span?.setAttribute(
+                        `${this.prefix}.provider`,
+                        event.provider
+                    );
+                }
+                span?.setStatus({ code: 1 });
+                span?.end();
+                this.spans.delete(key);
+                break;
+            }
+            case 'model_error': {
+                this.errorCounter?.add(1, baseAttrs);
+                const key = this.key(runId, event.callId, path);
+                const span = this.spans.get(key);
+                span?.setStatus({
+                    code: 2,
+                    message: event.error.message,
+                });
+                span?.end();
+                this.spans.delete(key);
                 break;
             }
             case 'tool_receipt': {

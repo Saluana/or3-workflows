@@ -5,6 +5,13 @@
  */
 import type { ProviderRoutingPolicy } from '../../gateway/types';
 
+type PercentileCutoffs = {
+    p50?: number;
+    p75?: number;
+    p90?: number;
+    p99?: number;
+};
+
 /**
  * OpenRouter provider preferences (camelCase request form). Kept structural so
  * this module does not hard-depend on the exact SDK version's optional/nullable
@@ -24,10 +31,11 @@ export interface OpenRouterProviderPreferences {
         image?: string;
         audio?: string;
     };
-    sort?: string;
-    preferredMaxLatency?: number;
-    preferredMinThroughput?: number;
+    sort?: string | { by?: string; partition?: string };
+    preferredMaxLatency?: number | PercentileCutoffs;
+    preferredMinThroughput?: number | PercentileCutoffs;
     quantizations?: string[];
+    zdr?: boolean;
 }
 
 function priceToString(value: number | undefined): string | undefined {
@@ -61,12 +69,13 @@ export function mapRoutingPolicy(
         prefs.requireParameters = true;
     }
 
-    // Data collection / ZDR. zeroDataRetention is a convenience for `deny`.
+    // Data collection and ZDR are distinct OpenRouter controls.
     if (policy?.dataCollection) {
         prefs.dataCollection = policy.dataCollection;
     }
-    if (policy?.zeroDataRetention) {
-        prefs.dataCollection = 'deny';
+    const zdr = policy?.zdr ?? policy?.zeroDataRetention;
+    if (zdr !== undefined) {
+        prefs.zdr = zdr;
     }
 
     if (policy?.maxPrice) {
@@ -86,8 +95,10 @@ export function mapRoutingPolicy(
     if (policy?.sort) prefs.sort = policy.sort;
 
     // Latency/throughput are *preferences* (soft), not hard exclusions (design).
-    if (policy?.preferredMaxLatencySeconds !== undefined)
-        prefs.preferredMaxLatency = policy.preferredMaxLatencySeconds;
+    const preferredMaxLatency =
+        policy?.preferredMaxLatency ?? policy?.preferredMaxLatencySeconds;
+    if (preferredMaxLatency !== undefined)
+        prefs.preferredMaxLatency = preferredMaxLatency;
     if (policy?.preferredMinThroughput !== undefined)
         prefs.preferredMinThroughput = policy.preferredMinThroughput;
     if (policy?.quantizations && policy.quantizations.length > 0)

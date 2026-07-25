@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue';
-import { NodeData, WorkflowEditor } from 'or3-workflow-core';
+import {
+    DEFAULT_WORKFLOW_MODEL,
+    NodeData,
+    WorkflowEditor,
+} from 'or3-workflow-core';
 import IconAgent from '../icons/IconAgent.vue';
 import IconRouter from '../icons/IconRouter.vue';
 import IconParallel from '../icons/IconParallel.vue';
@@ -37,6 +41,7 @@ onUnmounted(() => {
 
 const nodeTypes = [
     {
+        id: 'agent',
         type: 'agent',
         label: 'AI Agent',
         description:
@@ -45,11 +50,72 @@ const nodeTypes = [
         icon: IconAgent,
         defaultData: {
             label: 'New Agent',
-            model: 'z-ai/glm-4.6:exacto',
+            model: DEFAULT_WORKFLOW_MODEL,
             prompt: '',
         },
     },
     {
+        id: 'structured-agent',
+        type: 'agent',
+        label: 'Structured Agent',
+        description:
+            'Return strict, schema-validated JSON with capability routing',
+        colorVar: '--or3-color-accent',
+        icon: IconAgent,
+        defaultData: {
+            label: 'Structured Agent',
+            model: DEFAULT_WORKFLOW_MODEL,
+            prompt: 'Return a structured response matching the configured schema.',
+            modelRequest: {
+                version: 1,
+                models: [DEFAULT_WORKFLOW_MODEL],
+                routing: { requireParameters: true },
+                requiredCapabilities: ['structured-output'],
+            },
+            structuredOutput: {
+                name: 'structured_response',
+                schemaId: 'structured_response',
+                schemaVersion: 1,
+                strict: true,
+                schema: {
+                    type: 'object',
+                    properties: {
+                        answer: { type: 'string' },
+                    },
+                    required: ['answer'],
+                    additionalProperties: false,
+                },
+                repair: { maxAttempts: 1, backend: 'retry' },
+            },
+        },
+    },
+    {
+        id: 'research-agent',
+        type: 'agent',
+        label: 'Research Agent',
+        description:
+            'Use OpenRouter web search, fetch, and datetime server tools',
+        colorVar: '--or3-color-accent',
+        icon: IconAgent,
+        defaultData: {
+            label: 'Research Agent',
+            model: DEFAULT_WORKFLOW_MODEL,
+            prompt: 'Research the request and cite the evidence you used.',
+            modelRequest: {
+                version: 1,
+                models: [DEFAULT_WORKFLOW_MODEL],
+                routing: { requireParameters: true },
+                requiredCapabilities: ['tools'],
+                serverTools: [
+                    { name: 'openrouter:web_search', transport: 'either' },
+                    { name: 'openrouter:web_fetch', transport: 'either' },
+                    { name: 'openrouter:datetime', transport: 'either' },
+                ],
+            },
+        },
+    },
+    {
+        id: 'router',
         type: 'router',
         label: 'Decision',
         description:
@@ -62,6 +128,7 @@ const nodeTypes = [
         },
     },
     {
+        id: 'parallel',
         type: 'parallel',
         label: 'Parallel',
         description:
@@ -70,12 +137,13 @@ const nodeTypes = [
         icon: IconParallel,
         defaultData: {
             label: 'Parallel',
-            model: 'z-ai/glm-4.6:exacto',
+            model: DEFAULT_WORKFLOW_MODEL,
             prompt: 'Combine the outputs into a coherent response.',
             branches: [],
         },
     },
     {
+        id: 'while-loop',
         type: 'whileLoop',
         label: 'Loop',
         description: 'Repeat a sequence until a condition is met',
@@ -90,6 +158,7 @@ const nodeTypes = [
         },
     },
     {
+        id: 'subflow',
         type: 'subflow',
         label: 'Sub-workflow',
         description: 'Embed another workflow as a single node',
@@ -103,6 +172,7 @@ const nodeTypes = [
         },
     },
     {
+        id: 'output',
         type: 'output',
         label: 'Output',
         description: 'Define the final output format',
@@ -263,7 +333,7 @@ const handleNodeTap = (
         <div class="palette-nodes">
             <div
                 v-for="node in nodeTypes"
-                :key="node.type"
+                :key="node.id"
                 class="palette-node"
                 draggable="true"
                 @dragstart="onDragStart($event, node.type, node.defaultData)"

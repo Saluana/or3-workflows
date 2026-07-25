@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { OpenRouterExecutionAdapter } from '../execution';
+import { OpenRouterLLMProvider } from '../providers/OpenRouterLLMProvider';
 import type {
     WorkflowData,
     ExecutionCallbacks,
@@ -11,6 +12,62 @@ const createMockClient = () => ({
     chat: {
         send: vi.fn(),
     },
+});
+
+describe('OpenRouterLLMProvider public SDK compatibility', () => {
+    it('uses the v1 chatRequest shape and public AbortSignal options for file messages', async () => {
+        const send = vi.fn(async () =>
+            (async function* () {
+                yield { choices: [{ delta: { content: 'read' } }] };
+            })()
+        );
+        const client = new Proxy(
+            { chat: { send } },
+            {
+                get(target, property, receiver) {
+                    if (String(property).startsWith('_')) {
+                        throw new Error(
+                            `private SDK field read: ${String(property)}`
+                        );
+                    }
+                    return Reflect.get(target, property, receiver);
+                },
+            }
+        );
+        const provider = new OpenRouterLLMProvider(client as any);
+        const controller = new AbortController();
+
+        await provider.chat(
+            'vendor/model',
+            [
+                {
+                    role: 'user',
+                    content: [
+                        {
+                            type: 'file',
+                            file: {
+                                filename: 'note.txt',
+                                fileData:
+                                    'data:text/plain;base64,aGVsbG8=',
+                            },
+                        },
+                    ],
+                },
+            ],
+            { signal: controller.signal }
+        );
+
+        expect(send).toHaveBeenCalledWith(
+            expect.objectContaining({
+                chatRequest: expect.objectContaining({
+                    models: ['vendor/model'],
+                    stream: true,
+                    messages: expect.any(Array),
+                }),
+            }),
+            { signal: controller.signal }
+        );
+    });
 });
 
 // Sample workflow for testing
@@ -196,6 +253,10 @@ describe('OpenRouterExecutionAdapter', () => {
         });
 
         it('should handle workflow without start node', async () => {
+            const events: Array<{ event: { type: string } }> = [];
+            adapter = new OpenRouterExecutionAdapter(mockClient as any, {
+                onEventV2: (event) => events.push(event),
+            });
             const workflow: WorkflowData = {
                 meta: { version: '2.0.0', name: 'No Start' },
                 nodes: [
@@ -218,6 +279,10 @@ describe('OpenRouterExecutionAdapter', () => {
             expect(result.success).toBe(false);
             // Preflight validation catches this now with code NO_START_NODE
             expect(result.error?.message).toContain('NO_START_NODE');
+            expect(adapter.isRunning()).toBe(false);
+            expect(
+                events.some((event) => event.event.type === 'done')
+            ).toBe(true);
         });
 
         it('should handle API errors gracefully', async () => {
@@ -374,6 +439,21 @@ describe('OpenRouterExecutionAdapter - Router Node', () => {
             'agent-general',
             expect.anything()
         );
+        expect(mockClient.chat.send).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({
+                chatRequest: expect.objectContaining({
+                    tools: expect.any(Array),
+                    toolChoice: expect.any(Object),
+                    provider: expect.objectContaining({
+                        requireParameters: true,
+                    }),
+                }),
+            }),
+            expect.any(Object)
+        );
+        const routerRequest = mockClient.chat.send.mock.calls[0]?.[0]
+            ?.chatRequest as Record<string, unknown>;
+        expect(routerRequest).not.toHaveProperty('temperature');
     });
 });
-

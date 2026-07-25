@@ -14,6 +14,12 @@ import type {
     ToolCallEventWithNode,
 } from '../types';
 import type { ModelUsage } from '../gateway/types';
+import type {
+    FinishReason,
+    ModelIdentifiers,
+    ModelTiming,
+    ProviderAnnotation,
+} from '../gateway/types';
 
 /** New model/tool/durability events plus the existing lifecycle events (v2). */
 export type WorkflowEventV2 =
@@ -34,24 +40,52 @@ export type WorkflowEventV2 =
     | { type: 'tool_result'; event: ToolCallEventWithNode; result?: string }
     | {
           type: 'model_start';
+          callId: string;
           nodeId: string;
           requestedModels: readonly string[];
+          transport: 'chat' | 'responses';
       }
     | {
           type: 'model_finish';
+          callId: string;
           nodeId: string;
           actualModel?: string;
           provider?: string;
+          finishReason?: FinishReason;
           usage?: ModelUsage;
+          identifiers?: ModelIdentifiers;
+          timing?: ModelTiming;
+          annotations?: ProviderAnnotation[];
+      }
+    | {
+          type: 'model_error';
+          callId: string;
+          nodeId: string;
+          requestedModels: readonly string[];
+          transport: 'chat' | 'responses';
+          error: Error;
       }
     | { type: 'retry'; nodeId: string; attempt: number; reason?: string }
-    | { type: 'checkpoint'; checkpointId: string; nodeId?: string }
-    | { type: 'resume'; checkpointId: string; nodeId?: string }
+    | {
+          type: 'checkpoint';
+          checkpointId: string;
+          nodeId?: string;
+          status?: string;
+      }
+    | {
+          type: 'resume';
+          checkpointId: string;
+          nodeId?: string;
+          status?: string;
+      }
     | {
           type: 'tool_intent';
           callId: string;
           toolName: string;
           nodeId: string;
+          status?: string;
+          sideEffect?: string;
+          idempotencyKey?: string;
       }
     | {
           type: 'tool_approval';
@@ -210,6 +244,7 @@ export function projectToLegacyEvent(
         // v2-only events have no v1 projection.
         case 'model_start':
         case 'model_finish':
+        case 'model_error':
         case 'retry':
         case 'checkpoint':
         case 'resume':

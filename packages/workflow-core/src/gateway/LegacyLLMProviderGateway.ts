@@ -99,6 +99,7 @@ export class LegacyLLMProviderGateway implements ModelGateway {
             maxTokens: request.generation?.maxOutputTokens,
             tools: toToolDefinitions(request.tools, this.warn),
             toolChoice: request.toolChoice,
+            parallelToolCalls: request.parallelToolCalls,
             responseFormat,
             onToken: request.onTextDelta
                 ? (token: string) => {

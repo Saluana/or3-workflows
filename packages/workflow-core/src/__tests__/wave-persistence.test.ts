@@ -122,6 +122,7 @@ describe('wave-boundary RunStore persistence (R7.AC1, R7.AC2)', () => {
         expect(result.success).toBe(true);
         const loaded = await store.load('wave-run-1');
         expect(loaded.snapshot).toBeDefined();
+        expect(loaded.snapshot!.status).toBe('completed');
         expect(loaded.snapshot!.completedNodes).toEqual(
             expect.arrayContaining(['start', 'a', 'b', 'merge'])
         );
@@ -131,6 +132,11 @@ describe('wave-boundary RunStore persistence (R7.AC1, R7.AC2)', () => {
         expect(store.allEvents('wave-run-1').some((e) => e.type === 'wave_boundary')).toBe(
             true
         );
+        expect(
+            store
+                .allEvents('wave-run-1')
+                .some((e) => e.type === 'run_completed')
+        ).toBe(true);
     });
 
     it('resumes from a wave snapshot with identical pending nodes and outputs', async () => {
@@ -222,5 +228,162 @@ describe('wave-boundary RunStore persistence (R7.AC1, R7.AC2)', () => {
             expect.arrayContaining(['start', 'a', 'b', 'merge'])
         );
         expect(afterResume.snapshot?.transcript.length).toBeGreaterThanOrEqual(3);
+    });
+
+    it('persists and reuses legacy tool receipts across a repeated run', async () => {
+        const store = new InMemoryRunStore();
+        const handler = vi.fn(async () => 'durable-tool-result');
+        const provider: LLMProvider = {
+            chat: vi.fn(async (_model, messages) => {
+                const hasToolResult = messages.some(
+                    (message) => message.role === 'tool'
+                );
+                return hasToolResult
+                    ? { content: 'done', finishReason: 'stop' as const }
+                    : {
+                          content: null,
+                          finishReason: 'tool_calls' as const,
+                          toolCalls: [
+                              {
+                                  id: 'stable-call-1',
+                                  type: 'function' as const,
+                                  function: {
+                                      name: 'durable_tool',
+                                      arguments: '{"value":1}',
+                                  },
+                              },
+                          ],
+                      };
+            }),
+            getModelCapabilities: async () => null,
+        };
+        const options = {
+            runStore: store,
+            runId: 'tool-receipt-run',
+            persistWaveSnapshots: true,
+            preflight: false,
+            tools: [
+                {
+                    type: 'function' as const,
+                    function: {
+                        name: 'durable_tool',
+                        parameters: {
+                            type: 'object' as const,
+                            properties: { value: { type: 'number' } },
+                            required: ['value'],
+                        },
+                    },
+                    handler,
+                },
+            ],
+        };
+        const toolWorkflow: WorkflowData = {
+            meta: { version: '2.0.0', name: 'tool-receipt' },
+            nodes: [
+                {
+                    id: 'start',
+                    type: 'start',
+                    position: { x: 0, y: 0 },
+                    data: { label: 'Start' },
+                },
+                {
+                    id: 'agent',
+                    type: 'agent',
+                    position: { x: 1, y: 0 },
+                    data: {
+                        label: 'Agent',
+                        model: 'test/model',
+                        prompt: 'Use the tool',
+                    },
+                },
+            ],
+            edges: [
+                {
+                    id: 'start-agent',
+                    source: 'start',
+                    target: 'agent',
+                },
+            ],
+        };
+
+        const first = await new OpenRouterExecutionAdapter(
+            provider,
+            options
+        ).execute(toolWorkflow, { text: 'go' }, silentCallbacks());
+        expect(first.success).toBe(true);
+        expect(handler).toHaveBeenCalledTimes(1);
+        expect(
+            await store.getToolReceipt(
+                'tool-receipt-run',
+                'stable-call-1'
+            )
+        ).toMatchObject({
+            status: 'succeeded',
+            result: 'durable-tool-result',
+        });
+
+        const second = await new OpenRouterExecutionAdapter(
+            provider,
+            options
+        ).execute(toolWorkflow, { text: 'go' }, silentCallbacks());
+        expect(second.success).toBe(true);
+        expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    it('validates structured agent output and persists its typed value', async () => {
+        const store = new InMemoryRunStore();
+        const provider: LLMProvider = {
+            chat: vi.fn(async () => ({
+                content: '{"b":2,"a":1}',
+                finishReason: 'stop' as const,
+            })),
+            getModelCapabilities: async () => null,
+        };
+        const workflow: WorkflowData = {
+            meta: { id: 'structured-wf', version: '2.0.0', name: 'structured' },
+            nodes: [
+                {
+                    id: 'start',
+                    type: 'start',
+                    position: { x: 0, y: 0 },
+                    data: { label: 'Start' },
+                },
+                {
+                    id: 'agent',
+                    type: 'agent',
+                    position: { x: 1, y: 0 },
+                    data: {
+                        label: 'Structured',
+                        model: 'test/model',
+                        prompt: 'Return JSON',
+                        structuredOutput: {
+                            name: 'answer',
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    a: { type: 'number' },
+                                    b: { type: 'number' },
+                                },
+                                required: ['a', 'b'],
+                                additionalProperties: false,
+                            },
+                            strict: true,
+                        },
+                    },
+                },
+            ],
+            edges: [{ id: 'e', source: 'start', target: 'agent' }],
+        };
+        const result = await new OpenRouterExecutionAdapter(provider, {
+            runStore: store,
+            runId: 'structured-run',
+            preflight: false,
+        }).execute(workflow, { text: 'go' }, silentCallbacks());
+
+        expect(result.success).toBe(true);
+        expect(result.output).toBe('{"a":1,"b":2}');
+        const loaded = await store.load('structured-run');
+        expect(loaded.snapshot?.workflowId).toBe('structured-wf');
+        expect(loaded.snapshot?.nodeValues?.agent).toEqual({ a: 1, b: 2 });
     });
 });

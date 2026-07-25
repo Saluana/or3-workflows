@@ -7,10 +7,12 @@
  */
 export {
     OpenRouterAgentLoopBackend,
+    OpenRouterAgentClientRequiredError,
     OptionalBackendUnavailableError,
     createOpenRouterAgentBackend,
     preflightOpenRouterAgent,
 } from './agent/openrouterAgentBackend';
+export type { OpenRouterAgentBackendOptions } from './agent/openrouterAgentBackend';
 export type {
     AgentLoopBackend,
     AgentLoopInput,

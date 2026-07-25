@@ -54,7 +54,8 @@ Main entry (`or3-workflow-core`):
 - **Observability (R8):** `RunSequencer`, `WorkflowEventEnvelope`,
   `redactEnvelope`, `OtelWorkflowAdapter`, `runEvaluationSuite`,
   `compareCandidates`.
-- **Agent backends (R6):** `NativeAgentLoopBackend` (default).
+- **Agent backends (R6):** `NativeAgentLoopBackend` (default), plus explicit
+  per-node backend selection through `modelRequest.backend`.
 - **Supervisor (R9):** `createSupervisorTemplate`.
 
 Optional subpath (`or3-workflow-core/openrouter-agent`):
@@ -68,36 +69,55 @@ These are **optional** and never eagerly bundled:
 
 - `@openrouter/agent` — required only when using the OpenRouter Agent backend.
   Loaded via a runtime dynamic import; a missing package fails preflight with an
-  actionable error (`OptionalBackendUnavailableError`).
+  actionable error (`OptionalBackendUnavailableError`). The adapter is
+  operational when the host supplies an OpenRouter Agent client (and,
+  optionally, conversation state). It maps typed tools, routing, streaming,
+  stop conditions, approval continuations, usage, cancellation, and the final
+  assistant message back into OR3's loop result. It remains opt-in while
+  application-specific quality/cost thresholds are evaluated.
 - `@opentelemetry/api` — the host constructs and passes a tracer/meter to
   `OtelWorkflowAdapter`; without one it is a no-op.
 
 ## Feature flags (staged rollout)
 
-All modernized capabilities are opt-in; defaults preserve current behavior:
+Modernized request fields are additive; defaults preserve current behavior:
 
 - **Native tool loop remains the default backend.** `openrouter-agent` is
-  disabled until parity tests pass (assistant/tool ordering, cancellation, stop
-  conditions, resumable state, receipt ownership).
+  selected explicitly and is never imported by the native path.
+- **Gateway-native node requests** use `modelRequest.models` for ordered
+  fallbacks and can opt into provider routing, reasoning, structured output,
+  plugins, server tools, and `parallelToolCalls`. Existing `model` fields are
+  still projected into a one-model request.
 - **Structured values** apply only when a node configures a
-  `StructuredOutputSpec`.
+  `StructuredOutputSpec`; repair is bounded and separately metered.
 - **Typed tool policy** defaults to conservative sequential execution with
   approval required for `policy`/destructive tools (`DEFAULT_TOOL_POLICY`).
 - **RunStore** is opt-in; foreground execution stays in-memory unless a host
   provides a `RunStore`/`CheckpointAdapter`.
-- **OpenTelemetry** is off unless a tracer/meter is supplied.
+- **V2 execution events** are emitted for every run. Sensitive content and
+  provider annotations are redacted by default. OpenTelemetry export is off
+  unless a tracer/meter is supplied.
 - **Supervisor** is a template that emits ordinary primitives; there is no hidden
-  engine primitive.
+  engine primitive. Its generated nodes carry enforced cost, delegation,
+  iteration, permission, and optional approval gates.
 
 ## Durability caveats
 
 `CheckpointRunStoreAdapter` bridges a v1 `CheckpointAdapter` to the `RunStore`
 snapshot API but is **not** side-effect-safe durability: a v1 checkpoint has no
 ordered event journal, no optimistic ownership, and no cross-restart tool
-receipts. Use a native `RunStore` implementation for exactly-once side effects.
+receipts. Use a native `RunStore` implementation for side-effect-aware recovery.
 There is an unavoidable uncertainty window when an external system commits but
-the receipt write fails; OR3 resolves it with an idempotency key when supported,
-otherwise the run pauses in `reconciliation_required`.
+the receipt write fails. The runtime writes durable `prepared`/`started`
+intents before execution, reuses receipts and idempotency keys, and enters
+`reconciliation_required` for an uncertain non-idempotent side effect. A host
+reconciler must decide whether the external action completed, failed, may be
+retried, or must remain paused. This is crash-safe orchestration, not a claim of
+universal exactly-once delivery to external systems.
+
+`or3-chat` background jobs provide a schema-v2 `RunStore` adapter backed by the
+job's durable workflow state. Foreground workflows remain intentionally
+in-memory unless their host supplies a store.
 
 ## Rollback
 

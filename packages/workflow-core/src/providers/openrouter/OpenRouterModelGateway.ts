@@ -110,6 +110,15 @@ export interface OpenRouterV1Client {
             options?: PublicRequestOptions
         ): Promise<ORChatResult | AsyncIterable<ORStreamChunk>>;
     };
+    models?: {
+        get(request: {
+            author: string;
+            slug: string;
+        }): Promise<
+            | { data?: import('../../models').OpenRouterModel }
+            | import('../../models').OpenRouterModel
+        >;
+    };
 }
 
 // ============================================================================
@@ -139,6 +148,10 @@ export interface OpenRouterGatewayOptions {
     modelRegistry?: ModelRegistry;
     /** Receives non-fatal preflight/mapping warnings. */
     onWarning?: (message: string) => void;
+    /** TTL for lazily fetched model capability entries (default: 5 minutes). */
+    capabilityCatalogTtlMs?: number;
+    /** TTL after a failed/missing catalog lookup (default: 30 seconds). */
+    capabilityCatalogFailureTtlMs?: number;
 }
 
 // ============================================================================
@@ -233,17 +246,46 @@ function extractAnnotations(
 
 function extractProviderName(metadata: unknown): string | undefined {
     if (!metadata || typeof metadata !== 'object') return undefined;
-    const endpoints = (metadata as { endpoints?: unknown }).endpoints;
-    if (endpoints && typeof endpoints === 'object') {
-        const provider = (endpoints as { provider?: unknown }).provider;
-        if (typeof provider === 'string') return provider;
+    const meta = metadata as {
+        endpoints?: { available?: unknown };
+        attempts?: unknown;
+    };
+    const available = meta.endpoints?.available;
+    if (Array.isArray(available)) {
+        const selected = available.find(
+            (endpoint): endpoint is { provider: string; selected: true } =>
+                Boolean(
+                    endpoint &&
+                        typeof endpoint === 'object' &&
+                        (endpoint as { selected?: unknown }).selected === true &&
+                        typeof (endpoint as { provider?: unknown }).provider ===
+                            'string'
+                )
+        );
+        if (selected) return selected.provider;
+    }
+    if (Array.isArray(meta.attempts)) {
+        const successful = [...meta.attempts].reverse().find(
+            (attempt): attempt is { provider: string; status: number } =>
+                Boolean(
+                    attempt &&
+                        typeof attempt === 'object' &&
+                        typeof (attempt as { provider?: unknown }).provider ===
+                            'string' &&
+                        typeof (attempt as { status?: unknown }).status ===
+                            'number' &&
+                        (attempt as { status: number }).status >= 200 &&
+                        (attempt as { status: number }).status < 400
+                )
+        );
+        if (successful) return successful.provider;
     }
     return undefined;
 }
 
 function toChatRequestTools(
     tools: ModelToolDescriptor[] | undefined,
-    warn: (m: string) => void
+    models: readonly string[]
 ): unknown[] | undefined {
     if (!tools || tools.length === 0) return undefined;
     const out: unknown[] = [];
@@ -251,15 +293,27 @@ function toChatRequestTools(
         if (tool.type === 'function') {
             out.push({ type: 'function', function: tool.function });
         } else if (tool.transport === 'responses') {
-            warn(
-                `Server tool "${tool.name}" is Responses-API-only and cannot be attached to a Chat Completions request; it was dropped.`
-            );
+            throw new ProviderCallError({
+                message: `Server tool "${tool.name}" requires the Responses API and cannot be attached to a Chat Completions request.`,
+                retryable: false,
+                requestedModels: models,
+            });
         } else {
             // Chat/either-compatible provider server tool: pass by name/config.
             out.push({ type: tool.name, ...(tool.config ?? {}) });
         }
     }
     return out.length > 0 ? out : undefined;
+}
+
+function toChatRequestPlugins(
+    plugins: ModelRequest['plugins']
+): unknown[] | undefined {
+    if (!plugins || plugins.length === 0) return undefined;
+    return plugins.map((plugin) => ({
+        id: plugin.id,
+        ...(plugin.config ?? {}),
+    }));
 }
 
 // ============================================================================
@@ -272,6 +326,10 @@ export class OpenRouterModelGateway implements ModelGateway {
     private readonly resolver: CapabilityResolver;
     private readonly metadata: 'disabled' | 'enabled';
     private readonly warn: (message: string) => void;
+    private readonly capabilityRefreshes = new Map<
+        string,
+        { expiresAt: number; promise: Promise<void> }
+    >();
 
     constructor(private readonly options: OpenRouterGatewayOptions) {
         if (!options.client) {
@@ -286,6 +344,9 @@ export class OpenRouterModelGateway implements ModelGateway {
 
     async generate(request: ModelRequest): Promise<ModelCallResult> {
         const models = toNonEmptyModels(request.models);
+        await Promise.all(
+            models.map((model) => this.refreshModel(model))
+        );
 
         // Preflight capability check across the fallback chain (R3.AC3/4).
         const capabilities = this.collectRequiredCapabilities(request);
@@ -351,6 +412,8 @@ export class OpenRouterModelGateway implements ModelGateway {
             request.requiredCapabilities ?? []
         );
         if (request.tools && request.tools.length > 0) caps.add('tools');
+        if (request.parallelToolCalls === true)
+            caps.add('parallel-tool-calls');
         if (request.generation?.responseFormat) caps.add('structured-output');
         if (request.generation?.reasoning?.enabled) caps.add('reasoning');
         return Array.from(caps);
@@ -365,14 +428,17 @@ export class OpenRouterModelGateway implements ModelGateway {
         const chatRequest: Record<string, unknown> = {
             // Preserve fallback priority order (R3.AC1).
             models: [...models],
-            model: models[0],
             messages: normalizeMessages(request.messages),
         };
 
         if (gen?.temperature !== undefined)
             chatRequest.temperature = gen.temperature;
         if (gen?.maxOutputTokens !== undefined)
-            chatRequest.maxCompletionTokens = gen.maxOutputTokens;
+            // OpenRouter's model catalog still advertises `max_tokens` for
+            // providers such as xAI. Sending `max_completion_tokens` together
+            // with require_parameters can filter every otherwise-compatible
+            // endpoint. The SDK keeps `maxTokens` for this cross-provider case.
+            chatRequest.maxTokens = gen.maxOutputTokens;
         if (gen?.topP !== undefined) chatRequest.topP = gen.topP;
         if (gen?.seed !== undefined) chatRequest.seed = gen.seed;
         if (gen?.stop !== undefined) chatRequest.stop = gen.stop;
@@ -380,8 +446,13 @@ export class OpenRouterModelGateway implements ModelGateway {
         if (gen?.reasoning) {
             const reasoning: Record<string, unknown> = {};
             if (gen.reasoning.effort) reasoning.effort = gen.reasoning.effort;
-            if (gen.reasoning.maxTokens !== undefined)
-                reasoning.maxTokens = gen.reasoning.maxTokens;
+            if (gen.reasoning.summary)
+                reasoning.summary = gen.reasoning.summary;
+            if (gen.reasoning.maxTokens !== undefined) {
+                this.warn(
+                    'reasoning.maxTokens is not supported by the current OpenRouter Chat SDK and was ignored; use reasoning.effort instead.'
+                );
+            }
             if (Object.keys(reasoning).length > 0)
                 chatRequest.reasoning = reasoning;
         }
@@ -398,12 +469,14 @@ export class OpenRouterModelGateway implements ModelGateway {
             };
         }
 
-        const tools = toChatRequestTools(request.tools, this.warn);
+        const tools = toChatRequestTools(request.tools, models);
         if (tools) chatRequest.tools = tools;
         if (request.toolChoice !== undefined)
             chatRequest.toolChoice = request.toolChoice;
         if (request.parallelToolCalls !== undefined)
             chatRequest.parallelToolCalls = request.parallelToolCalls;
+        const plugins = toChatRequestPlugins(request.plugins);
+        if (plugins) chatRequest.plugins = plugins;
 
         const provider = mapRoutingPolicy(
             request.routing,
@@ -472,7 +545,7 @@ export class OpenRouterModelGateway implements ModelGateway {
             finishReason: normalizeFinishReason(choice?.finishReason),
             usage: normalizeUsage(response.usage),
             identifiers: response.id
-                ? { requestId: response.id, generationId: response.id }
+                ? { generationId: response.id }
                 : undefined,
             timing: {
                 startedAt,
@@ -507,8 +580,11 @@ export class OpenRouterModelGateway implements ModelGateway {
         let metadata: unknown;
         let firstTokenAt: number | undefined;
         const toolCallsByIndex = new Map<number, ToolCallResult>();
+        const rawChunks: ORStreamChunk[] | undefined =
+            request.debug?.includeRawResponse ? [] : undefined;
 
         for await (const chunk of stream) {
+            rawChunks?.push(chunk);
             if (request.signal?.aborted) {
                 throw new ProviderCallError({
                     message: 'Request aborted',
@@ -584,7 +660,7 @@ export class OpenRouterModelGateway implements ModelGateway {
             finishReason: normalizeFinishReason(finishReason),
             usage: normalizeUsage(usage),
             identifiers: responseId
-                ? { requestId: responseId, generationId: responseId }
+                ? { generationId: responseId }
                 : undefined,
             timing: {
                 startedAt,
@@ -596,7 +672,9 @@ export class OpenRouterModelGateway implements ModelGateway {
                         : undefined,
             },
             annotations: extractAnnotations(metadata),
-            raw: undefined,
+            raw: rawChunks
+                ? { provider: 'openrouter', value: rawChunks }
+                : undefined,
         };
     }
 
@@ -625,9 +703,76 @@ export class OpenRouterModelGateway implements ModelGateway {
         });
     }
 
+    private async refreshModel(modelId: string): Promise<void> {
+        if (!this.client.models?.get) return;
+        const now = Date.now();
+        const cached = this.capabilityRefreshes.get(modelId);
+        if (this.registry.has(modelId) && !cached) return;
+        if (cached && cached.expiresAt > now) {
+            return cached.promise;
+        }
+        const [author, ...slugParts] = modelId.split('/');
+        if (!author || slugParts.length === 0) return;
+        const refresh = (async () => {
+            try {
+                const response = await this.client.models!.get({
+                    author,
+                    slug: slugParts.join('/'),
+                });
+                const model =
+                    response &&
+                    typeof response === 'object' &&
+                    'data' in response
+                        ? response.data
+                        : response;
+                if (
+                    model &&
+                    typeof model === 'object' &&
+                    'id' in model
+                ) {
+                    this.registry.register(
+                        model as import('../../models').OpenRouterModel
+                    );
+                    this.capabilityRefreshes.set(modelId, {
+                        expiresAt:
+                            Date.now() +
+                            (this.options.capabilityCatalogTtlMs ??
+                                5 * 60_000),
+                        promise: Promise.resolve(),
+                    });
+                    return;
+                }
+            } catch (error) {
+                this.warn(
+                    `Unable to refresh capabilities for "${modelId}": ${
+                        error instanceof Error
+                            ? error.message
+                            : String(error)
+                    }. Deferring to require_parameters.`
+                );
+            }
+            this.capabilityRefreshes.set(modelId, {
+                expiresAt:
+                    Date.now() +
+                    (this.options.capabilityCatalogFailureTtlMs ??
+                        30_000),
+                promise: Promise.resolve(),
+            });
+        })();
+        this.capabilityRefreshes.set(modelId, {
+            expiresAt:
+                now +
+                (this.options.capabilityCatalogFailureTtlMs ??
+                    30_000),
+            promise: refresh,
+        });
+        return refresh;
+    }
+
     async getModelCapabilities(
         modelId: string
     ): Promise<ModelCapabilities | null> {
+        await this.refreshModel(modelId);
         const model = this.registry.get(modelId);
         if (!model) return null;
         const info = toModelInfo(model);

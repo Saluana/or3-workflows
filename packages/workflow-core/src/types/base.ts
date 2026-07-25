@@ -3,6 +3,12 @@ import type { HITLConfig } from '../hitl';
 import type { SubflowNodeData } from '../subflow';
 import type { OutputNodeData } from '../extensions/OutputNodeExtension';
 import type { ModelInputModality, ModelOutputModality } from '../models';
+import type {
+    GenerationSettings,
+    ModelCapability,
+    ProviderPluginDescriptor,
+    ProviderRoutingPolicy,
+} from '../gateway/types';
 export { isSubflowNodeData } from '../subflow';
 export { isOutputNodeData } from '../extensions/OutputNodeExtension';
 export type { SubflowNodeData } from '../subflow';
@@ -106,11 +112,21 @@ export interface ExecutionInput {
  */
 export interface WorkflowData {
     meta: {
+        /** Stable workflow identifier. Falls back to `name` for legacy data. */
+        id?: string;
         version: string;
         name: string;
         description?: string;
         createdAt?: string;
         updatedAt?: string;
+        /**
+         * Optional runtime policy embedded by workflow templates. Hosts can
+         * still provide stricter execution options at runtime.
+         */
+        execution?: {
+            stopPolicy?: import('../stopPolicy').StopPolicy;
+            template?: 'supervisor' | (string & {});
+        };
     };
     nodes: WorkflowNode[];
     edges: WorkflowEdge[];
@@ -206,6 +222,49 @@ export interface BaseNodeData {
     description?: string;
     /** Current execution status */
     status?: NodeStatus;
+    /**
+     * Permission scopes granted to this node. `undefined` preserves the legacy
+     * unrestricted behavior; an explicit empty array grants no scoped tools.
+     */
+    permissions?: string[];
+}
+
+/**
+ * Provider-managed tool attached to a model request. These tools are executed
+ * by the provider and are never passed to OR3's local tool executor.
+ */
+export interface ProviderServerToolSelection {
+    name:
+        | 'openrouter:web_search'
+        | 'openrouter:web_fetch'
+        | 'openrouter:datetime'
+        | 'openrouter:image_generation'
+        | 'openrouter:apply_patch'
+        | (string & {});
+    transport?: 'chat' | 'responses' | 'either';
+    config?: Record<string, unknown>;
+}
+
+/**
+ * Versioned provider-neutral request configuration shared by LLM-backed
+ * nodes. It is additive to legacy node fields; when present, `models` and the
+ * nested settings take precedence while legacy values remain fallbacks.
+ */
+export interface NodeModelRequestV1 {
+    version: 1;
+    /** Ordered model fallbacks. Must contain at least one model. */
+    models: [string, ...string[]];
+    /** Chat is the compatibility default; some server tools require Responses. */
+    transport?: 'chat' | 'responses';
+    generation?: GenerationSettings;
+    routing?: ProviderRoutingPolicy;
+    requiredCapabilities?: ModelCapability[];
+    plugins?: ProviderPluginDescriptor[];
+    serverTools?: ProviderServerToolSelection[];
+    /** Explicit agent-loop backend. Native remains the compatibility default. */
+    backend?: 'native' | 'openrouter-agent' | (string & {});
+    /** Raw provider response capture is opt-in and intended for diagnostics. */
+    debug?: { includeRawResponse?: boolean };
 }
 
 /**
@@ -226,6 +285,8 @@ export interface StartNodeData extends BaseNodeData {
  */
 export interface AgentNodeData extends BaseNodeData {
     model: string;
+    /** Gateway-native request. Takes precedence over `model` when present. */
+    modelRequest?: NodeModelRequestV1;
     prompt: string;
     temperature?: number;
     maxTokens?: number;
@@ -242,6 +303,8 @@ export interface AgentNodeData extends BaseNodeData {
         | 'none'
         | 'required'
         | { type: 'function'; function: { name: string } };
+    /** Whether the model may emit more than one tool call per turn. */
+    parallelToolCalls?: boolean;
     /**
      * Request structured JSON output from the model (when supported).
      * Uses provider `response_format: json_schema` when possible.
@@ -251,6 +314,12 @@ export interface AgentNodeData extends BaseNodeData {
         description?: string;
         schema: Record<string, unknown>;
         strict?: boolean;
+        /** Stable schema identity; defaults to `name` for legacy documents. */
+        schemaId?: string;
+        /** Schema version; defaults to 1 for legacy documents. */
+        schemaVersion?: number;
+        /** Optional bounded repair policy. */
+        repair?: import('../schema').StructuredRepairPolicy;
     };
     acceptsImages?: boolean;
     acceptsAudio?: boolean;
@@ -276,6 +345,7 @@ export interface AgentNodeData extends BaseNodeData {
  */
 export interface RouterNodeData extends BaseNodeData {
     model?: string;
+    modelRequest?: NodeModelRequestV1;
     prompt?: string;
     routes: RouteDefinition[];
     errorHandling?: NodeErrorConfig;
@@ -315,6 +385,8 @@ export interface RouteCondition {
  */
 export interface ParallelNodeData extends BaseNodeData {
     model?: string;
+    /** Gateway-native request used for merge calls and branch defaults. */
+    modelRequest?: NodeModelRequestV1;
     prompt?: string;
     branches: BranchDefinition[];
     mergeEnabled?: boolean;
@@ -333,8 +405,11 @@ export interface BranchDefinition {
     id: string;
     label: string;
     model?: string;
+    modelRequest?: NodeModelRequestV1;
     prompt?: string;
     tools?: string[];
+    /** Explicit per-worker permissions in supervisor/parallel workflows. */
+    permissions?: string[];
 }
 
 /**
@@ -343,6 +418,8 @@ export interface BranchDefinition {
 export interface WhileLoopNodeData extends BaseNodeData {
     conditionPrompt: string;
     conditionModel?: string;
+    /** Gateway-native request used by the loop condition evaluator. */
+    conditionModelRequest?: NodeModelRequestV1;
     maxIterations: number;
     onMaxIterations: 'error' | 'warning' | 'continue';
     customEvaluator?: string;

@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { Handle, Position } from '@vue-flow/core';
 import NodeWrapper from './NodeWrapper.vue';
 import IconAgent from '../icons/IconAgent.vue';
+import { DEFAULT_WORKFLOW_MODEL } from 'or3-workflow-core';
 
 const props = defineProps<{
     id: string;
@@ -10,13 +11,25 @@ const props = defineProps<{
         label: string;
         model?: string;
         prompt?: string;
+        modelRequest?: {
+            models?: string[];
+            backend?: string;
+        };
         status?: 'idle' | 'active' | 'completed' | 'error';
     };
     selected?: boolean;
 }>();
 
 const label = computed(() => props.data.label || 'Agent');
-const model = computed(() => props.data.model || 'z-ai/glm-4.6:exacto');
+const model = computed(
+    () =>
+        props.data.modelRequest?.models?.[0] ||
+        props.data.model ||
+        DEFAULT_WORKFLOW_MODEL
+);
+const fallbackCount = computed(
+    () => Math.max(0, (props.data.modelRequest?.models?.length ?? 1) - 1)
+);
 const status = computed(() => props.data.status || 'idle');
 
 const modelShort = computed(() => {
@@ -49,6 +62,15 @@ const emit = defineEmits<{
 
             <div class="model-badge">
                 <span class="model-name">{{ modelShort }}</span>
+                <span v-if="fallbackCount" class="model-name">
+                    +{{ fallbackCount }} fallback{{ fallbackCount === 1 ? '' : 's' }}
+                </span>
+                <span
+                    v-if="props.data.modelRequest?.backend"
+                    class="model-name"
+                >
+                    {{ props.data.modelRequest.backend }}
+                </span>
             </div>
         </div>
 

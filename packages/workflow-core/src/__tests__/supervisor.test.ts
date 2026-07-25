@@ -35,7 +35,7 @@ describe('supervisor template (R9.AC1)', () => {
         expect(routed.some((e) => e.sourceHandle === 'billing')).toBe(true);
     });
 
-    it('produces parallel delegation with subflow workers scoping child paths', () => {
+    it('fans out subflow workers without duplicating them as LLM branches', () => {
         const wf = createSupervisorTemplate({
             name: 'Parallel Supervisor',
             parallel: true,
@@ -44,8 +44,43 @@ describe('supervisor template (R9.AC1)', () => {
                 { id: 'b', label: 'B', kind: 'subflow', subflowId: 'sub-b' },
             ],
         });
-        expect(wf.nodes.some((n) => n.type === 'parallel')).toBe(true);
+        expect(wf.nodes.some((n) => n.type === 'parallel')).toBe(false);
         expect(wf.nodes.filter((n) => n.type === 'subflow')).toHaveLength(2);
+        expect(
+            wf.edges.filter(
+                (edge) =>
+                    edge.source === 'start' &&
+                    edge.target.startsWith('worker-')
+            )
+        ).toHaveLength(2);
+    });
+
+    it('runs agent branches and subflow workers in the same DAG fan-out', () => {
+        const wf = createSupervisorTemplate({
+            name: 'Mixed Parallel Supervisor',
+            parallel: true,
+            workers: [
+                { id: 'agent', label: 'Agent', kind: 'agent' },
+                {
+                    id: 'subflow',
+                    label: 'Subflow',
+                    kind: 'subflow',
+                    subflowId: 'subflow-id',
+                },
+            ],
+        });
+        const parallel = wf.nodes.find((node) => node.type === 'parallel');
+        expect(parallel).toBeDefined();
+        expect(
+            (parallel?.data as { branches?: unknown[] }).branches
+        ).toHaveLength(1);
+        expect(
+            wf.edges.some(
+                (edge) =>
+                    edge.source === 'start' &&
+                    edge.target === 'worker-subflow'
+            )
+        ).toBe(true);
     });
 
     it('inserts a HITL approval node when requested', () => {

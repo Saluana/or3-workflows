@@ -57,6 +57,46 @@ export interface EvaluationResult {
     error?: string;
 }
 
+/** Persisted evaluation artifact, deliberately separate from workflow runs. */
+export interface EvaluationArtifact {
+    suiteId: string;
+    result: EvaluationResult;
+    recordedAt: number;
+}
+
+/** Host-implemented durable store (database/object storage/file adapter). */
+export interface EvaluationArtifactStore {
+    put(artifact: EvaluationArtifact): Promise<void>;
+    list(suiteId: string): Promise<EvaluationArtifact[]>;
+}
+
+/** Reference store for tests and short-lived browser sessions. */
+export class InMemoryEvaluationArtifactStore
+    implements EvaluationArtifactStore
+{
+    private readonly artifacts: EvaluationArtifact[] = [];
+
+    async put(artifact: EvaluationArtifact): Promise<void> {
+        const index = this.artifacts.findIndex(
+            (stored) =>
+                stored.suiteId === artifact.suiteId &&
+                stored.result.caseId === artifact.result.caseId &&
+                stored.result.candidateId ===
+                    artifact.result.candidateId
+        );
+        if (index >= 0) this.artifacts[index] = structuredClone(artifact);
+        else this.artifacts.push(structuredClone(artifact));
+    }
+
+    async list(suiteId: string): Promise<EvaluationArtifact[]> {
+        return structuredClone(
+            this.artifacts.filter(
+                (artifact) => artifact.suiteId === suiteId
+            )
+        );
+    }
+}
+
 /** Executes one case and returns a normalized output. */
 export type EvaluationRunner = (
     testCase: EvaluationCase
@@ -109,6 +149,10 @@ export interface RunHarnessOptions {
      */
     allowLive?: boolean;
     env?: Record<string, string | undefined>;
+    /** Optional durable artifact sink. */
+    artifactStore?: EvaluationArtifactStore;
+    /** Required with artifactStore when stable cross-process grouping matters. */
+    suiteId?: string;
 }
 
 function liveAllowed(options: RunHarnessOptions): boolean {
@@ -127,10 +171,20 @@ export async function runEvaluationSuite(
 ): Promise<EvaluationResult[]> {
     const allowLive = liveAllowed(options);
     const results: EvaluationResult[] = [];
+    const record = async (result: EvaluationResult): Promise<void> => {
+        results.push(result);
+        if (options.artifactStore) {
+            await options.artifactStore.put({
+                suiteId: options.suiteId ?? 'default',
+                result,
+                recordedAt: Date.now(),
+            });
+        }
+    };
 
     for (const testCase of cases) {
         if (testCase.providerMode === 'live' && !allowLive) {
-            results.push({
+            await record({
                 caseId: testCase.id,
                 candidateId: testCase.candidateId,
                 skipped: true,
@@ -164,7 +218,7 @@ export async function runEvaluationSuite(
                     )
                 );
             }
-            results.push({
+            await record({
                 caseId: testCase.id,
                 candidateId: testCase.candidateId,
                 skipped: false,
@@ -173,7 +227,7 @@ export async function runEvaluationSuite(
                 assertions,
             });
         } catch (err) {
-            results.push({
+            await record({
                 caseId: testCase.id,
                 candidateId: testCase.candidateId,
                 skipped: false,

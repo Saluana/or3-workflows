@@ -15,6 +15,9 @@ export type {
     ToolCallPlan,
     ToolBatchPlan,
     ToolReceipt,
+    ToolIntent,
+    ToolReconciler,
+    ToolReconciliationDecision,
     ToolCallOutcome,
 } from './types';
 export { DEFAULT_TOOL_POLICY } from './types';
@@ -33,6 +36,8 @@ export {
 export { WorkflowToolRegistry } from './registry';
 export {
     executeToolBatch,
+    ToolReconciliationRequiredError,
+    isToolReconciliationRequiredError,
     type ToolReceiptStore,
     type ToolApprovalGate,
     type ToolBatchCall,

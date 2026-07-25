@@ -11,6 +11,7 @@
  * @module supervisor
  */
 import { SCHEMA_VERSION, type WorkflowData, type WorkflowEdge, type WorkflowNode } from '../types';
+import { DEFAULT_WORKFLOW_MODEL } from '../models';
 
 /** A worker the supervisor can delegate to. */
 export interface SupervisorWorker {
@@ -31,6 +32,7 @@ export interface SupervisorBudget {
     maxSteps?: number;
     maxCostUsd?: number;
     maxDurationMs?: number;
+    maxTokens?: number;
 }
 
 export interface SupervisorConfig {
@@ -48,7 +50,7 @@ export interface SupervisorConfig {
     budget?: SupervisorBudget;
 }
 
-const DEFAULT_SUPERVISOR_MODEL = 'z-ai/glm-4.6:exacto';
+const DEFAULT_SUPERVISOR_MODEL = DEFAULT_WORKFLOW_MODEL;
 
 function node(
     id: string,
@@ -97,6 +99,7 @@ export function createSupervisorTemplate(
                 model: supervisorModel,
                 prompt: 'Await human approval before delegating to workers.',
                 hitl: { enabled: true, mode: 'approval' },
+                permissions: [],
             })
         );
         edges.push(edge('e-start-approval', 'start', 'approval'));
@@ -106,41 +109,66 @@ export function createSupervisorTemplate(
     const workerIds: string[] = [];
 
     if (config.parallel) {
-        // Parallel delegation via a parallel node with one branch per worker.
-        nodes.push(
-            node('supervisor', 'parallel', 400, 0, {
-                label: 'Supervisor (parallel)',
-                model: supervisorModel,
-                prompt: config.supervisorPrompt ?? 'Delegate to all workers.',
-                branches: config.workers.map((w) => ({
-                    id: w.id,
-                    label: w.label,
-                    model: w.model ?? supervisorModel,
-                    prompt: w.prompt,
-                })),
-                mergeEnabled: true,
-                permissions: collectPermissions(config),
-                budget: config.budget,
-            })
+        const agentWorkers = config.workers.filter(
+            (worker) => worker.kind === 'agent'
         );
-        edges.push(edge(`e-${delegationSource}-supervisor`, delegationSource, 'supervisor'));
-        // Parallel branches are executed inside the node; still surface explicit
-        // worker subflow nodes for observability when kind === 'subflow'.
-        config.workers.forEach((w, i) => {
-            if (w.kind === 'subflow') {
-                const wid = `worker-${w.id}`;
-                nodes.push(
-                    node(wid, 'subflow', 600, i * 120, {
-                        label: w.label,
-                        subflowId: w.subflowId ?? w.id,
-                        permissions: w.permissions,
-                    })
-                );
-                edges.push(edge(`e-supervisor-${wid}`, 'supervisor', wid));
-                workerIds.push(wid);
-            }
+        const subflowWorkers = config.workers.filter(
+            (worker) => worker.kind === 'subflow'
+        );
+
+        // ParallelNode owns only LLM branches. Treating a subflow as both an
+        // LLM branch and an explicit subflow node duplicates that worker's work.
+        if (agentWorkers.length > 0) {
+            nodes.push(
+                node('supervisor', 'parallel', 400, 0, {
+                    label: 'Supervisor (parallel)',
+                    model: supervisorModel,
+                    prompt:
+                        config.supervisorPrompt ??
+                        'Delegate to all agent workers.',
+                    branches: agentWorkers.map((worker) => ({
+                        id: worker.id,
+                        label: worker.label,
+                        model: worker.model ?? supervisorModel,
+                        prompt: worker.prompt,
+                        permissions: worker.permissions,
+                    })),
+                    mergeEnabled: true,
+                    permissions: collectPermissions(config),
+                    budget: config.budget,
+                })
+            );
+            edges.push(
+                edge(
+                    `e-${delegationSource}-supervisor`,
+                    delegationSource,
+                    'supervisor'
+                )
+            );
+            workerIds.push('supervisor');
+        }
+
+        // Explicit subflow nodes fan out from the same source, so the ordinary
+        // DAG wave scheduler runs them concurrently with each other and with
+        // the optional agent ParallelNode.
+        subflowWorkers.forEach((worker, index) => {
+            const wid = `worker-${worker.id}`;
+            nodes.push(
+                node(wid, 'subflow', 600, index * 120, {
+                    label: worker.label,
+                    subflowId: worker.subflowId ?? worker.id,
+                    permissions: worker.permissions,
+                })
+            );
+            edges.push(
+                edge(
+                    `e-${delegationSource}-${wid}`,
+                    delegationSource,
+                    wid
+                )
+            );
+            workerIds.push(wid);
         });
-        if (workerIds.length === 0) workerIds.push('supervisor');
     } else {
         // Routed delegation: a router chooses one worker (edges are source of truth).
         nodes.push(
@@ -212,6 +240,10 @@ export function createSupervisorTemplate(
             description:
                 config.description ??
                 'Supervisor composite generated from graph primitives.',
+            execution: {
+                template: 'supervisor',
+                stopPolicy: config.budget,
+            },
         },
         nodes,
         edges,

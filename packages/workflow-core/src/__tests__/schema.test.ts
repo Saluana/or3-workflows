@@ -118,10 +118,25 @@ describe('parse + validate + bounded repair (R4.AC3, R4.AC4)', () => {
     });
 });
 
-describe('unregistered schema pass-through', () => {
-    it('accepts any value when no zod schema is registered', () => {
-        const spec = specFromJsonSchema('unknown', 9, { type: 'object' });
+describe('inline JSON Schema validation', () => {
+    it('validates values when no Zod schema is registered', () => {
+        const spec = specFromJsonSchema('unknown', 9, {
+            type: 'object',
+            properties: { answer: { type: 'number' } },
+            required: ['answer'],
+            additionalProperties: false,
+        });
         const r = validateStructuredValue({ anything: true }, spec);
-        expect(r.ok).toBe(true);
+        expect(r.ok).toBe(false);
+        const valid = validateStructuredValue({ answer: 42 }, spec);
+        expect(valid.ok).toBe(true);
+    });
+
+    it('surfaces invalid persisted schemas as validation failures', () => {
+        const spec = specFromJsonSchema('bad-schema', 1, {
+            type: 'not-a-json-schema-type',
+        });
+        const r = validateStructuredValue({ anything: true }, spec);
+        expect(r.ok).toBe(false);
     });
 });

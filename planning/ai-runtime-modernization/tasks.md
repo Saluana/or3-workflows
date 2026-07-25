@@ -1,5 +1,9 @@
 # Tasks
 
+> Review status (2026-07-25): checkboxes below were reconciled against runtime
+> call sites and acceptance tests. Items that only have contracts/scaffolds, but
+> do not yet meet their stated "Done when" condition, are intentionally open.
+
 ## 1. Compatibility baselines
 
 - [x] 1.1 Add golden fixtures for legacy workflows, provider mocks, canonical assistant/tool transcripts, callbacks, and string outputs
@@ -142,7 +146,7 @@
       Requirements: R8.AC5, R8.AC6
       Done when: CI can run pinned workflow fixtures with property assertions and cost/duration reports without network access.
 
-- [x] 7.5 Add opt-in live candidate comparison
+- [ ] 7.5 Add opt-in live candidate comparison
       Requirements: R8.AC5
       Done when: an explicit environment flag compares models/routing/backends and writes isolated evaluation results.
 
@@ -170,7 +174,7 @@
       Requirements: R9.AC1, R9.AC2, R9.AC3
       Done when: delegation produces ordinary router/subflow/parallel/HITL nodes, scoped child paths, and explicit budgets/permissions.
 
-- [x] 9.2 Evaluate supervisor and agent backends against explicit graph baselines
+- [ ] 9.2 Evaluate supervisor and agent backends against explicit graph baselines
       Requirements: R8.AC5, R9.AC4
       Done when: quality, cost, and latency results determine recommendations and no backend becomes default without passing thresholds.
 
