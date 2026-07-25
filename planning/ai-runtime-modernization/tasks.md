@@ -10,43 +10,43 @@
       Requirements: R1.AC4, R6.AC3
       Done when: static generation proves no SSR run-store, OpenTelemetry SDK, or OpenRouter Agent implementation is eagerly bundled.
 
-- [ ] 1.3 Document the compatibility/deprecation policy and public surfaces
+- [x] 1.3 Document the compatibility/deprecation policy and public surfaces
       Requirements: R1.AC5, R2.AC1, R2.AC2
       Done when: current interfaces, replacements, deprecation window, and workflow-format guarantees are published in package docs.
 
 ## 2. Provider-neutral model gateway
 
-- [ ] 2.1 Define `ModelRequest`, `ModelCallResult`, normalized metadata, routing, capabilities, and error types
+- [x] 2.1 Define `ModelRequest`, `ModelCallResult`, normalized metadata, routing, capabilities, and error types
       Requirements: R2.AC1, R2.AC2, R2.AC3, R2.AC4
       Done when: type tests cover non-empty models, absent metadata, debug raw response opt-in, and provider-neutral exports.
 
-- [ ] 2.2 Implement `LegacyLLMProviderGateway` and gateway detection in `OpenRouterExecutionAdapter`
+- [x] 2.2 Implement `LegacyLLMProviderGateway` and gateway detection in `OpenRouterExecutionAdapter`
       Requirements: R1.AC2, R2.AC1, R2.AC5
       Done when: all existing provider mocks run unchanged and abort reaches their supported call path.
 
-- [ ] 2.3 Refactor native LLM nodes and loops to call only `ModelGateway.generate`
+- [x] 2.3 Refactor native LLM nodes and loops to call only `ModelGateway.generate`
       Requirements: R2.AC1, R2.AC2, R2.AC5
       Done when: agent, router, while-loop, parallel branch, output synthesis, compaction, and subflow calls pass gateway contract tests.
 
-- [ ] 2.4 Add normalized model lifecycle events and metadata aggregation
+- [x] 2.4 Add normalized model lifecycle events and metadata aggregation
       Requirements: R2.AC2, R8.AC1, R8.AC2
       Done when: every model attempt emits correlated start/finish/error data and the run result aggregates usage without fabricated values.
 
 ## 3. OpenRouter v1 adapter and routing
 
-- [ ] 3.1 Isolate OpenRouter SDK v1 types and implement its public request transport
+- [x] 3.1 Isolate OpenRouter SDK v1 types and implement its public request transport
       Requirements: R3.AC1, R3.AC2, R3.AC5
       Done when: the provider contains no `_options`/`_baseURL` access and unit fixtures verify the SDK v1 request shape.
 
-- [ ] 3.2 Map model fallback arrays and provider routing policies
+- [x] 3.2 Map model fallback arrays and provider routing policies
       Requirements: R3.AC1, R3.AC2, R3.AC3
       Done when: tests cover ordered models, provider order/filters, privacy, price, fallback, latency/throughput preferences, and `requireParameters`.
 
-- [ ] 3.3 Implement tri-state capability preflight across fallback models
+- [x] 3.3 Implement tri-state capability preflight across fallback models
       Requirements: R3.AC3, R3.AC4, R4.AC3
       Done when: proven unsupported chains fail, unknown catalog entries warn, and required parameters are enforced at request time.
 
-- [ ] 3.4 Normalize actual model, provider, usage/cost, identifiers, annotations, and router metadata
+- [x] 3.4 Normalize actual model, provider, usage/cost, identifiers, annotations, and router metadata
       Requirements: R2.AC2, R2.AC3, R8.AC2
       Done when: streaming/non-streaming fixtures preserve reported fields and leave unavailable fields undefined.
 
@@ -148,29 +148,29 @@
 
 ## 8. Optional OpenRouter Agent and managed tools
 
-- [ ] 8.1 Define `AgentLoopBackend` and wrap the native loop
+- [x] 8.1 Define `AgentLoopBackend` and wrap the native loop
       Requirements: R6.AC1, R6.AC2
       Done when: native behavior is unchanged and backend selection is explicit in node/runtime configuration.
 
-- [ ] 8.2 Implement a lazy optional `@openrouter/agent` backend
+- [x] 8.2 Implement a lazy optional `@openrouter/agent` backend
       Requirements: R1.AC4, R6.AC2, R6.AC3
       Done when: missing-package preflight is actionable, static bundles omit it, and parity tests cover streaming, tools, stop conditions, HITL, state, and cancellation.
 
-- [ ] 8.3 Add provider-server tool and plugin descriptors with endpoint gates
+- [x] 8.3 Add provider-server tool and plugin descriptors with endpoint gates
       Requirements: R6.AC4, R6.AC5, R6.AC6
       Done when: Chat/Responses compatibility is validated, plugins and tools render separately, and deprecated web-plugin use warns.
 
-- [ ] 8.4 Expose server tools through agent capability selection and optional palette presets
+- [x] 8.4 Expose server tools through agent capability selection and optional palette presets
       Requirements: R5.AC6, R6.AC4
       Done when: authors can attach supported server tools to an agent while the graph never presents them as directly locally executable.
 
 ## 9. Supervisor pattern and release gates
 
-- [ ] 9.1 Build a supervisor graph template/composite extension
+- [x] 9.1 Build a supervisor graph template/composite extension
       Requirements: R9.AC1, R9.AC2, R9.AC3
       Done when: delegation produces ordinary router/subflow/parallel/HITL nodes, scoped child paths, and explicit budgets/permissions.
 
-- [ ] 9.2 Evaluate supervisor and agent backends against explicit graph baselines
+- [x] 9.2 Evaluate supervisor and agent backends against explicit graph baselines
       Requirements: R8.AC5, R9.AC4
       Done when: quality, cost, and latency results determine recommendations and no backend becomes default without passing thresholds.
 
@@ -178,7 +178,7 @@
       Requirements: R1.AC1, R1.AC3, R1.AC4, R8.AC6
       Done when: `or3-workflows` tests/typecheck/build and `or3-chat` workflow tests/typecheck/static/SSR builds are green.
 
-- [ ] 9.4 Publish migration notes and staged feature flags
+- [x] 9.4 Publish migration notes and staged feature flags
       Requirements: R1.AC5, R3.AC6, R6.AC1, R7.AC1
       Done when: native/legacy defaults remain active, opt-in flags are documented, rollback paths exist, and deprecated code removal is scheduled.
 

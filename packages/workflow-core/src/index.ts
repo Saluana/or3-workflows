@@ -463,3 +463,11 @@ export {
     nativeAgentLoopBackend,
     aggregateUsage,
 } from './agent';
+
+// Supervisor pattern (R9)
+export {
+    createSupervisorTemplate,
+    type SupervisorConfig,
+    type SupervisorWorker,
+    type SupervisorBudget,
+} from './supervisor';
