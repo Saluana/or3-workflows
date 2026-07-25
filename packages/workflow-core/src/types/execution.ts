@@ -250,10 +250,18 @@ export interface LLMProvider {
  * Result of a node execution.
  */
 export interface NodeExecutionResult {
-    /** The primary output text of the node */
+    /** The primary output text of the node (stable string projection for legacy consumers, R4.AC5). */
     output: string;
     /** The IDs of the next nodes to execute */
     nextNodes: string[];
+    /**
+     * Additive typed value carrying the validated structured JSON value for
+     * typed edges (R4.AC5). Legacy consumers that read only `output` are
+     * unaffected.
+     */
+    value?: unknown;
+    /** Identifies the schema that validated {@link value}. */
+    valueSchema?: { id: string; version: number };
     /** Optional additional outputs (e.g. for debugging or specific UI rendering) */
     metadata?: Record<string, any>;
 }
