@@ -50,11 +50,11 @@
       Requirements: R2.AC2, R2.AC3, R8.AC2
       Done when: streaming/non-streaming fixtures preserve reported fields and leave unavailable fields undefined.
 
-- [ ] 3.5 Migrate both `or3-chat` execution paths to a shared gateway factory
+- [x] 3.5 Migrate both `or3-chat` execution paths to a shared gateway factory
       Requirements: R1.AC3, R3.AC5, R3.AC6
       Done when: foreground/background parity passes without a patched client and `createWorkflowOpenRouterClient` is unused.
 
-- [ ] 3.6 Remove the v1 compatibility monkey patch after one green compatibility cycle
+- [x] 3.6 Remove the v1 compatibility monkey patch after one green compatibility cycle
       Requirements: R3.AC6, R8.AC6
       Done when: repository search finds no workflow use of the patch and core/chat builds plus workflow suites pass.
 
