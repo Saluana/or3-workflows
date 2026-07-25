@@ -2,11 +2,11 @@
 
 ## 1. Compatibility baselines
 
-- [ ] 1.1 Add golden fixtures for legacy workflows, provider mocks, canonical assistant/tool transcripts, callbacks, and string outputs
+- [x] 1.1 Add golden fixtures for legacy workflows, provider mocks, canonical assistant/tool transcripts, callbacks, and string outputs
       Requirements: R1.AC1, R1.AC2, R1.AC3, R8.AC6
       Done when: the same fixtures pass in `workflow-core` and both `or3-chat` foreground/background test harnesses.
 
-- [ ] 1.2 Add static and SSR package-boundary checks for optional runtime modules
+- [x] 1.2 Add static and SSR package-boundary checks for optional runtime modules
       Requirements: R1.AC4, R6.AC3
       Done when: static generation proves no SSR run-store, OpenTelemetry SDK, or OpenRouter Agent implementation is eagerly bundled.
 
