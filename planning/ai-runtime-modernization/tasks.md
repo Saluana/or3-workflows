@@ -108,7 +108,7 @@
       Requirements: R1.AC1, R7.AC2
       Done when: existing HITL/checkpoint tests pass and documentation states that the bridge is not side-effect-safe durability.
 
-- [ ] 6.3 Persist node scheduling/completion and nested subflow state at wave boundaries
+- [x] 6.3 Persist node scheduling/completion and nested subflow state at wave boundaries
       Requirements: R7.AC1, R7.AC2
       Done when: restart tests at every DAG wave resume with identical pending nodes, values, transcript, and paths.
 
@@ -120,7 +120,7 @@
       Requirements: R7.AC6
       Done when: the UI/runtime reports reused receipts and requires authorization before destructive replay.
 
-- [ ] 6.6 Implement an `or3-chat` durable `RunStore` adapter
+- [x] 6.6 Implement an `or3-chat` durable `RunStore` adapter
       Requirements: R1.AC3, R7.AC1, R7.AC7
       Done when: an SSR process-restart test resumes a background workflow without duplicating a completed tool and long-term memory remains separate.
 

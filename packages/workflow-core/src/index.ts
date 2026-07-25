@@ -418,6 +418,11 @@ export {
     planRetryNode,
     forkRun,
     type RetryNodePlan,
+    buildWaveSnapshot,
+    persistWaveBoundary,
+    snapshotToResumeFrom,
+    loadResumeSnapshot,
+    type WaveBoundaryState,
 } from './runstore';
 
 // Observability and evaluations (R8)

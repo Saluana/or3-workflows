@@ -20,3 +20,10 @@ export {
     createRunId,
 } from './CheckpointRunStoreAdapter';
 export { planRetryNode, forkRun, type RetryNodePlan } from './timeTravel';
+export {
+    buildWaveSnapshot,
+    persistWaveBoundary,
+    snapshotToResumeFrom,
+    loadResumeSnapshot,
+    type WaveBoundaryState,
+} from './wavePersistence';

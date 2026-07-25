@@ -799,6 +799,25 @@ export interface ExecutionOptions {
     autoCheckpoint?: boolean;
 
     /**
+     * Durable run journal for side-effect-safe wave resume (R7).
+     * When set, the engine persists pending/scheduled/completed nodes,
+     * typed values, transcript, and nested subflow path at every DAG wave.
+     */
+    runStore?: import('../runstore').RunStore;
+
+    /**
+     * Stable run identifier used with `runStore`. Auto-generated when omitted
+     * and `runStore` is provided.
+     */
+    runId?: string;
+
+    /**
+     * When true (default if `runStore` is set), persist a RunSnapshot after
+     * each successful DAG wave boundary.
+     */
+    persistWaveSnapshots?: boolean;
+
+    /**
      * Run-level stop / budget policy (max steps, duration, tokens).
      */
     stopPolicy?: import('../stopPolicy').StopPolicy;
@@ -839,6 +858,14 @@ export interface ResumeFromOptions {
     resumeInput?: string;
     /** Final node id if known. */
     finalNodeId?: string;
+    /**
+     * Full pending queue restored from a wave-boundary RunSnapshot (R7.AC2).
+     * When set, the executor seeds the BFS queue with these nodes instead of
+     * only `startNodeId`, so diamond/parallel pending work resumes identically.
+     */
+    pendingNodes?: string[];
+    /** Nested subflow path restored from a durable snapshot. */
+    subflowPath?: string[];
     /** Pending HITL request id when resuming a durable pause. */
     pendingHITLRequestId?: string;
     /** HITL response to apply on resume (skips waiting). */

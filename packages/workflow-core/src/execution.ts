@@ -78,6 +78,12 @@ import {
     type StopPolicyState,
 } from './stopPolicy';
 import type { EdgeData, EdgeInputMapping } from './types/base';
+import {
+    createRunId,
+    loadResumeSnapshot,
+    persistWaveBoundary,
+    snapshotToResumeFrom,
+} from './runstore';
 
 // ============================================================================
 // Constants
@@ -489,7 +495,28 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             safeEmitEvent(this.options.onEvent, event);
         };
 
-        const resumeFrom = this.options.resumeFrom;
+        // Resolve durable run identity when a RunStore is configured (R7).
+        const runStore = this.options.runStore;
+        const runId =
+            this.options.runId ??
+            (runStore ? createRunId() : undefined);
+        if (runStore && runId && !this.options.runId) {
+            this.options = { ...this.options, runId };
+        }
+        const persistWaves =
+            !!runStore &&
+            !!runId &&
+            (this.options.persistWaveSnapshots ?? true);
+
+        let resumeFrom = this.options.resumeFrom;
+        // When no explicit resumeFrom is provided, restore from the durable
+        // wave snapshot so process restarts continue deterministically.
+        if (!resumeFrom && runStore && runId) {
+            const snap = await loadResumeSnapshot(runStore, runId);
+            if (snap && snap.pendingNodes.length > 0) {
+                resumeFrom = snapshotToResumeFrom(snap);
+            }
+        }
 
         const startTime = Date.now();
         emit({
@@ -501,6 +528,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         const nodeOutputs: Record<string, string> = resumeFrom?.nodeOutputs
             ? { ...resumeFrom.nodeOutputs }
             : {};
+        const nodeValues: Record<string, import('./gateway/types').JsonValue> =
+            {};
         const executionOrder: string[] = resumeFrom?.executionOrder
             ? [...resumeFrom.executionOrder]
             : [];
@@ -643,9 +672,12 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 nodeChain: resumeFrom?.executionOrder
                     ? [...resumeFrom.executionOrder]
                     : [],
-                nodePath: this.options._subflowPath
-                    ? [...this.options._subflowPath]
-                    : [],
+                nodePath:
+                    resumeFrom?.subflowPath?.length
+                        ? [...resumeFrom.subflowPath]
+                        : this.options._subflowPath
+                          ? [...this.options._subflowPath]
+                          : [],
                 signal: this.abortController.signal,
                 session,
                 memory: this.memory,
@@ -655,14 +687,20 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             sessionMessages = context.session.messages;
 
             // BFS execution through the graph
-            const rootNodeId = resumeFrom?.startNodeId ?? startNode.id;
-            const queue: string[] = [rootNodeId];
+            const startNodeId = resumeFrom?.startNodeId ?? startNode.id;
+            const queue: string[] =
+                resumeFrom?.pendingNodes && resumeFrom.pendingNodes.length > 0
+                    ? [...resumeFrom.pendingNodes]
+                    : [startNodeId];
+            const rootNodeId = startNodeId;
             const executed = new Set<string>(
                 resumeFrom ? Object.keys(resumeFrom.nodeOutputs || {}) : []
             );
-            // Ensure the resume target is re-run
+            // Ensure resume targets are re-run (pending nodes not yet in outputs).
             if (resumeFrom) {
-                executed.delete(rootNodeId);
+                for (const id of queue) {
+                    executed.delete(id);
+                }
             }
             const skipped = new Set<string>();
             // Per-node execution counter to prevent infinite loops
@@ -774,11 +812,16 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 }
 
                 // Execute all ready nodes concurrently
+                const scheduledThisWave = [...readyNodes];
                 const executeNode = async (
                     nodeId: string
                 ): Promise<{
                     nodeId: string;
-                    result: { output: string; nextNodes: string[] };
+                    result: {
+                        output: string;
+                        nextNodes: string[];
+                        value?: import('./gateway/types').JsonValue;
+                    };
                 }> => {
                     const result = await this.executeNodeWithErrorHandling(
                         nodeId,
@@ -796,6 +839,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 for (const { nodeId, result } of results) {
                     // Store output
                     nodeOutputs[nodeId] = result.output;
+                    if (result.value !== undefined) {
+                        nodeValues[nodeId] = result.value;
+                    }
+                    context.outputs[nodeId] = result.output;
                     finalOutput = result.output;
                     finalNodeId = nodeId;
                     executionOrder.push(nodeId);
@@ -857,6 +904,34 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                         startNodeId: lastActiveNodeId,
                     };
                     await this.options.checkpointAdapter.save(autoCp);
+                }
+
+                // Durable RunStore wave snapshot (R7.AC1, R7.AC2): pending,
+                // scheduled, completed, transcript, and nested path.
+                if (persistWaves && runStore && runId) {
+                    const pendingUnique: string[] = [];
+                    const pendingSeen = new Set<string>();
+                    for (const id of queue) {
+                        if (executed.has(id) || pendingSeen.has(id)) continue;
+                        pendingSeen.add(id);
+                        pendingUnique.push(id);
+                    }
+                    await persistWaveBoundary(runStore, {
+                        runId,
+                        status: 'running',
+                        workflowId: workflow.meta.name,
+                        workflowVersion: workflow.meta.version,
+                        pendingNodes: pendingUnique,
+                        scheduledNodes: scheduledThisWave,
+                        completedNodes: [...executionOrder],
+                        nodeOutputs: { ...nodeOutputs },
+                        nodeValues:
+                            Object.keys(nodeValues).length > 0
+                                ? { ...nodeValues }
+                                : undefined,
+                        transcript: [...context.session.messages],
+                        subflowPath: [...context.nodePath],
+                    });
                 }
             }
 
@@ -1174,7 +1249,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         graph: WorkflowGraph,
         edges: WorkflowEdge[],
         callbacks: ExecutionCallbacks
-    ): Promise<{ output: string; nextNodes: string[] }> {
+    ): Promise<{ output: string; nextNodes: string[]; value?: import('./gateway/types').JsonValue }> {
         const node = graph.nodeMap.get(nodeId);
         if (!node) return { output: '', nextNodes: [] };
         const meta = {
@@ -1546,7 +1621,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             meta: meta as NodeExecutionMetadata,
             at: Date.now(),
         });
-        return { output: result.output, nextNodes: result.nextNodes };
+        return {
+            output: result.output,
+            nextNodes: result.nextNodes,
+            value: result.value as import('./gateway/types').JsonValue | undefined,
+        };
     }
 
     /**
@@ -1660,7 +1739,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         graph: WorkflowGraph,
         edges: WorkflowEdge[],
         callbacks: ExecutionCallbacks
-    ): Promise<{ output: string; nextNodes: string[] }> {
+    ): Promise<{ output: string; nextNodes: string[]; value?: import('./gateway/types').JsonValue }> {
         const node = graph.nodeMap.get(nodeId);
         if (!node) {
             // Early return for missing node
@@ -1818,7 +1897,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         graph: WorkflowGraph,
         edges: WorkflowEdge[],
         callbacks: ExecutionCallbacks
-    ): Promise<{ output: string; nextNodes: string[] }> {
+    ): Promise<{ output: string; nextNodes: string[]; value?: import('./gateway/types').JsonValue }> {
         const nodeData = node.data as unknown as Record<string, unknown>;
         const hitlConfig = nodeData.hitl as HITLConfig | undefined;
         const nodeLabel = getNodeLabel(node);
@@ -2308,7 +2387,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         edges: WorkflowEdge[],
         callbacks: ExecutionCallbacks,
         preExecuted: Set<string> = new Set()
-    ): Promise<{ output: string; nextNodes: string[] }> {
+    ): Promise<{ output: string; nextNodes: string[]; value?: import('./gateway/types').JsonValue }> {
         const queue: string[] = [startNodeId];
         const executed = new Set<string>(preExecuted);
         let output = '';
