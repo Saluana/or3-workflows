@@ -78,23 +78,23 @@
 
 ## 5. Typed tools and policy
 
-- [ ] 5.1 Define serializable tool descriptors, runtime tools, execution context, policy, and receipt types
+- [x] 5.1 Define serializable tool descriptors, runtime tools, execution context, policy, and receipt types
       Requirements: R5.AC1, R5.AC5, R5.AC6
       Done when: type tests represent local, server, MCP, and provider-managed tools without conflating their execution authority.
 
-- [ ] 5.2 Implement legacy and `or3-chat` tool-registry adapters
+- [x] 5.2 Implement legacy and `or3-chat` tool-registry adapters
       Requirements: R5.AC2, R5.AC6
       Done when: current tools execute through adapters with unchanged results and conservative default approval/concurrency policy.
 
-- [ ] 5.3 Split model parallel-call permission from executor scheduling policy
+- [x] 5.3 Split model parallel-call permission from executor scheduling policy
       Requirements: R5.AC3, R5.AC4
       Done when: tests cover parallel model calls executed in parallel, serialized for safety, paused for approval, and rejected.
 
-- [ ] 5.4 Pass cancellation, identity, attempt, and idempotency context into every local tool
+- [x] 5.4 Pass cancellation, identity, attempt, and idempotency context into every local tool
       Requirements: R2.AC5, R5.AC5
       Done when: abort stops active tools and event/receipt fixtures use stable identifiers across retry/resume.
 
-- [ ] 5.5 Add input/output schema validation and policy-aware HITL
+- [x] 5.5 Add input/output schema validation and policy-aware HITL
       Requirements: R5.AC1, R5.AC4, R9.AC3
       Done when: invalid input never executes, invalid output is not marked successful, and approval resumes through existing HITL contracts.
 
