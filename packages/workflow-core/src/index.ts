@@ -257,6 +257,48 @@ export {
     isCompactionConfig,
 } from './compaction';
 
+// Provider-neutral model gateway (R2)
+export {
+    // Types
+    type JsonValue,
+    type JsonPrimitive,
+    type NonEmptyModels,
+    type ModelCapability,
+    type CapabilitySupport,
+    type CapabilityEvidence,
+    type CapabilityCheck,
+    type ModelCapabilityReport,
+    type ReasoningEffort,
+    type ReasoningConfig,
+    type StructuredOutputRequest,
+    type GenerationSettings,
+    type DataCollectionPolicy,
+    type MaxPricePolicy,
+    type ProviderRoutingPolicy,
+    type ToolChoice,
+    type ModelToolDescriptor,
+    type ProviderPluginDescriptor,
+    type ModelRequest,
+    type FinishReason,
+    type ModelUsage,
+    type ModelIdentifiers,
+    type ModelTiming,
+    type ProviderAnnotation,
+    type ModelCallResult,
+    type ModelGateway,
+    // Runtime values
+    toNonEmptyModels,
+    GatewayError,
+    CapabilityPreflightError,
+    ProviderCallError,
+    LegacyLLMProviderGateway,
+    type LegacyLLMProviderGatewayOptions,
+    isModelGateway,
+    isLLMProvider,
+    resolveToModelGateway,
+    gatewayAsLLMProvider,
+} from './gateway';
+
 // Model Registry
 export {
     // Types
