@@ -100,11 +100,11 @@
 
 ## 6. Durable run journal
 
-- [ ] 6.1 Define `RunStore`, versioned run events, snapshots, optimistic sequence rules, and reconciliation state
+- [x] 6.1 Define `RunStore`, versioned run events, snapshots, optimistic sequence rules, and reconciliation state
       Requirements: R7.AC1, R7.AC2, R7.AC5
       Done when: an in-memory reference adapter rejects stale writers and can reconstruct a run from snapshot plus events.
 
-- [ ] 6.2 Bridge `CheckpointAdapter` v1 into the new snapshot API with explicit limitations
+- [x] 6.2 Bridge `CheckpointAdapter` v1 into the new snapshot API with explicit limitations
       Requirements: R1.AC1, R7.AC2
       Done when: existing HITL/checkpoint tests pass and documentation states that the bridge is not side-effect-safe durability.
 
@@ -116,7 +116,7 @@
       Requirements: R7.AC3, R7.AC4, R7.AC5
       Done when: receipt-backed calls are reused, idempotent uncertain calls retry with the same key, and non-idempotent uncertain calls pause.
 
-- [ ] 6.5 Implement retry-one-node and checkpoint fork semantics
+- [x] 6.5 Implement retry-one-node and checkpoint fork semantics
       Requirements: R7.AC6
       Done when: the UI/runtime reports reused receipts and requires authorization before destructive replay.
 

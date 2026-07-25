@@ -401,3 +401,21 @@ export {
     WorkflowToolRegistry,
     executeToolBatch,
 } from './tools';
+
+// Durable run journal (R7)
+export {
+    RUN_SCHEMA_VERSION,
+    ConcurrentRunWriterError,
+    type RunStatus,
+    type PersistedRunEvent,
+    type RunSnapshot,
+    type ReconciliationState,
+    type RunRecord,
+    type RunStore,
+    InMemoryRunStore,
+    CheckpointRunStoreAdapter,
+    createRunId,
+    planRetryNode,
+    forkRun,
+    type RetryNodePlan,
+} from './runstore';
