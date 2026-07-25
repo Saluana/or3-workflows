@@ -67,7 +67,7 @@ describe('OpenRouterExecutionAdapter', () => {
     describe('constructor', () => {
         it('should throw error if client is null', () => {
             expect(() => new OpenRouterExecutionAdapter(null as any)).toThrow(
-                'OpenRouterExecutionAdapter requires an OpenRouter client or LLMProvider.'
+                'OpenRouterExecutionAdapter requires an OpenRouter client, LLMProvider, or ModelGateway.'
             );
         });
 
@@ -75,7 +75,7 @@ describe('OpenRouterExecutionAdapter', () => {
             expect(
                 () => new OpenRouterExecutionAdapter(undefined as any)
             ).toThrow(
-                'OpenRouterExecutionAdapter requires an OpenRouter client or LLMProvider.'
+                'OpenRouterExecutionAdapter requires an OpenRouter client, LLMProvider, or ModelGateway.'
             );
         });
 

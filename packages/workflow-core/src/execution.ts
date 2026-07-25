@@ -30,6 +30,12 @@ import {
     StartNodeExtension,
 } from './extensions';
 import { OpenRouterLLMProvider } from './providers/OpenRouterLLMProvider';
+import {
+    type ModelGateway,
+    isModelGateway,
+    LegacyLLMProviderGateway,
+    gatewayAsLLMProvider,
+} from './gateway';
 import { InMemoryAdapter, type MemoryAdapter } from './memory';
 import { ExecutionSession, type Session } from './session';
 import {
@@ -351,6 +357,14 @@ export function registerExtension(extension: NodeExtension): void {
  */
 export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     private provider: LLMProvider;
+    /**
+     * Provider-neutral gateway used as the internal source of truth (R2).
+     * Legacy `LLMProvider` and raw OpenRouter clients are wrapped in a
+     * {@link LegacyLLMProviderGateway}; a supplied {@link ModelGateway} is used
+     * directly. Extensions still receive an `LLMProvider` (`this.provider`)
+     * during the deprecation window.
+     */
+    private gateway: ModelGateway;
     private options: ExecutionOptions;
     private abortController: AbortController | null = null;
     private running = false;
@@ -379,21 +393,30 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
      * @param options - Optional execution configuration.
      */
     constructor(
-        clientOrProvider: OpenRouter | LLMProvider,
+        clientOrProvider: OpenRouter | LLMProvider | ModelGateway,
         options: ExecutionOptions = {}
     ) {
         if (!clientOrProvider) {
             throw new Error(
-                'OpenRouterExecutionAdapter requires an OpenRouter client or LLMProvider.'
+                'OpenRouterExecutionAdapter requires an OpenRouter client, LLMProvider, or ModelGateway.'
             );
         }
 
-        if (this.isLLMProvider(clientOrProvider)) {
+        if (isModelGateway(clientOrProvider)) {
+            // A provider-neutral gateway is the source of truth; extensions get
+            // a legacy projection during the deprecation window.
+            this.gateway = clientOrProvider;
+            this.provider = gatewayAsLLMProvider(clientOrProvider);
+        } else if (this.isLLMProvider(clientOrProvider)) {
+            // Keep the direct provider for extensions (no lossy round-trip) and
+            // wrap it as a gateway for the internal contract.
             this.provider = clientOrProvider;
+            this.gateway = new LegacyLLMProviderGateway(clientOrProvider);
         } else {
             this.provider = new OpenRouterLLMProvider(clientOrProvider, {
                 debug: options.debug,
             });
+            this.gateway = new LegacyLLMProviderGateway(this.provider);
         }
 
         this.options = {
@@ -414,6 +437,14 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             'chat' in obj &&
             typeof obj.chat === 'function'
         );
+    }
+
+    /**
+     * The internal provider-neutral gateway (R2). Prefer this over the legacy
+     * `LLMProvider` projection for new integrations.
+     */
+    getGateway(): ModelGateway {
+        return this.gateway;
     }
 
     // ==========================================================================
@@ -1425,7 +1456,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     options?.onHITLRequest ?? this.options.onHITLRequest;
 
                 const subAdapter = new OpenRouterExecutionAdapter(
-                    this.provider,
+                    this.gateway,
                     {
                         ...this.options,
                         ...options,
