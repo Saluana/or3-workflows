@@ -174,7 +174,7 @@
       Requirements: R8.AC5, R9.AC4
       Done when: quality, cost, and latency results determine recommendations and no backend becomes default without passing thresholds.
 
-- [ ] 9.3 Run full core/chat compatibility, type, build, static, and SSR verification
+- [x] 9.3 Run full core/chat compatibility, type, build, static, and SSR verification
       Requirements: R1.AC1, R1.AC3, R1.AC4, R8.AC6
       Done when: `or3-workflows` tests/typecheck/build and `or3-chat` workflow tests/typecheck/static/SSR builds are green.
 
