@@ -36,41 +36,136 @@
  */
 
 // ============================================================================
-// Re-export types from OpenRouter SDK
+// OR3-owned structural model catalog types
 // ============================================================================
-
-// Import SDK types - these use camelCase
-import type {
-    Model as SDKModel,
-    InputModality as SDKInputModality,
-    OutputModality as SDKOutputModality,
-    Parameter as SDKParameter,
-    ModelArchitecture as SDKModelArchitecture,
-    PublicPricing as SDKPublicPricing,
-    TopProviderInfo as SDKTopProviderInfo,
-    PerRequestLimits as SDKPerRequestLimits,
-    DefaultParameters as SDKDefaultParameters,
-    ModelGroup as SDKModelGroup,
-    ModelArchitectureInstructType as SDKInstructType,
-} from '@openrouter/sdk/models';
-
-// Re-export SDK types with our naming for backward compatibility
-export type ModelInputModality = SDKInputModality;
-export type ModelOutputModality = SDKOutputModality;
-export type ModelParameter = SDKParameter;
-export type ModelTokenizer = SDKModelGroup;
-export type ModelInstructType = SDKInstructType;
-export type ModelArchitecture = SDKModelArchitecture;
-export type ModelPricing = SDKPublicPricing;
-export type ModelTopProvider = SDKTopProviderInfo;
-export type ModelPerRequestLimits = SDKPerRequestLimits;
-export type ModelDefaultParameters = SDKDefaultParameters;
+//
+// The model catalog is intentionally decoupled from the `@openrouter/sdk`
+// `Model` type. The SDK's `Model` shape churns between minor versions (e.g.
+// it gained required `links` / `supportedVoices` fields and dropped
+// `ModelArchitectureInstructType`), and tightly coupling `DEFAULT_MODELS` and
+// the registry to it forces breaking changes downstream on every SDK bump.
+//
+// Instead we define permissive, structural (duck-typed) types that describe the
+// fields OR3 actually consumes. Any OpenRouter SDK `Model` remains assignable to
+// `OpenRouterModel` because these interfaces are a structural subset, so hosts
+// can still pass `await openrouter.models.list()` directly.
 
 /**
- * OpenRouter Model type - directly from the SDK.
- * Uses camelCase property names as returned by the SDK.
+ * Open string union helper: keeps editor autocomplete for well-known values
+ * while still accepting any provider-reported string.
  */
-export type OpenRouterModel = SDKModel;
+type OpenString<TKnown extends string> = TKnown | (string & {});
+
+/** Supported model input modalities (open union). */
+export type ModelInputModality = OpenString<
+    'text' | 'image' | 'audio' | 'video' | 'file'
+>;
+
+/** Supported model output modalities (open union). */
+export type ModelOutputModality = OpenString<
+    'text' | 'image' | 'audio' | 'video' | 'embeddings' | 'file'
+>;
+
+/** A supported request parameter name (open union). */
+export type ModelParameter = OpenString<
+    | 'temperature'
+    | 'top_p'
+    | 'top_k'
+    | 'top_a'
+    | 'min_p'
+    | 'max_tokens'
+    | 'frequency_penalty'
+    | 'presence_penalty'
+    | 'repetition_penalty'
+    | 'seed'
+    | 'stop'
+    | 'logit_bias'
+    | 'logprobs'
+    | 'top_logprobs'
+    | 'response_format'
+    | 'structured_outputs'
+    | 'tools'
+    | 'tool_choice'
+    | 'reasoning'
+    | 'include_reasoning'
+>;
+
+/** Tokenizer family reported by OpenRouter (open union). */
+export type ModelTokenizer = OpenString<
+    'GPT' | 'Claude' | 'Gemini' | 'Llama' | 'Mistral' | 'Other'
+>;
+
+/** Instruct-type formatting hint. */
+export type ModelInstructType = string | null;
+
+/** Model architecture metadata. */
+export interface ModelArchitecture {
+    modality?: string;
+    inputModalities: ModelInputModality[];
+    outputModalities: ModelOutputModality[];
+    tokenizer?: ModelTokenizer;
+    instructType?: ModelInstructType;
+}
+
+/**
+ * Model pricing. All fields are USD-per-unit strings (as OpenRouter reports
+ * them). Additional provider-specific pricing keys are permitted.
+ */
+export interface ModelPricing {
+    prompt?: string;
+    completion?: string;
+    request?: string;
+    image?: string;
+    audio?: string;
+    webSearch?: string;
+    internalReasoning?: string;
+    inputCacheRead?: string;
+    inputCacheWrite?: string;
+    [key: string]: string | undefined;
+}
+
+/** Top-provider limits reported for a model. */
+export interface ModelTopProvider {
+    contextLength?: number | null;
+    maxCompletionTokens?: number | null;
+    isModerated?: boolean;
+}
+
+/** Per-request limits; `null` when unbounded. */
+export type ModelPerRequestLimits = Record<string, unknown> | null;
+
+/** Default sampling parameters reported for a model. */
+export interface ModelDefaultParameters {
+    temperature?: number | null;
+    topP?: number | null;
+    frequencyPenalty?: number | null;
+    [key: string]: number | null | undefined;
+}
+
+/**
+ * OR3-owned structural model type.
+ *
+ * This is a permissive, duck-typed description of a model. An OpenRouter SDK
+ * `Model` is structurally assignable to this type, but OR3 never depends on the
+ * SDK type directly, so SDK-only field churn cannot break OR3 consumers.
+ */
+export interface OpenRouterModel {
+    id: string;
+    name: string;
+    architecture: ModelArchitecture;
+    supportedParameters: ModelParameter[];
+    pricing: ModelPricing;
+    contextLength?: number | null;
+    canonicalSlug?: string;
+    huggingFaceId?: string;
+    created?: number;
+    description?: string;
+    topProvider?: ModelTopProvider;
+    perRequestLimits?: ModelPerRequestLimits;
+    defaultParameters?: ModelDefaultParameters | null;
+    /** Additional provider-reported fields are preserved but untyped. */
+    [key: string]: unknown;
+}
 
 // ============================================================================
 // Simplified Model Info for UI
