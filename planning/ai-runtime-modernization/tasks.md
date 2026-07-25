@@ -112,7 +112,7 @@
       Requirements: R7.AC1, R7.AC2
       Done when: restart tests at every DAG wave resume with identical pending nodes, values, transcript, and paths.
 
-- [ ] 6.4 Persist tool intent and receipt around external execution
+- [x] 6.4 Persist tool intent and receipt around external execution
       Requirements: R7.AC3, R7.AC4, R7.AC5
       Done when: receipt-backed calls are reused, idempotent uncertain calls retry with the same key, and non-idempotent uncertain calls pause.
 
@@ -126,23 +126,23 @@
 
 ## 7. Observability and evaluations
 
-- [ ] 7.1 Introduce the v2 event envelope and legacy callback projection
+- [x] 7.1 Introduce the v2 event envelope and legacy callback projection
       Requirements: R1.AC1, R8.AC1
       Done when: events have stable run/sequence/path correlation and existing callback fixtures remain unchanged.
 
-- [ ] 7.2 Add privacy defaults, bounded payloads, and redaction tests
+- [x] 7.2 Add privacy defaults, bounded payloads, and redaction tests
       Requirements: R8.AC4
       Done when: default events contain no prompt, attachment, credential, tool payload, or raw provider content.
 
-- [ ] 7.3 Add an optional OpenTelemetry API adapter
+- [x] 7.3 Add an optional OpenTelemetry API adapter
       Requirements: R8.AC3
       Done when: a no-SDK host remains no-op and a test SDK receives correlated run/node/model/tool/checkpoint spans and metrics.
 
-- [ ] 7.4 Build the mocked evaluation harness and assertion DSL
+- [x] 7.4 Build the mocked evaluation harness and assertion DSL
       Requirements: R8.AC5, R8.AC6
       Done when: CI can run pinned workflow fixtures with property assertions and cost/duration reports without network access.
 
-- [ ] 7.5 Add opt-in live candidate comparison
+- [x] 7.5 Add opt-in live candidate comparison
       Requirements: R8.AC5
       Done when: an explicit environment flag compares models/routing/backends and writes isolated evaluation results.
 
