@@ -135,6 +135,13 @@ function extractUsage(chunkUsage: StreamChunk['usage']): ChatResult['usage'] {
     };
 }
 
+/**
+ * @deprecated Prefer {@link OpenRouterModelGateway} (via
+ * `createOpenRouterModelGateway`). This legacy provider is retained for the
+ * deprecation window and remains the fallback when an adapter is constructed
+ * with a raw OpenRouter client. Unlike the gateway it may use raw fetch for
+ * file-part payloads; new code should construct a gateway with explicit options.
+ */
 export class OpenRouterLLMProvider implements LLMProvider {
     private modelCapabilitiesCache: Map<string, ModelCapabilities | null> =
         new Map();

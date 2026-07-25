@@ -299,6 +299,22 @@ export {
     gatewayAsLLMProvider,
 } from './gateway';
 
+// OpenRouter v1 model gateway (R3)
+export {
+    OpenRouterModelGateway,
+    type OpenRouterGatewayOptions,
+    type OpenRouterV1Client,
+    type PublicRequestOptions,
+    CapabilityResolver,
+    type PreflightResult,
+    mapRoutingPolicy,
+    type OpenRouterProviderPreferences,
+    normalizeMessages,
+    type ORRequestMessage,
+    createOpenRouterModelGateway,
+    createOpenRouterLLMProvider,
+} from './providers/openrouter';
+
 // Model Registry
 export {
     // Types
