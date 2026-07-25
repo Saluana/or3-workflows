@@ -217,6 +217,12 @@ export {
     type OutputNodeData,
     type OutputFormat,
     isOutputNodeData,
+    // Structured value runtime (R4)
+    SchemaValidationNodeExtension,
+    createSchemaValidationNodeExtension,
+    createStructuredAgentPreset,
+    type SchemaValidationNodeData,
+    type StructuredAgentPresetOptions,
     interpolateTemplate,
     formatOutput,
     extractTemplatePlaceholders,
@@ -341,3 +347,26 @@ export {
     DEFAULT_MODELS,
     registerDefaultModels,
 } from './models';
+
+// Structured value runtime (R4)
+export {
+    type StructuredOutputSpec,
+    type StructuredRepairPolicy,
+    type SchemaRef,
+    type StructuredValidationIssue,
+    type StructuredValidationResult,
+    type RegisteredSchema,
+    type RepairRegenerator,
+    stableStringify,
+    projectValueToString,
+    SchemaRegistry,
+    schemaRegistry,
+    schemaKey,
+    parseJsonCandidate,
+    validateStructuredValue,
+    parseAndValidate,
+    parseValidateRepair,
+    StructuredValidationError,
+    specFromJsonSchema,
+    registerAndSpec,
+} from './schema';

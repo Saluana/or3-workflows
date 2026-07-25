@@ -60,19 +60,19 @@
 
 ## 4. Structured value runtime
 
-- [ ] 4.1 Add serializable versioned schema specs and a runtime schema registry
+- [x] 4.1 Add serializable versioned schema specs and a runtime schema registry
       Requirements: R4.AC1, R4.AC2
       Done when: JSON Schema round-trips through workflow storage and a registered Zod schema validates the same `schemaId@version`.
 
-- [ ] 4.2 Add typed `value`/`valueSchema` fields with stable string projection
+- [x] 4.2 Add typed `value`/`valueSchema` fields with stable string projection
       Requirements: R4.AC5, R4.AC6
       Done when: typed downstream edges receive JSON values while legacy output maps, checkpoints, callbacks, and UI status remain strings.
 
-- [ ] 4.3 Implement structured response parsing, validation, bounded repair, and typed errors
+- [x] 4.3 Implement structured response parsing, validation, bounded repair, and typed errors
       Requirements: R4.AC3, R4.AC4
       Done when: valid, malformed, schema-invalid, repair-success, repair-exhausted, streaming, and healing compatibility cases pass.
 
-- [ ] 4.4 Add schema-validation extension and a Structured Agent palette preset
+- [x] 4.4 Add schema-validation extension and a Structured Agent palette preset
       Requirements: R4.AC1, R4.AC5
       Done when: authors can validate any upstream value and create a schema-configured agent without duplicating agent execution code.
 

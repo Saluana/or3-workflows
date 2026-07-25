@@ -7,6 +7,7 @@ export * from './ToolNodeExtension.js';
 export * from './WhileLoopExtension.js';
 export * from './SubflowExtension.js';
 export * from './OutputNodeExtension.js';
+export * from './SchemaValidationNodeExtension.js';
 
 // Extension Configuration Utilities
 export * from './configure.js';
