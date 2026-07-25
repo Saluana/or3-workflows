@@ -42,7 +42,7 @@
         "url": "https://github.com/Saluana/or3-workflows"
     },
     "dependencies": {
-        "or3-workflow-core": "workspace:*",
+        "or3-workflow-core": "file:../workflow-core",
         "@vue-flow/background": "^1.3.0",
         "@vue-flow/controls": "^1.1.1",
         "@vue-flow/core": "^1.33.2",
