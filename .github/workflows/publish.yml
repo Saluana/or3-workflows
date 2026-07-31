@@ -56,6 +56,10 @@ jobs:
           fi
 
           echo "directory=$package_dir" >> "$GITHUB_OUTPUT"
+      - name: Build core dependency
+        if: steps.package.outputs.directory == 'packages/workflow-vue'
+        working-directory: packages/workflow-core
+        run: bun run build
       - name: Typecheck
         working-directory: ${{ steps.package.outputs.directory }}
         run: bun run typecheck
