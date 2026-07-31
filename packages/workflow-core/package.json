@@ -2,7 +2,10 @@
     "name": "or3-workflow-core",
     "version": "0.1.4",
     "description": "Headless workflow engine with LLM agent orchestration",
-    "type": "module",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
     "main": "./dist/index.js",
     "module": "./dist/index.js",
     "types": "./dist/index.d.ts",
