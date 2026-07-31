@@ -12,14 +12,16 @@ import {
     registerDefaultModels,
     migrateOutputNodeData,
     type OutputNodeData,
+    type AgentNodeData,
     DEFAULT_WORKFLOW_MODEL,
-    type NodeModelRequestV1,
 } from 'or3-workflow-core';
 import OutputModeSelector from './output/OutputModeSelector.vue';
 import OutputSourcePicker from './output/OutputSourcePicker.vue';
 import OutputPreview from './output/OutputPreview.vue';
 import { useOutputPreview } from '../../composables/useOutputPreview';
 import { useUpstreamResolver } from '../../composables/useUpstreamResolver';
+
+type NodeModelRequestV1 = NonNullable<AgentNodeData['modelRequest']>;
 
 // Type guard for configurable node data
 interface ConfigurableNodeData {
