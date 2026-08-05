@@ -3,12 +3,15 @@ import type {
     WorkflowNode,
     WorkflowEdge,
     BaseNodeData,
+    NodeModelRequestV1,
     ExecutionContext,
     ValidationError,
     ValidationWarning,
     LLMProvider,
     ChatMessage,
 } from '../types';
+import { DEFAULT_WORKFLOW_MODEL } from '../models';
+import { callModelForNode } from './modelGatewayCall';
 
 /**
  * Output format types.
@@ -38,6 +41,8 @@ export interface OutputNodeData extends BaseNodeData {
         prompt?: string;
         /** Model to use for synthesis */
         model?: string;
+        /** Gateway-native request; takes precedence over `model`. */
+        modelRequest?: NodeModelRequestV1;
     };
 
     /** Flag indicating user is using raw template mode (legacy compatibility) */
@@ -271,7 +276,8 @@ function executeCombineMode(
 async function executeSynthesisMode(
     context: ExecutionContext,
     data: OutputNodeData,
-    provider?: LLMProvider
+    provider: LLMProvider | undefined,
+    nodeId: string
 ): Promise<{ output: string; nextNodes: string[] }> {
     if (!provider) {
         throw new Error('LLM provider required for synthesis mode');
@@ -296,17 +302,25 @@ async function executeSynthesisMode(
     const systemPrompt =
         data.synthesis?.prompt ||
         'Combine the following inputs into a cohesive document.';
-    const model = data.synthesis?.model || 'openai/gpt-4o-mini';
+    const model =
+        data.synthesis?.modelRequest?.models[0] ||
+        data.synthesis?.model ||
+        DEFAULT_WORKFLOW_MODEL;
 
     const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: inputs },
     ];
 
-    const response = await provider.chat(model, messages, {
-        onToken: context.onToken,
-        onReasoning: context.onReasoning,
-        signal: context.signal,
+    const response = await callModelForNode({
+        context,
+        nodeId,
+        provider,
+        legacyModel: model,
+        modelRequest: data.synthesis?.modelRequest,
+        messages,
+        onTextDelta: context.onToken,
+        onReasoningDelta: context.onReasoning,
     });
 
     const content = response.content || '';
@@ -422,7 +436,7 @@ export const OutputNodeExtension: NodeExtension = {
 
         // New modes
         if (data.mode === 'synthesis') {
-            return executeSynthesisMode(context, data, provider);
+            return executeSynthesisMode(context, data, provider, node.id);
         } else {
             return executeCombineMode(context, data);
         }

@@ -11,22 +11,26 @@ export interface StopPolicy {
     maxDurationMs?: number;
     /** Max total tokens (prompt + completion estimates/actual) */
     maxTokens?: number;
+    /** Max provider-reported cost across model calls in USD. */
+    maxCostUsd?: number;
 }
 
 export interface StopPolicyState {
     steps: number;
     tokens: number;
+    costUsd: number;
     startedAt: number;
 }
 
 export function createStopPolicyState(): StopPolicyState {
-    return { steps: 0, tokens: 0, startedAt: Date.now() };
+    return { steps: 0, tokens: 0, costUsd: 0, startedAt: Date.now() };
 }
 
 export type BudgetExhaustedReason =
     | 'max_steps'
     | 'max_duration'
-    | 'max_tokens';
+    | 'max_tokens'
+    | 'max_cost';
 
 export function checkStopPolicy(
     policy: StopPolicy | undefined,
@@ -58,6 +62,14 @@ export function checkStopPolicy(
             exceeded: true,
             reason: 'max_tokens',
             message: `Stop policy: maxTokens (${policy.maxTokens}) reached`,
+        };
+    }
+
+    if (policy.maxCostUsd != null && state.costUsd >= policy.maxCostUsd) {
+        return {
+            exceeded: true,
+            reason: 'max_cost',
+            message: `Stop policy: maxCostUsd (${policy.maxCostUsd}) reached`,
         };
     }
 

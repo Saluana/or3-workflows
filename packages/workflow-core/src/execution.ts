@@ -28,8 +28,20 @@ import {
     SubflowExtension,
     OutputNodeExtension,
     StartNodeExtension,
+    SchemaValidationNodeExtension,
 } from './extensions';
 import { OpenRouterLLMProvider } from './providers/OpenRouterLLMProvider';
+import {
+    type ModelCallRecord,
+    type ModelGateway,
+    isModelGateway,
+    LegacyLLMProviderGateway,
+    gatewayAsLLMProvider,
+} from './gateway';
+import {
+    createOpenRouterModelGateway,
+    type OpenRouterV1Client,
+} from './providers/openrouter';
 import { InMemoryAdapter, type MemoryAdapter } from './memory';
 import { ExecutionSession, type Session } from './session';
 import {
@@ -63,7 +75,7 @@ import {
     type TokenCounter,
 } from './compaction';
 import { validateWorkflow } from './validation';
-import { safeEmitEvent } from './events';
+import { safeEmitEvent, type WorkflowEvent } from './events';
 import {
     BudgetExceededError,
     checkStopPolicy,
@@ -72,6 +84,23 @@ import {
     type StopPolicyState,
 } from './stopPolicy';
 import type { EdgeData, EdgeInputMapping } from './types/base';
+import {
+    createRunId,
+    loadResumeSnapshot,
+    persistWaveBoundary,
+    snapshotToResumeFrom,
+} from './runstore';
+import { DEFAULT_WORKFLOW_MODEL } from './models';
+import {
+    isToolReconciliationRequiredError,
+    type ToolIntent,
+} from './tools';
+import {
+    RunSequencer,
+    projectToLegacyEvent,
+    redactEnvelope,
+    type WorkflowEventV2,
+} from './observability';
 
 // ============================================================================
 // Constants
@@ -82,7 +111,7 @@ import type { EdgeData, EdgeInputMapping } from './types/base';
  * This is a reliable, cost-effective model that works well for most use cases.
  * Can be overridden via ExecutionOptions.defaultModel.
  */
-const DEFAULT_MODEL = 'openai/gpt-4o-mini';
+const DEFAULT_MODEL = DEFAULT_WORKFLOW_MODEL;
 
 /** Maximum retry attempts for API calls */
 const DEFAULT_MAX_RETRIES = 2;
@@ -98,6 +127,35 @@ const DEFAULT_SKIP_ON_RETRY: ReadonlyArray<import('./errors').ErrorCode> = [
     'AUTH',
     'VALIDATION',
 ] as const;
+
+function mergeStopPolicies(
+    workflow: import('./stopPolicy').StopPolicy | undefined,
+    host: import('./stopPolicy').StopPolicy | undefined
+): import('./stopPolicy').StopPolicy | undefined {
+    if (!workflow) return host;
+    if (!host) return workflow;
+    const minimum = (
+        left: number | undefined,
+        right: number | undefined
+    ): number | undefined =>
+        left === undefined
+            ? right
+            : right === undefined
+              ? left
+              : Math.min(left, right);
+    return {
+        maxSteps: minimum(workflow.maxSteps, host.maxSteps),
+        maxDurationMs: minimum(
+            workflow.maxDurationMs,
+            host.maxDurationMs
+        ),
+        maxTokens: minimum(workflow.maxTokens, host.maxTokens),
+        maxCostUsd: minimum(
+            workflow.maxCostUsd,
+            host.maxCostUsd
+        ),
+    };
+}
 
 // ============================================================================
 // Types
@@ -123,6 +181,7 @@ interface InternalExecutionContext {
     readonly originalInput: string;
     readonly attachments: Attachment[];
     outputs: Record<string, string>;
+    values: Record<string, import('./gateway/types').JsonValue>;
     nodeChain: string[];
     readonly nodePath: string[];
     readonly signal: AbortSignal;
@@ -306,6 +365,7 @@ export const extensionRegistry = new Map<string, NodeExtension>([
     ['whileLoop', WhileLoopExtension],
     ['subflow', SubflowExtension],
     ['output', OutputNodeExtension],
+    ['schemaValidation', SchemaValidationNodeExtension],
     ['start', StartNodeExtension],
     ['condition', RouterNodeExtension], // Legacy alias
 ]);
@@ -351,6 +411,15 @@ export function registerExtension(extension: NodeExtension): void {
  */
 export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     private provider: LLMProvider;
+    /**
+     * Provider-neutral gateway used as the internal source of truth (R2).
+     * Legacy `LLMProvider` instances are wrapped in a
+     * {@link LegacyLLMProviderGateway}; raw OpenRouter v1 clients are wrapped
+     * in an {@link OpenRouterModelGateway}; and a supplied
+     * {@link ModelGateway} is used directly. Extensions still receive an
+     * `LLMProvider` (`this.provider`) during the deprecation window.
+     */
+    private gateway: ModelGateway;
     private options: ExecutionOptions;
     private abortController: AbortController | null = null;
     private running = false;
@@ -362,7 +431,14 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     }> = [];
     private stopPolicyState: StopPolicyState | null = null;
     private assertBudgetFn: (() => void) | null = null;
-    private recordLlmStepFn: ((tokens?: number) => void) | null = null;
+    private recordLlmStepFn:
+        | ((tokens?: number, costUsd?: number) => void)
+        | null = null;
+    private modelCalls: ModelCallRecord[] = [];
+    private modelCallSequence = 0;
+    private activeV2Emitter:
+        | ((event: WorkflowEventV2, path?: string[]) => void)
+        | null = null;
 
     // Cache node type sets for O(1) lookups
     private static readonly LLM_NODE_TYPES = new Set([
@@ -379,21 +455,33 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
      * @param options - Optional execution configuration.
      */
     constructor(
-        clientOrProvider: OpenRouter | LLMProvider,
+        clientOrProvider: OpenRouter | LLMProvider | ModelGateway,
         options: ExecutionOptions = {}
     ) {
         if (!clientOrProvider) {
             throw new Error(
-                'OpenRouterExecutionAdapter requires an OpenRouter client or LLMProvider.'
+                'OpenRouterExecutionAdapter requires an OpenRouter client, LLMProvider, or ModelGateway.'
             );
         }
 
-        if (this.isLLMProvider(clientOrProvider)) {
+        if (isModelGateway(clientOrProvider)) {
+            // A provider-neutral gateway is the source of truth; extensions get
+            // a legacy projection during the deprecation window.
+            this.gateway = clientOrProvider;
+            this.provider = gatewayAsLLMProvider(clientOrProvider);
+        } else if (this.isLLMProvider(clientOrProvider)) {
+            // Keep the direct provider for extensions (no lossy round-trip) and
+            // wrap it as a gateway for the internal contract.
             this.provider = clientOrProvider;
+            this.gateway = new LegacyLLMProviderGateway(clientOrProvider);
         } else {
             this.provider = new OpenRouterLLMProvider(clientOrProvider, {
                 debug: options.debug,
             });
+            this.gateway = createOpenRouterModelGateway(
+                clientOrProvider as unknown as OpenRouterV1Client,
+                { metadata: 'enabled' }
+            );
         }
 
         this.options = {
@@ -414,6 +502,14 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             'chat' in obj &&
             typeof obj.chat === 'function'
         );
+    }
+
+    /**
+     * The internal provider-neutral gateway (R2). Prefer this over the legacy
+     * `LLMProvider` projection for new integrations.
+     */
+    getGateway(): ModelGateway {
+        return this.gateway;
     }
 
     // ==========================================================================
@@ -452,13 +548,146 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
         this.running = true;
         this.tokenUsageEvents = [];
+        this.modelCalls = [];
+        this.modelCallSequence = 0;
         this.stopPolicyState = createStopPolicyState();
 
-        const emit = (event: Parameters<typeof safeEmitEvent>[1]) => {
-            safeEmitEvent(this.options.onEvent, event);
+        // Resolve durable run identity when a RunStore is configured (R7).
+        const runStore = this.options.runStore;
+        const runId =
+            this.options.runId ??
+            (runStore ? createRunId() : undefined);
+        if (runStore && runId && !this.options.runId) {
+            this.options = { ...this.options, runId };
+        }
+        const eventRunId =
+            runId ?? this.options.sessionId ?? createRunId();
+        const sequencer = new RunSequencer(eventRunId, {
+            workflowId: workflow.meta.id ?? workflow.meta.name,
+            workflowVersion: workflow.meta.version,
+        });
+        const dispatchV2 = (
+            event: WorkflowEventV2,
+            path: string[] = []
+        ): void => {
+            const envelope = sequencer.envelope(event, { path });
+            const legacy = projectToLegacyEvent(envelope);
+            if (legacy) safeEmitEvent(this.options.onEvent, legacy);
+            const exported = redactEnvelope(
+                envelope,
+                this.options.eventRedaction
+            );
+            try {
+                this.options.onEventV2?.(exported);
+            } catch {
+                // Telemetry callbacks never alter workflow execution.
+            }
+            try {
+                this.options.otel?.handle(exported);
+            } catch {
+                // Host instrumentation remains isolated.
+            }
         };
+        this.activeV2Emitter = dispatchV2;
+        const emit = (event: WorkflowEvent): void => {
+            const { at: _at, ...withoutTimestamp } = event;
+            dispatchV2(withoutTimestamp as WorkflowEventV2);
+        };
+        const persistWaves =
+            !!runStore &&
+            !!runId &&
+            (this.options.persistWaveSnapshots ?? true);
 
-        const resumeFrom = this.options.resumeFrom;
+        let resumeFrom = this.options.resumeFrom;
+        // When no explicit resumeFrom is provided, restore from the durable
+        // wave snapshot so process restarts continue deterministically.
+        if (!resumeFrom && runStore && runId) {
+            let snap;
+            try {
+                snap = await loadResumeSnapshot(runStore, runId);
+            } catch (error) {
+                const failedAt = Date.now();
+                const err =
+                    error instanceof Error
+                        ? error
+                        : new Error(String(error));
+                const result = this.buildExecutionResult(
+                    false,
+                    '',
+                    '',
+                    undefined,
+                    [],
+                    undefined,
+                    {},
+                    [],
+                    failedAt,
+                    err
+                );
+                dispatchV2({
+                    type: 'run_start',
+                    workflowName: workflow.meta.name,
+                    sessionId: this.options.sessionId,
+                });
+                dispatchV2({ type: 'done', result });
+                callbacks.onNodeError('', err as any);
+                callbacks.onComplete?.(result as any);
+                this.running = false;
+                this.activeV2Emitter = null;
+                return result;
+            }
+            if (
+                (snap?.status === 'running' ||
+                    (snap?.status === 'reconciliation_required' &&
+                        !!this.options.toolReconciler)) &&
+                snap.pendingNodes.length > 0
+            ) {
+                resumeFrom = snapshotToResumeFrom(snap);
+            }
+            if (
+                snap?.status === 'reconciliation_required' &&
+                !this.options.toolReconciler
+            ) {
+                const reconciliation = snap.reconciliation;
+                const result = this.buildExecutionResult(
+                    false,
+                    '',
+                    '',
+                    undefined,
+                    [...snap.completedNodes],
+                    snap.completedNodes[snap.completedNodes.length - 1],
+                    { ...snap.nodeOutputs },
+                    [...snap.transcript],
+                    Date.now(),
+                    undefined,
+                    {
+                        paused: true,
+                        pause: {
+                            type: 'reconciliation',
+                            resumeToken: runId,
+                            reason:
+                                reconciliation?.reason ??
+                                'An external tool outcome must be reconciled before resume',
+                        },
+                    }
+                );
+                dispatchV2({
+                    type: 'run_start',
+                    workflowName: workflow.meta.name,
+                    sessionId: this.options.sessionId,
+                });
+                dispatchV2({
+                    type: 'resume',
+                    checkpointId: runId,
+                    nodeId: reconciliation?.nodeId,
+                    status: 'reconciliation_required',
+                });
+                dispatchV2({ type: 'done', result });
+                callbacks.onComplete?.(result as any);
+                this.running = false;
+                this.activeV2Emitter = null;
+                return result;
+            }
+        }
 
         const startTime = Date.now();
         emit({
@@ -467,9 +696,20 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             sessionId: this.options.sessionId,
             at: startTime,
         });
+        if (resumeFrom) {
+            this.activeV2Emitter?.({
+                type: 'resume',
+                checkpointId:
+                    this.options.runId ?? 'resume-snapshot',
+                nodeId: resumeFrom.startNodeId,
+                status: 'running',
+            });
+        }
         const nodeOutputs: Record<string, string> = resumeFrom?.nodeOutputs
             ? { ...resumeFrom.nodeOutputs }
             : {};
+        const nodeValues: Record<string, import('./gateway/types').JsonValue> =
+            resumeFrom?.nodeValues ? { ...resumeFrom.nodeValues } : {};
         const executionOrder: string[] = resumeFrom?.executionOrder
             ? [...resumeFrom.executionOrder]
             : [];
@@ -477,10 +717,46 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         let finalNodeId: string | undefined = resumeFrom?.finalNodeId;
         let finalOutput = resumeFrom?.resumeInput || '';
         let sessionMessages: ChatMessage[] = [];
+        const persistRunStatus = async (
+            status: import('./runstore').RunStatus,
+            pendingNodes: string[],
+            scheduledNodes: string[] = [],
+            transcript: ChatMessage[] = sessionMessages,
+            subflowPath: string[] =
+                resumeFrom?.subflowPath ??
+                this.options._subflowPath ??
+                [],
+            reconciliation?: import('./runstore').ReconciliationState
+        ): Promise<void> => {
+            if (!persistWaves || !runStore || !runId) return;
+            await persistWaveBoundary(runStore, {
+                runId,
+                status,
+                workflowId: workflow.meta.id ?? workflow.meta.name,
+                workflowVersion: workflow.meta.version,
+                pendingNodes,
+                scheduledNodes,
+                completedNodes: [...executionOrder],
+                nodeOutputs: { ...nodeOutputs },
+                nodeValues:
+                    Object.keys(nodeValues).length > 0
+                        ? { ...nodeValues }
+                        : undefined,
+                transcript: [...transcript],
+                subflowPath: [...subflowPath],
+                reconciliation,
+            });
+        };
+
+        const configuredStopPolicy =
+            mergeStopPolicies(
+                workflow.meta.execution?.stopPolicy,
+                this.options.stopPolicy
+            ) ?? {};
 
         const assertBudget = () => {
             const check = checkStopPolicy(
-                this.options.stopPolicy,
+                configuredStopPolicy,
                 this.stopPolicyState!
             );
             if (check.exceeded) {
@@ -496,20 +772,23 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             }
         };
 
-        const recordLlmStep = (tokens?: number) => {
+        const recordLlmStep = (tokens?: number, costUsd?: number) => {
             if (!this.stopPolicyState) return;
             this.stopPolicyState.steps += 1;
             if (typeof tokens === 'number' && tokens > 0) {
                 this.stopPolicyState.tokens += tokens;
             }
+            if (typeof costUsd === 'number' && costUsd >= 0) {
+                this.stopPolicyState.costUsd += costUsd;
+            }
             // Enforce duration/token budgets immediately; maxSteps is checked
             // at the start of the next LLM call via assertBudget.
-            const policy = this.options.stopPolicy;
-            if (!policy) return;
+            const policy = configuredStopPolicy;
             const check = checkStopPolicy(
                 {
                     maxDurationMs: policy.maxDurationMs,
                     maxTokens: policy.maxTokens,
+                    maxCostUsd: policy.maxCostUsd,
                 },
                 this.stopPolicyState
             );
@@ -528,61 +807,74 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         this.assertBudgetFn = assertBudget;
         this.recordLlmStepFn = recordLlmStep;
 
-        // Preflight validation (enabled by default)
-        if (this.options.preflight !== false) {
-            const validationContext: ValidationContext = {
-                subflowRegistry: this.options.subflowRegistry,
-                defaultModel: this.options.defaultModel,
-                extensionRegistry,
-            };
-
-            const validation = validateWorkflow(
-                workflow.nodes,
-                workflow.edges,
-                validationContext,
-                { strictDataValidation: this.options.strictDataValidation }
-            );
-
-            if (!validation.isValid) {
-                const errorMessages = validation.errors
-                    .map(
-                        (e) =>
-                            `${e.code}: ${e.message}${
-                                e.nodeId ? ` (node: ${e.nodeId})` : ''
-                            }`
-                    )
-                    .join('; ');
-
-                const validationError = createExecutionError(
-                    new Error(`Workflow validation failed: ${errorMessages}`),
-                    '',
-                    '',
-                    undefined,
-                    1,
-                    1,
-                    []
-                );
-
-                callbacks.onNodeError('', validationError);
-
-                const result = this.buildExecutionResult(
-                    false,
-                    '',
-                    '',
-                    undefined,
-                    [],
-                    undefined,
-                    {},
-                    sessionMessages,
-                    startTime,
-                    validationError
-                );
-                callbacks.onComplete?.(result as any);
-                return result;
-            }
-        }
-
         try {
+            // Preflight validation (enabled by default)
+            if (this.options.preflight !== false) {
+                const validationContext: ValidationContext = {
+                    subflowRegistry: this.options.subflowRegistry,
+                    defaultModel: this.options.defaultModel,
+                    extensionRegistry,
+                };
+
+                const validation = validateWorkflow(
+                    workflow.nodes,
+                    workflow.edges,
+                    validationContext,
+                    {
+                        strictDataValidation:
+                            this.options.strictDataValidation,
+                    }
+                );
+
+                if (!validation.isValid) {
+                    const errorMessages = validation.errors
+                        .map(
+                            (e) =>
+                                `${e.code}: ${e.message}${
+                                    e.nodeId
+                                        ? ` (node: ${e.nodeId})`
+                                        : ''
+                                }`
+                        )
+                        .join('; ');
+
+                    const validationError = createExecutionError(
+                        new Error(
+                            `Workflow validation failed: ${errorMessages}`
+                        ),
+                        '',
+                        '',
+                        undefined,
+                        1,
+                        1,
+                        []
+                    );
+
+                    callbacks.onNodeError('', validationError);
+                    await persistRunStatus('failed', []);
+
+                    const result = this.buildExecutionResult(
+                        false,
+                        '',
+                        '',
+                        undefined,
+                        [],
+                        undefined,
+                        {},
+                        sessionMessages,
+                        startTime,
+                        validationError
+                    );
+                    emit({
+                        type: 'done',
+                        result,
+                        at: Date.now(),
+                    });
+                    callbacks.onComplete?.(result as any);
+                    return result;
+                }
+            }
+
             const graph = this.buildGraph(workflow.nodes, workflow.edges);
 
             // Find start node
@@ -609,12 +901,16 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 originalInput: input.text,
                 attachments: input.attachments || [],
                 outputs: { ...(resumeFrom?.nodeOutputs || {}) },
+                values: nodeValues,
                 nodeChain: resumeFrom?.executionOrder
                     ? [...resumeFrom.executionOrder]
                     : [],
-                nodePath: this.options._subflowPath
-                    ? [...this.options._subflowPath]
-                    : [],
+                nodePath:
+                    resumeFrom?.subflowPath?.length
+                        ? [...resumeFrom.subflowPath]
+                        : this.options._subflowPath
+                          ? [...this.options._subflowPath]
+                          : [],
                 signal: this.abortController.signal,
                 session,
                 memory: this.memory,
@@ -624,14 +920,20 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             sessionMessages = context.session.messages;
 
             // BFS execution through the graph
-            const rootNodeId = resumeFrom?.startNodeId ?? startNode.id;
-            const queue: string[] = [rootNodeId];
+            const startNodeId = resumeFrom?.startNodeId ?? startNode.id;
+            const queue: string[] =
+                resumeFrom?.pendingNodes && resumeFrom.pendingNodes.length > 0
+                    ? [...resumeFrom.pendingNodes]
+                    : [startNodeId];
+            const rootNodeId = startNodeId;
             const executed = new Set<string>(
                 resumeFrom ? Object.keys(resumeFrom.nodeOutputs || {}) : []
             );
-            // Ensure the resume target is re-run
+            // Ensure resume targets are re-run (pending nodes not yet in outputs).
             if (resumeFrom) {
-                executed.delete(rootNodeId);
+                for (const id of queue) {
+                    executed.delete(id);
+                }
             }
             const skipped = new Set<string>();
             // Per-node execution counter to prevent infinite loops
@@ -743,11 +1045,16 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 }
 
                 // Execute all ready nodes concurrently
+                const scheduledThisWave = [...readyNodes];
                 const executeNode = async (
                     nodeId: string
                 ): Promise<{
                     nodeId: string;
-                    result: { output: string; nextNodes: string[] };
+                    result: {
+                        output: string;
+                        nextNodes: string[];
+                        value?: import('./gateway/types').JsonValue;
+                    };
                 }> => {
                     const result = await this.executeNodeWithErrorHandling(
                         nodeId,
@@ -765,6 +1072,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 for (const { nodeId, result } of results) {
                     // Store output
                     nodeOutputs[nodeId] = result.output;
+                    if (result.value !== undefined) {
+                        nodeValues[nodeId] = result.value;
+                    }
+                    context.outputs[nodeId] = result.output;
                     finalOutput = result.output;
                     finalNodeId = nodeId;
                     executionOrder.push(nodeId);
@@ -826,6 +1137,52 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                         startNodeId: lastActiveNodeId,
                     };
                     await this.options.checkpointAdapter.save(autoCp);
+                    this.activeV2Emitter?.(
+                        {
+                            type: 'checkpoint',
+                            checkpointId: autoCp.id,
+                            nodeId: lastActiveNodeId,
+                            status: autoCp.status,
+                        },
+                        context.nodePath
+                    );
+                }
+
+                // Durable RunStore wave snapshot (R7.AC1, R7.AC2): pending,
+                // scheduled, completed, transcript, and nested path.
+                if (persistWaves && runStore && runId) {
+                    const pendingUnique: string[] = [];
+                    const pendingSeen = new Set<string>();
+                    for (const id of queue) {
+                        if (executed.has(id) || pendingSeen.has(id)) continue;
+                        pendingSeen.add(id);
+                        pendingUnique.push(id);
+                    }
+                    await persistWaveBoundary(runStore, {
+                        runId,
+                        status: 'running',
+                        workflowId: workflow.meta.id ?? workflow.meta.name,
+                        workflowVersion: workflow.meta.version,
+                        pendingNodes: pendingUnique,
+                        scheduledNodes: scheduledThisWave,
+                        completedNodes: [...executionOrder],
+                        nodeOutputs: { ...nodeOutputs },
+                        nodeValues:
+                            Object.keys(nodeValues).length > 0
+                                ? { ...nodeValues }
+                                : undefined,
+                        transcript: [...context.session.messages],
+                        subflowPath: [...context.nodePath],
+                    });
+                    this.activeV2Emitter?.(
+                        {
+                            type: 'checkpoint',
+                            checkpointId: runId,
+                            nodeId: lastActiveNodeId,
+                            status: 'running',
+                        },
+                        context.nodePath
+                    );
                 }
             }
 
@@ -851,6 +1208,14 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 }
             }
 
+            await persistRunStatus(
+                'completed',
+                [],
+                [],
+                context.session.messages,
+                context.nodePath
+            );
+
             const result = this.buildExecutionResult(
                 true,
                 finalOutput,
@@ -867,6 +1232,9 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             return result;
         } catch (error) {
             if (isWorkflowPausedError(error)) {
+                await persistRunStatus('paused', [
+                    error.hitlRequest.nodeId,
+                ]);
                 const pausedResult = this.buildExecutionResult(
                     false,
                     '',
@@ -923,6 +1291,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 if (this.options.checkpointAdapter) {
                     await this.options.checkpointAdapter.save(budgetCheckpoint);
                 }
+                await persistRunStatus(
+                    'paused',
+                    lastActiveNodeId ? [lastActiveNodeId] : []
+                );
                 const budgetResult = this.buildExecutionResult(
                     false,
                     finalOutput,
@@ -959,8 +1331,58 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 return budgetResult;
             }
 
+            if (isToolReconciliationRequiredError(error)) {
+                const reconciliation = {
+                    reason: error.message,
+                    callId: error.intent.callId,
+                    toolName: error.intent.toolName,
+                    nodeId: error.intent.nodeId,
+                    sideEffect: error.intent.sideEffect,
+                    idempotencyKey: error.intent.idempotencyKey,
+                    at: Date.now(),
+                };
+                await persistRunStatus(
+                    'reconciliation_required',
+                    [error.intent.nodeId],
+                    [],
+                    sessionMessages,
+                    resumeFrom?.subflowPath ??
+                        this.options._subflowPath ??
+                        [],
+                    reconciliation
+                );
+                const pausedResult = this.buildExecutionResult(
+                    false,
+                    finalOutput,
+                    finalOutput,
+                    finalNodeId,
+                    executionOrder,
+                    lastActiveNodeId,
+                    nodeOutputs,
+                    sessionMessages,
+                    startTime,
+                    undefined,
+                    {
+                        paused: true,
+                        pause: {
+                            type: 'reconciliation',
+                            resumeToken:
+                                this.options.runId ?? error.intent.runId,
+                            reason: error.message,
+                        },
+                    }
+                );
+                emit({ type: 'done', result: pausedResult, at: Date.now() });
+                callbacks.onComplete?.(pausedResult as any);
+                return pausedResult;
+            }
+
             const err =
                 error instanceof Error ? error : new Error(String(error));
+            await persistRunStatus(
+                'failed',
+                lastActiveNodeId ? [lastActiveNodeId] : []
+            );
             const result = this.buildExecutionResult(
                 false,
                 '',
@@ -980,7 +1402,20 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             this.running = false;
             this.assertBudgetFn = null;
             this.recordLlmStepFn = null;
+            this.activeV2Emitter = null;
         }
+    }
+
+    private emitLegacyEvent(event: WorkflowEvent, path: string[] = []): void {
+        if (this.activeV2Emitter) {
+            const { at: _at, ...withoutTimestamp } = event;
+            this.activeV2Emitter(
+                withoutTimestamp as WorkflowEventV2,
+                path
+            );
+            return;
+        }
+        safeEmitEvent(this.options.onEvent, event);
     }
 
     /**
@@ -1022,6 +1457,17 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             duration: Date.now() - startTime,
             usage,
             tokenUsageDetails,
+            modelCalls: [...this.modelCalls],
+            costUsd:
+                this.modelCalls.some(
+                    (call) => call.usage?.costUsd !== undefined
+                )
+                    ? this.modelCalls.reduce(
+                          (sum, call) =>
+                              sum + (call.usage?.costUsd ?? 0),
+                          0
+                      )
+                    : undefined,
             paused: extras?.paused,
             checkpointId: extras?.checkpointId,
             hitlRequest: extras?.hitlRequest,
@@ -1057,7 +1503,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     async getModelCapabilities(
         modelId: string
     ): Promise<ModelCapabilities | null> {
-        return this.provider.getModelCapabilities(modelId);
+        return (
+            (await this.gateway.getModelCapabilities(modelId)) ??
+            (await this.provider.getModelCapabilities?.(modelId)) ??
+            null
+        );
     }
 
     /**
@@ -1143,9 +1593,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         graph: WorkflowGraph,
         edges: WorkflowEdge[],
         callbacks: ExecutionCallbacks
-    ): Promise<{ output: string; nextNodes: string[] }> {
+    ): Promise<{ output: string; nextNodes: string[]; value?: import('./gateway/types').JsonValue }> {
         const node = graph.nodeMap.get(nodeId);
         if (!node) return { output: '', nextNodes: [] };
+        const nodeData = node.data as unknown as Record<string, unknown>;
         const meta = {
             id: nodeId,
             label: getNodeLabel(node),
@@ -1154,12 +1605,12 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         } satisfies Partial<NodeExecutionMetadata>;
 
         callbacks.onNodeStart(nodeId, meta);
-        safeEmitEvent(this.options.onEvent, {
+        this.emitLegacyEvent({
             type: 'node_start',
             nodeId,
             meta: meta as NodeExecutionMetadata,
             at: Date.now(),
-        });
+        }, context.nodePath);
 
         // Look up extension
         const extension = extensionRegistry.get(node.type);
@@ -1179,8 +1630,12 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             OpenRouterExecutionAdapter.LLM_NODE_TYPES.has(node.type) &&
             this.options.compaction
         ) {
-            const nodeData = node.data as unknown as Record<string, unknown>;
             const model =
+                (
+                    nodeData.modelRequest as
+                        | { models?: string[] }
+                        | undefined
+                )?.models?.[0] ||
                 (typeof nodeData.model === 'string' ? nodeData.model : null) ||
                 (typeof nodeData.conditionModel === 'string'
                     ? nodeData.conditionModel
@@ -1190,7 +1645,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             const compactionResult = await this.compactHistoryIfNeeded(
                 historyMessages,
                 model,
-                callbacks
+                callbacks,
+                nodeId
             );
             historyMessages = compactionResult.messages;
             // Update session messages if compacted
@@ -1205,6 +1661,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         // so concurrent DAG waves don't race on a single field.
         const executionContext: ExecutionContext = {
             input: this.resolveNodeInput(nodeId, context, graph),
+            value: this.resolveNodeValue(nodeId, context, graph),
             history: historyMessages,
             memory: this.memory,
             attachments: context.attachments,
@@ -1219,6 +1676,144 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             subflowDepth: this.options._subflowDepth ?? 0,
             maxSubflowDepth: this.options.maxSubflowDepth ?? 10,
             tools: this.options.tools,
+            workflowTools: this.options.workflowTools,
+            toolExecutionPolicy: this.options.toolExecutionPolicy,
+            toolApprovalGate: this.options.toolApprovalGate,
+            toolReconciler: this.options.toolReconciler,
+            parallelToolCalls: this.options.parallelToolCalls,
+            permissions: Array.isArray(nodeData.permissions)
+                ? (nodeData.permissions as string[])
+                : undefined,
+            modelGateway: this.gateway,
+            agentBackends: this.options.agentBackends,
+            createModelCallId: (callNodeId) =>
+                `${this.options.runId ?? context.session.id}:model:${++this.modelCallSequence}:${callNodeId}`,
+            onModelCallStart: (callId, callNodeId, request) => {
+                this.modelCalls.push({
+                    callId,
+                    nodeId: callNodeId,
+                    requestedModels: [...request.models],
+                    transport: request.transport ?? 'chat',
+                });
+                this.activeV2Emitter?.(
+                    {
+                        type: 'model_start',
+                        callId,
+                        nodeId: callNodeId,
+                        requestedModels: [...request.models],
+                        transport: request.transport ?? 'chat',
+                    },
+                    context.nodePath
+                );
+            },
+            onModelCallFinish: (callId, callNodeId, request, result) => {
+                const record =
+                    this.modelCalls.find((item) => item.callId === callId) ??
+                    ({
+                        callId,
+                        nodeId: callNodeId,
+                        requestedModels: [...request.models],
+                        transport: request.transport ?? 'chat',
+                    } satisfies ModelCallRecord);
+                Object.assign(record, {
+                    actualModel: result.actualModel,
+                    provider: result.provider,
+                    finishReason: result.finishReason,
+                    usage: result.usage,
+                    identifiers: result.identifiers,
+                    timing: result.timing,
+                    annotations: result.annotations,
+                });
+                if (!this.modelCalls.includes(record)) {
+                    this.modelCalls.push(record);
+                }
+                this.activeV2Emitter?.(
+                    {
+                        type: 'model_finish',
+                        callId,
+                        nodeId: callNodeId,
+                        actualModel: result.actualModel,
+                        provider: result.provider,
+                        finishReason: result.finishReason,
+                        usage: result.usage,
+                        identifiers: result.identifiers,
+                        timing: result.timing,
+                        annotations: result.annotations,
+                    },
+                    context.nodePath
+                );
+            },
+            onModelCallError: (callId, callNodeId, request, error) => {
+                const record =
+                    this.modelCalls.find((item) => item.callId === callId) ??
+                    ({
+                        callId,
+                        nodeId: callNodeId,
+                        requestedModels: [...request.models],
+                        transport: request.transport ?? 'chat',
+                    } satisfies ModelCallRecord);
+                record.error = {
+                    name: error.name,
+                    message: error.message,
+                    retryable:
+                        'retryable' in error &&
+                        typeof error.retryable === 'boolean'
+                            ? error.retryable
+                            : undefined,
+                    statusCode:
+                        'statusCode' in error &&
+                        typeof error.statusCode === 'number'
+                            ? error.statusCode
+                            : undefined,
+                };
+                if (!this.modelCalls.includes(record)) {
+                    this.modelCalls.push(record);
+                }
+                this.activeV2Emitter?.(
+                    {
+                        type: 'model_error',
+                        callId,
+                        nodeId: callNodeId,
+                        requestedModels: [...request.models],
+                        transport: request.transport ?? 'chat',
+                        error,
+                    },
+                    context.nodePath
+                );
+            },
+            onToolIntent: (intent: ToolIntent) => {
+                this.activeV2Emitter?.(
+                    {
+                        type: 'tool_intent',
+                        callId: intent.callId,
+                        toolName: intent.toolName,
+                        nodeId: intent.nodeId,
+                        status: intent.status,
+                        sideEffect: intent.sideEffect,
+                        idempotencyKey: intent.idempotencyKey,
+                    },
+                    context.nodePath
+                );
+            },
+            onToolApproval: (approval) => {
+                this.activeV2Emitter?.(
+                    { type: 'tool_approval', ...approval },
+                    context.nodePath
+                );
+            },
+            onToolReceipt: (receipt, reused) => {
+                this.activeV2Emitter?.(
+                    {
+                        type: 'tool_receipt',
+                        callId: receipt.callId,
+                        toolName: receipt.toolName,
+                        status: reused ? 'reused' : receipt.status,
+                    },
+                    context.nodePath
+                );
+            },
+            runId: this.options.runId,
+            runStore: this.options.runStore,
             maxToolIterations: this.options.maxToolIterations,
             onMaxToolIterations: this.options.onMaxToolIterations,
             onHITLRequest: this.options.onHITLRequest,
@@ -1230,18 +1825,23 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     callbacks.onTokenUsage(nodeId, usage);
                 }
                 this.tokenUsageEvents.push({ nodeId, usage });
-                safeEmitEvent(this.options.onEvent, {
+                this.emitLegacyEvent({
                     type: 'token_usage',
                     nodeId,
                     usage,
                     at: Date.now(),
-                });
+                }, context.nodePath);
             },
             assertBudget: () => this.assertBudgetFn?.(),
-            recordLlmStep: (tokens) => this.recordLlmStepFn?.(tokens),
+            recordLlmStep: (tokens, costUsd) =>
+                this.recordLlmStepFn?.(tokens, costUsd),
 
             onToken: (token: string) => {
                 callbacks.onToken(nodeId, token);
+                this.activeV2Emitter?.(
+                    { type: 'token', nodeId, token },
+                    context.nodePath
+                );
                 const isLeaf = (graph.children[nodeId] || []).length === 0;
                 if (isLeaf && callbacks.onWorkflowToken) {
                     callbacks.onWorkflowToken(token, {
@@ -1256,8 +1856,17 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             onReasoning: callbacks.onReasoning
                 ? (token: string) => {
                       callbacks.onReasoning!(nodeId, token);
+                      this.activeV2Emitter?.(
+                          { type: 'reasoning', nodeId, token },
+                          context.nodePath
+                      );
                   }
-                : undefined,
+                : (token: string) => {
+                      this.activeV2Emitter?.(
+                          { type: 'reasoning', nodeId, token },
+                          context.nodePath
+                      );
+                  },
 
             // Branch streaming callbacks for parallel nodes
             onBranchToken: callbacks.onBranchToken
@@ -1425,7 +2034,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     options?.onHITLRequest ?? this.options.onHITLRequest;
 
                 const subAdapter = new OpenRouterExecutionAdapter(
-                    this.provider,
+                    this.gateway,
                     {
                         ...this.options,
                         ...options,
@@ -1471,6 +2080,14 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
         // Handle metadata/side-effects
         if (result.metadata?.selectedRoute) {
+            this.activeV2Emitter?.(
+                {
+                    type: 'route_selected',
+                    nodeId,
+                    routeId: result.metadata.selectedRoute,
+                },
+                context.nodePath
+            );
             if (callbacks.onRouteSelected) {
                 callbacks.onRouteSelected(
                     nodeId,
@@ -1508,14 +2125,18 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         // (See processWaveResults in execute().)
 
         callbacks.onNodeFinish(nodeId, result.output, meta);
-        safeEmitEvent(this.options.onEvent, {
+        this.emitLegacyEvent({
             type: 'node_finish',
             nodeId,
             output: result.output,
             meta: meta as NodeExecutionMetadata,
             at: Date.now(),
-        });
-        return { output: result.output, nextNodes: result.nextNodes };
+        }, context.nodePath);
+        return {
+            output: result.output,
+            nextNodes: result.nextNodes,
+            value: result.value as import('./gateway/types').JsonValue | undefined,
+        };
     }
 
     /**
@@ -1600,6 +2221,20 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         }
         return contributions.map((c) => c.output).join(separator);
     }
+
+    /**
+     * Resolve a typed input without changing the legacy string-input contract.
+     * A typed value is unambiguous only for a single inbound source.
+     */
+    private resolveNodeValue(
+        nodeId: string,
+        context: InternalExecutionContext,
+        graph: WorkflowGraph
+    ): import('./gateway/types').JsonValue | undefined {
+        const inbound = graph.inboundEdges[nodeId];
+        if (!inbound || inbound.length !== 1) return undefined;
+        return context.values[inbound[0]!.source];
+    }
     private getTokenUsageSummary(): TokenUsage | undefined {
         if (this.tokenUsageEvents.length === 0) {
             return undefined;
@@ -1629,7 +2264,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         graph: WorkflowGraph,
         edges: WorkflowEdge[],
         callbacks: ExecutionCallbacks
-    ): Promise<{ output: string; nextNodes: string[] }> {
+    ): Promise<{ output: string; nextNodes: string[]; value?: import('./gateway/types').JsonValue }> {
         const node = graph.nodeMap.get(nodeId);
         if (!node) {
             // Early return for missing node
@@ -1710,6 +2345,9 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 if (isBudgetExceededError(error)) {
                     throw error;
                 }
+                if (isToolReconciliationRequiredError(error)) {
+                    throw error;
+                }
 
                 const execError = createExecutionError(
                     error,
@@ -1726,6 +2364,15 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     attempt < maxAttempts &&
                     this.shouldRetry(execError, resolvedRetry);
                 if (shouldRetry) {
+                    this.activeV2Emitter?.(
+                        {
+                            type: 'retry',
+                            nodeId,
+                            attempt: attempt + 1,
+                            reason: execError.message,
+                        },
+                        context.nodePath
+                    );
                     // Use suggested delay (respects retry-after header)
                     const delay = execError.getSuggestedDelay(
                         resolvedRetry?.baseDelay || DEFAULT_RETRY_DELAY_MS,
@@ -1747,6 +2394,15 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     context.outputs[`${nodeId}_error`] =
                         this.serializeError(execError);
                     callbacks.onNodeError(nodeId, execError, meta);
+                    this.activeV2Emitter?.(
+                        {
+                            type: 'node_error',
+                            nodeId,
+                            error: execError,
+                            meta,
+                        },
+                        context.nodePath
+                    );
                     return {
                         output: '',
                         nextNodes: [errorEdge.target],
@@ -1755,6 +2411,15 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
                 if (mode === 'continue') {
                     callbacks.onNodeError(nodeId, execError, meta);
+                    this.activeV2Emitter?.(
+                        {
+                            type: 'node_error',
+                            nodeId,
+                            error: execError,
+                            meta,
+                        },
+                        context.nodePath
+                    );
                     return {
                         output: '',
                         nextNodes: this.getChildNodes(nodeId, edges),
@@ -1762,6 +2427,15 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 }
 
                 callbacks.onNodeError(nodeId, execError, meta);
+                this.activeV2Emitter?.(
+                    {
+                        type: 'node_error',
+                        nodeId,
+                        error: execError,
+                        meta,
+                    },
+                    context.nodePath
+                );
                 throw execError;
             }
         }
@@ -1787,7 +2461,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         graph: WorkflowGraph,
         edges: WorkflowEdge[],
         callbacks: ExecutionCallbacks
-    ): Promise<{ output: string; nextNodes: string[] }> {
+    ): Promise<{ output: string; nextNodes: string[]; value?: import('./gateway/types').JsonValue }> {
         const nodeData = node.data as unknown as Record<string, unknown>;
         const hitlConfig = nodeData.hitl as HITLConfig | undefined;
         const nodeLabel = getNodeLabel(node);
@@ -2277,7 +2951,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         edges: WorkflowEdge[],
         callbacks: ExecutionCallbacks,
         preExecuted: Set<string> = new Set()
-    ): Promise<{ output: string; nextNodes: string[] }> {
+    ): Promise<{ output: string; nextNodes: string[]; value?: import('./gateway/types').JsonValue }> {
         const queue: string[] = [startNodeId];
         const executed = new Set<string>(preExecuted);
         let output = '';
@@ -2419,7 +3093,8 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
     private async compactHistoryIfNeeded(
         messages: ChatMessage[],
         model: string,
-        callbacks?: ExecutionCallbacks
+        callbacks?: ExecutionCallbacks,
+        nodeId = 'compaction'
     ): Promise<{ messages: ChatMessage[]; result?: CompactionResult }> {
         const config = this.options.compaction;
         if (!config) {
@@ -2478,9 +3153,10 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             const prompt = buildSummarizationPrompt(toCompact, config);
 
             try {
-                const summarizationResult = await this.provider.chat(
-                    summarizeModel,
-                    [
+                this.assertBudgetFn?.();
+                const request: import('./gateway').ModelRequest = {
+                    models: [summarizeModel],
+                    messages: [
                         {
                             role: 'system',
                             content:
@@ -2488,11 +3164,57 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                         },
                         { role: 'user', content: prompt },
                     ],
-                    {
+                    generation: {
                         temperature: 0.3,
-                        maxTokens: 500,
-                        signal: this.abortController?.signal,
-                    }
+                        maxOutputTokens: 500,
+                    },
+                    signal: this.abortController?.signal,
+                };
+                const callId = `${
+                    this.options.runId ?? 'workflow'
+                }:model:${++this.modelCallSequence}:${nodeId}:compaction`;
+                this.modelCalls.push({
+                    callId,
+                    nodeId,
+                    requestedModels: [...request.models],
+                    transport: 'chat',
+                });
+                this.activeV2Emitter?.({
+                    type: 'model_start',
+                    callId,
+                    nodeId,
+                    requestedModels: [...request.models],
+                    transport: 'chat',
+                });
+                const summarizationResult =
+                    await this.gateway.generate(request);
+                const record = this.modelCalls.find(
+                    (item) => item.callId === callId
+                )!;
+                Object.assign(record, {
+                    actualModel: summarizationResult.actualModel,
+                    provider: summarizationResult.provider,
+                    finishReason: summarizationResult.finishReason,
+                    usage: summarizationResult.usage,
+                    identifiers: summarizationResult.identifiers,
+                    timing: summarizationResult.timing,
+                    annotations: summarizationResult.annotations,
+                });
+                this.activeV2Emitter?.({
+                    type: 'model_finish',
+                    callId,
+                    nodeId,
+                    actualModel: summarizationResult.actualModel,
+                    provider: summarizationResult.provider,
+                    finishReason: summarizationResult.finishReason,
+                    usage: summarizationResult.usage,
+                    identifiers: summarizationResult.identifiers,
+                    timing: summarizationResult.timing,
+                    annotations: summarizationResult.annotations,
+                });
+                this.recordLlmStepFn?.(
+                    summarizationResult.usage?.totalTokens,
+                    summarizationResult.usage?.costUsd
                 );
 
                 summary = summarizationResult.content || '';

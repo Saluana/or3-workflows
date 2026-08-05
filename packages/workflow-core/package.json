@@ -1,8 +1,11 @@
 {
     "name": "or3-workflow-core",
-    "version": "0.1.2",
+    "version": "0.1.4",
     "description": "Headless workflow engine with LLM agent orchestration",
-    "type": "module",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
     "main": "./dist/index.js",
     "module": "./dist/index.js",
     "types": "./dist/index.d.ts",
@@ -14,6 +17,10 @@
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js"
+        },
+        "./openrouter-agent": {
+            "types": "./dist/openrouter-agent.d.ts",
+            "import": "./dist/openrouter-agent.js"
         }
     },
     "scripts": {
@@ -23,6 +30,9 @@
         "test": "vitest run",
         "test:watch": "vitest",
         "prepublishOnly": "bun run build"
+    },
+    "publishConfig": {
+        "access": "public"
     },
     "keywords": [
         "workflow",
@@ -36,11 +46,25 @@
     "license": "MIT",
     "repository": {
         "type": "git",
-        "url": "https://github.com/Saluana/or3-workflows"
+        "url": "git+https://github.com/Saluana/or3-workflows.git",
+        "directory": "packages/workflow-core"
     },
     "dependencies": {
-        "@openrouter/sdk": "^0.3.11",
+        "@openrouter/sdk": "^1.1.6",
+        "ajv": "^8.17.1",
         "zod": "^4.0.0"
+    },
+    "peerDependencies": {
+        "@openrouter/agent": "^0.8.0",
+        "@opentelemetry/api": ">=1.0.0"
+    },
+    "peerDependenciesMeta": {
+        "@openrouter/agent": {
+            "optional": true
+        },
+        "@opentelemetry/api": {
+            "optional": true
+        }
     },
     "devDependencies": {
         "typescript": "^5.0.0",

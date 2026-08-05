@@ -6,24 +6,32 @@ export default defineConfig({
     plugins: [
         dts({
             include: ['src'],
-            rollupTypes: true,
+            // Multiple entry points: emit per-file declarations (no single roll-up)
+            // so the optional `./openrouter-agent` subpath keeps its own types.
+            rollupTypes: false,
         }),
     ],
     build: {
         copyPublicDir: false,
         lib: {
-            entry: resolve(__dirname, 'src/index.ts'),
-            name: 'Or3WorkflowCore',
-            fileName: (format) => `index.${format === 'es' ? 'js' : 'umd.cjs'}`,
+            entry: {
+                index: resolve(__dirname, 'src/index.ts'),
+                'openrouter-agent': resolve(
+                    __dirname,
+                    'src/openrouter-agent.ts'
+                ),
+            },
+            formats: ['es'],
         },
         rollupOptions: {
-            external: ['@openrouter/sdk', 'zod'],
-            output: {
-                globals: {
-                    '@openrouter/sdk': 'OpenRouterSDK',
-                    zod: 'Zod',
-                },
-            },
+            // `@openrouter/agent` and `@opentelemetry/api` are OPTIONAL peer deps
+            // and must never be bundled.
+            external: [
+                '@openrouter/sdk',
+                'zod',
+                '@openrouter/agent',
+                '@opentelemetry/api',
+            ],
         },
     },
 });

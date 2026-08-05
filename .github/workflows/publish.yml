@@ -1,0 +1,74 @@
+name: Publish npm package
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Package to publish
+        required: true
+        type: choice
+        options:
+          - or3-workflow-core
+          - or3-workflow-vue
+  push:
+    tags:
+      - "or3-workflow-core-v*"
+      - "or3-workflow-vue-v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: npm install --global npm@11
+      - run: bun install --frozen-lockfile
+      - name: Select and verify package
+        id: package
+        env:
+          SELECTED_PACKAGE: ${{ inputs.package }}
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            package_name="${GITHUB_REF_NAME%-v*}"
+          else
+            package_name="$SELECTED_PACKAGE"
+          fi
+
+          case "$package_name" in
+            or3-workflow-core) package_dir="packages/workflow-core" ;;
+            or3-workflow-vue) package_dir="packages/workflow-vue" ;;
+            *) echo "Unknown package: $package_name"; exit 1 ;;
+          esac
+
+          version="$(node -p "require('./$package_dir/package.json').version")"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "$package_name-v$version" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match $package_name version $version."
+            exit 1
+          fi
+
+          echo "directory=$package_dir" >> "$GITHUB_OUTPUT"
+      - name: Build core dependency
+        if: steps.package.outputs.directory == 'packages/workflow-vue'
+        working-directory: packages/workflow-core
+        run: bun run build
+      - name: Typecheck
+        working-directory: ${{ steps.package.outputs.directory }}
+        run: bun run typecheck
+      - name: Test core
+        if: steps.package.outputs.directory == 'packages/workflow-core'
+        working-directory: packages/workflow-core
+        run: bun run test
+      - name: Publish
+        working-directory: ${{ steps.package.outputs.directory }}
+        run: npm publish --access public

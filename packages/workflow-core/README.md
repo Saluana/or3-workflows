@@ -2,6 +2,16 @@
 
 Headless workflow engine with LLM agent orchestration. Build multi-agent AI pipelines with a type-safe, framework-agnostic core.
 
+> **AI runtime modernization:** the provider-neutral `ModelGateway`, structured
+> values, typed tools, durable `RunStore`, richer observability, optional agent
+> backends, and the supervisor pattern are documented — including the
+> compatibility/deprecation policy, optional peer dependencies, and staged
+> feature flags — in [`docs/ai-runtime-modernization.md`](../../docs/ai-runtime-modernization.md).
+> Existing `WorkflowData 2.0.0` documents, `LLMProvider` mocks, and callbacks
+> keep working; new capabilities are additive and opt-in. The optional
+> `@openrouter/agent` backend is exposed at the `or3-workflow-core/openrouter-agent`
+> subpath and is never eagerly bundled.
+
 ## Installation
 
 ```bash

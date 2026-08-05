@@ -3,11 +3,14 @@
     "private": true,
     "version": "0.0.0",
     "type": "module",
+    "engines": {
+        "node": ">=24"
+    },
     "scripts": {
         "run": "bun src/index.ts"
     },
     "dependencies": {
-        "or3-workflow-core": "workspace:*",
-        "@openrouter/sdk": "^0.3.11"
+        "@openrouter/sdk": "^1.1.6",
+        "or3-workflow-core": "workspace:*"
     }
 }

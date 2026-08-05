@@ -8,20 +8,37 @@ import type {
     ValidationError,
     ValidationWarning,
     ChatMessage,
+    NodeExecutionResult,
+    NodeModelRequestV1,
 } from '../types';
 import type { HITLRequest } from '../hitl';
 import {
     type OpenRouterContentPart,
-    type ToolForLLM,
     resolveAttachmentUrl,
 } from './shared';
 import {
     buildToolMeta,
     runValidatedToolLoop,
 } from './runValidatedToolLoop';
+import {
+    parseValidateRepair,
+    projectValueToString,
+    specFromJsonSchema,
+    StructuredValidationError,
+} from '../schema';
+import type { JsonValue, ModelToolDescriptor } from '../gateway';
+import { DEFAULT_WORKFLOW_MODEL } from '../models';
+import { callModelForNode } from './modelGatewayCall';
+import { buildNodeModelRequest } from './modelGatewayCall';
+import {
+    adaptExecutableTool,
+    executeToolBatch,
+    type ToolExecutionPolicy,
+    type WorkflowTool,
+} from '../tools';
 
 /** Default model for agent nodes */
-const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
+const DEFAULT_MODEL = DEFAULT_WORKFLOW_MODEL;
 
 /** Default maximum number of tool call iterations to prevent infinite loops */
 const DEFAULT_MAX_TOOL_ITERATIONS = 10;
@@ -33,7 +50,7 @@ async function runToolLoop(
     provider: LLMProvider,
     model: string,
     messages: ChatMessage[],
-    toolsForLLM: ToolForLLM[] | undefined,
+    toolsForLLM: ModelToolDescriptor[] | undefined,
     toolMeta: ReturnType<typeof buildToolMeta>,
     context: ExecutionContext,
     data: AgentNodeData,
@@ -43,6 +60,7 @@ async function runToolLoop(
     return runValidatedToolLoop({
         provider,
         model,
+        modelRequest: data.modelRequest,
         messages,
         toolsForLLM,
         toolMeta,
@@ -53,6 +71,8 @@ async function runToolLoop(
         maxTokens: data.maxTokens,
         toolChoice: data.toolChoice,
         structuredOutput: data.structuredOutput,
+        parallelToolCalls:
+            data.parallelToolCalls ?? context.parallelToolCalls,
         onToken: (token) => context.onToken?.(token),
         onReasoning: (token) => context.onReasoning?.(token),
     });
@@ -137,20 +157,26 @@ export const AgentNodeExtension: NodeExtension = {
         context: ExecutionContext,
         node: WorkflowNode,
         provider?: LLMProvider
-    ): Promise<{ output: string; nextNodes: string[] }> {
+    ): Promise<NodeExecutionResult> {
         if (!provider) {
             throw new Error('Agent node requires an LLM provider');
         }
 
         const data = node.data as AgentNodeData;
-        const model = data.model || context.defaultModel || DEFAULT_MODEL;
+        const model =
+            data.modelRequest?.models[0] ||
+            data.model ||
+            context.defaultModel ||
+            DEFAULT_MODEL;
         const systemPrompt =
             data.prompt || `You are a helpful assistant named ${data.label}.`;
 
         // Check model capabilities if provider available
         let supportedModalities = ['text'];
         if (model) {
-            const capabilities = await provider.getModelCapabilities(model);
+            const capabilities = await (
+                context.modelGateway ?? provider
+            ).getModelCapabilities(model);
             if (capabilities) {
                 supportedModalities = capabilities.inputModalities;
             }
@@ -265,30 +291,54 @@ export const AgentNodeExtension: NodeExtension = {
         // Build tools array from node config and global context tools
         const nodeToolNames = data.tools || [];
         const globalTools = context.tools || [];
-        const toolMeta = buildToolMeta(globalTools);
+        const workflowTools = context.workflowTools || [];
+        const toolMeta = buildToolMeta(globalTools, workflowTools);
 
         // Build tools for LLM - either from node config (basic) or global tools (full)
-        let toolsForLLM: ToolForLLM[] | undefined;
+        let toolsForLLM: ModelToolDescriptor[] | undefined;
+        const modelTools = new Map<string, ModelToolDescriptor>();
+        const hasPermission = (permissions?: string[]) =>
+            context.permissions === undefined ||
+            (permissions ?? []).every((permission) =>
+                context.permissions!.includes(permission)
+            );
+        for (const tool of globalTools) {
+            modelTools.set(tool.function.name, {
+                type: 'function',
+                function: tool.function,
+            });
+        }
+        for (const tool of workflowTools) {
+            if (!hasPermission(tool.descriptor.permissions)) continue;
+            if (tool.descriptor.authority === 'provider-server') {
+                modelTools.set(tool.descriptor.name, {
+                    type: 'provider-server',
+                    name: tool.descriptor.name,
+                    transport: tool.descriptor.transport ?? 'either',
+                    config: tool.descriptor.providerConfig,
+                });
+                continue;
+            }
+            modelTools.set(tool.descriptor.name, {
+                type: 'function',
+                function: {
+                    name: tool.descriptor.name,
+                    description: tool.descriptor.description,
+                    parameters: tool.descriptor.inputSchema,
+                },
+            });
+        }
         if (nodeToolNames.length > 0) {
             // Node specifies tool names - find matching tools from global registry
-            toolsForLLM = nodeToolNames.map((name): ToolForLLM => {
-                const globalTool = globalTools.find(
-                    (t) => t.function.name === name
-                );
-                if (globalTool) {
-                    return { type: 'function', function: globalTool.function };
-                }
+            toolsForLLM = nodeToolNames.map((name): ModelToolDescriptor => {
+                const modelTool = modelTools.get(name);
+                if (modelTool) return modelTool;
                 // Fallback: basic tool definition without schema
                 return { type: 'function', function: { name } };
             });
-        } else if (globalTools.length > 0) {
+        } else if (modelTools.size > 0) {
             // Use all global tools
-            toolsForLLM = globalTools.map(
-                (t): ToolForLLM => ({
-                    type: 'function',
-                    function: t.function,
-                })
-            );
+            toolsForLLM = [...modelTools.values()];
         }
 
         // Determine max tool iterations - node-level overrides context-level
@@ -303,23 +353,224 @@ export const AgentNodeExtension: NodeExtension = {
             context.onMaxToolIterations ??
             'warning';
 
+        const runSelectedLoop = async (
+            loopMessages: ChatMessage[]
+        ) => {
+            const backendId =
+                data.modelRequest?.backend ?? 'native';
+            if (backendId === 'native') {
+                return runToolLoop(
+                    provider,
+                    model,
+                    loopMessages,
+                    toolsForLLM,
+                    toolMeta,
+                    context,
+                    data,
+                    maxToolIterations,
+                    node.id
+                );
+            }
+
+            const backend = context.agentBackends?.[backendId];
+            if (!backend) {
+                throw new Error(
+                    `Agent backend "${backendId}" is not configured. Pass it through ExecutionOptions.agentBackends.`
+                );
+            }
+            if (!context.modelGateway) {
+                throw new Error(
+                    `Agent backend "${backendId}" requires a ModelGateway`
+                );
+            }
+
+            const executable = new Map<string, WorkflowTool>();
+            for (const tool of globalTools) {
+                executable.set(
+                    tool.function.name,
+                    adaptExecutableTool(tool, {
+                        sideEffect: 'none',
+                        parallelSafe: true,
+                    })
+                );
+            }
+            for (const tool of workflowTools) {
+                if (hasPermission(tool.descriptor.permissions)) {
+                    executable.set(tool.descriptor.name, tool);
+                }
+            }
+            const exposedNames = new Set(
+                (toolsForLLM ?? []).map((tool) =>
+                    tool.type === 'function'
+                        ? tool.function.name
+                        : tool.name
+                )
+            );
+            const compatibilityPolicy: ToolExecutionPolicy = {
+                mode: 'parallel',
+                defaultApproval: 'auto',
+            };
+            const request = buildNodeModelRequest({
+                context,
+                nodeId: node.id,
+                legacyModel: model,
+                modelRequest: data.modelRequest,
+                messages: loopMessages,
+                generation: {
+                    temperature: data.temperature,
+                    maxOutputTokens: data.maxTokens,
+                    responseFormat: data.structuredOutput
+                        ? {
+                              name: data.structuredOutput.name,
+                              description:
+                                  data.structuredOutput.description,
+                              schema: data.structuredOutput.schema,
+                              strict: data.structuredOutput.strict,
+                          }
+                        : undefined,
+                },
+                tools: toolsForLLM,
+                toolChoice: data.toolChoice,
+                parallelToolCalls:
+                    data.parallelToolCalls ??
+                    context.parallelToolCalls,
+            });
+            const callId =
+                context.createModelCallId?.(node.id) ??
+                `${node.id}:agent:${Date.now()}`;
+            const startedAt = Date.now();
+            context.assertBudget?.();
+            context.onModelCallStart?.(
+                callId,
+                node.id,
+                request
+            );
+            try {
+                const result = await backend.run({
+                    gateway: context.modelGateway,
+                    models: request.models,
+                    messages: loopMessages,
+                    tools: request.tools,
+                    toolChoice: request.toolChoice,
+                    parallelToolCalls: request.parallelToolCalls,
+                    generation: request.generation,
+                    routing: request.routing,
+                    plugins: request.plugins,
+                    maxIterations: maxToolIterations,
+                    signal: context.signal,
+                    onTextDelta: (token) =>
+                        context.onToken?.(token),
+                    onReasoningDelta: (token) =>
+                        context.onReasoning?.(token),
+                    executeTool: async (invocation) => {
+                        if (!exposedNames.has(invocation.toolName)) {
+                            throw new Error(
+                                `Tool "${invocation.toolName}" is not exposed by node "${node.id}"`
+                            );
+                        }
+                        let parsed: unknown;
+                        try {
+                            parsed = JSON.parse(
+                                invocation.argumentsJson || '{}'
+                            );
+                        } catch {
+                            parsed = {};
+                        }
+                        const { outcomes } = await executeToolBatch(
+                            [
+                                {
+                                    callId: invocation.callId,
+                                    toolName: invocation.toolName,
+                                    input: parsed,
+                                },
+                            ],
+                            {
+                                runId:
+                                    context.runId ??
+                                    context.sessionId ??
+                                    'workflow-run',
+                                nodeId: node.id,
+                                signal:
+                                    context.signal ??
+                                    new AbortController().signal,
+                                policy:
+                                    context.toolExecutionPolicy ??
+                                    (workflowTools.length > 0
+                                        ? undefined
+                                        : compatibilityPolicy),
+                                parallelToolCalls: false,
+                                resolve: (name) =>
+                                    executable.get(name),
+                                approvalGate:
+                                    context.toolApprovalGate,
+                                reconciler: context.toolReconciler,
+                                receiptStore: context.runStore,
+                                grantedPermissions:
+                                    context.permissions,
+                                onIntent: context.onToolIntent,
+                                onApproval:
+                                    context.onToolApproval,
+                                onReceipt:
+                                    context.onToolReceipt,
+                            }
+                        );
+                        return outcomes[0]?.output ?? '';
+                    },
+                });
+                const completedAt = Date.now();
+                context.onModelCallFinish?.(
+                    callId,
+                    node.id,
+                    request,
+                    {
+                        requestedModels: request.models,
+                        actualModel: result.actualModel,
+                        provider: result.provider,
+                        assistantMessage:
+                            result.messages[
+                                result.messages.length - 1
+                            ] ?? {
+                                role: 'assistant',
+                                content: result.finalContent,
+                            },
+                        content: result.finalContent,
+                        usage: result.usage,
+                        timing: {
+                            startedAt,
+                            completedAt,
+                            totalMs: completedAt - startedAt,
+                        },
+                        finishReason:
+                            result.stoppedOnMaxIterations
+                                ? 'length'
+                                : 'stop',
+                    }
+                );
+                context.recordLlmStep?.(
+                    result.usage?.totalTokens,
+                    result.usage?.costUsd
+                );
+                return result;
+            } catch (error) {
+                context.onModelCallError?.(
+                    callId,
+                    node.id,
+                    request,
+                    error instanceof Error
+                        ? error
+                        : new Error(String(error))
+                );
+                throw error;
+            }
+        };
+
         // Run initial tool loop
-        let loopResult = await runToolLoop(
-            provider,
-            model,
-            messages,
-            toolsForLLM,
-            toolMeta,
-            context,
-            data,
-            maxToolIterations,
-            node.id
-        );
-        let { finalContent, iterations: toolIterations } = loopResult;
+        let loopResult = await runSelectedLoop(messages);
+        let { finalContent } = loopResult;
         let currentMessages = loopResult.messages;
 
         // Handle max tool iterations reached
-        if (toolIterations >= maxToolIterations) {
+        if (loopResult.stoppedOnMaxIterations) {
             if (onMaxToolIterations === 'error') {
                 throw new Error(
                     `Maximum tool iterations (${maxToolIterations}) reached. Execution stopped.`
@@ -356,22 +607,13 @@ export const AgentNodeExtension: NodeExtension = {
 
                 if (response.action === 'approve') {
                     // Continue with another round of tool calls using the helper
-                    loopResult = await runToolLoop(
-                        provider,
-                        model,
-                        currentMessages,
-                        toolsForLLM,
-                        toolMeta,
-                        context,
-                        data,
-                        maxToolIterations,
-                        node.id
-                    );
+                    loopResult =
+                        await runSelectedLoop(currentMessages);
                     finalContent = loopResult.finalContent;
-                    toolIterations = loopResult.iterations;
+                    currentMessages = loopResult.messages;
 
                     // If we hit the limit again, add a warning
-                    if (toolIterations >= maxToolIterations) {
+                    if (loopResult.stoppedOnMaxIterations) {
                         finalContent = `Warning: Maximum tool iterations (${maxToolIterations}) reached again after HITL approval. Last content: ${finalContent}`;
                     }
                 } else {
@@ -384,7 +626,107 @@ export const AgentNodeExtension: NodeExtension = {
             }
         }
 
-        const output = finalContent;
+        let output = finalContent;
+        let value: JsonValue | undefined;
+        let valueSchema: { id: string; version: number } | undefined;
+        if (data.structuredOutput) {
+            const spec = specFromJsonSchema(
+                data.structuredOutput.schemaId ??
+                    data.structuredOutput.name,
+                data.structuredOutput.schemaVersion ?? 1,
+                data.structuredOutput.schema,
+                {
+                    strict: data.structuredOutput.strict,
+                    repair: data.structuredOutput.repair,
+                }
+            );
+            const validated = await parseValidateRepair(finalContent, spec, {
+                regenerate:
+                    (spec.repair?.maxAttempts ?? 0) > 0
+                        ? async ({ attempt, previous, issues }) => {
+                              const repairMessages: ChatMessage[] = [
+                                  ...currentMessages,
+                                  {
+                                      role: 'assistant',
+                                      content: previous,
+                                  },
+                                  {
+                                      role: 'user',
+                                      content:
+                                          `The prior JSON failed schema validation (repair attempt ${attempt}). ` +
+                                          `Correct only the invalid JSON and return JSON with no prose. Issues: ${JSON.stringify(
+                                              issues
+                                          )}`,
+                                  },
+                              ];
+                              const baseRepairRequest: NodeModelRequestV1 =
+                                  data.modelRequest ??
+                                  {
+                                      version: 1,
+                                      models: [model],
+                                  };
+                              const repairModelRequest = {
+                                  ...baseRepairRequest,
+                                  serverTools: [],
+                                  plugins:
+                                      spec.repair?.backend ===
+                                      'response-healing'
+                                          ? [
+                                                ...(
+                                                    baseRepairRequest.plugins ??
+                                                    []
+                                                ).filter(
+                                                    (plugin) =>
+                                                        plugin.id !==
+                                                        'response-healing'
+                                                ),
+                                                {
+                                                    id: 'response-healing',
+                                                    kind: 'response' as const,
+                                                },
+                                            ]
+                                          : baseRepairRequest.plugins,
+                              };
+                              const repaired = await callModelForNode({
+                                  context,
+                                  nodeId: node.id,
+                                  provider,
+                                  legacyModel: model,
+                                  modelRequest: repairModelRequest,
+                                  messages: repairMessages,
+                                  generation: {
+                                      temperature: 0,
+                                      maxOutputTokens: data.maxTokens,
+                                      responseFormat: {
+                                          name:
+                                              data.structuredOutput!.name,
+                                          description:
+                                              data.structuredOutput!
+                                                  .description,
+                                          schema:
+                                              data.structuredOutput!.schema,
+                                          strict:
+                                              data.structuredOutput!.strict,
+                                      },
+                                  },
+                                  forceNonStreaming:
+                                      spec.repair?.backend ===
+                                      'response-healing',
+                              });
+                              return repaired.content ?? '';
+                          }
+                        : undefined,
+            });
+            if (!validated.ok) {
+                throw new StructuredValidationError(validated);
+            }
+            value = validated.value;
+            valueSchema = {
+                id: validated.schema.id,
+                version: validated.schema.version,
+            };
+            output = projectValueToString(value);
+        }
 
         // Calculate next nodes
         const outgoingEdges = context.getOutgoingEdges(node.id, 'output');
@@ -393,6 +735,8 @@ export const AgentNodeExtension: NodeExtension = {
         return {
             output,
             nextNodes,
+            value,
+            valueSchema,
         };
     },
 
@@ -407,7 +751,7 @@ export const AgentNodeExtension: NodeExtension = {
         const data = node.data as AgentNodeData;
 
         // Check for model
-        if (!data.model) {
+        if (!data.model && !data.modelRequest?.models?.length) {
             errors.push({
                 type: 'error',
                 code: 'MISSING_MODEL',

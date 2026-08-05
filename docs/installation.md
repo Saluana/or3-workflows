@@ -2,7 +2,7 @@
 
 ## Requirements
 
--   Node.js 18+ or Bun 1.0+
+-   Node.js 24+ or Bun 1.3+
 -   Vue 3.4+ (for Vue components)
 -   TypeScript 5.0+ (recommended)
 

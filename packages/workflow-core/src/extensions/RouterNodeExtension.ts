@@ -15,6 +15,8 @@ import type {
 import { estimateTokenUsage } from '../compaction';
 import { buildUserContentWithAttachments } from './shared';
 import { z } from 'zod';
+import { DEFAULT_WORKFLOW_MODEL } from '../models';
+import { callModelForNode } from './modelGatewayCall';
 
 /** Zod schema for validating router tool call arguments */
 const ToolArgsSchema = z.object({
@@ -23,7 +25,7 @@ const ToolArgsSchema = z.object({
 });
 
 /** Default model for router classification */
-const DEFAULT_MODEL = 'z-ai/glm-4.6:exacto';
+const DEFAULT_MODEL = DEFAULT_WORKFLOW_MODEL;
 
 /**
  * Router Node Extension
@@ -127,7 +129,11 @@ export const RouterNodeExtension: NodeExtension = {
         });
 
         // Use provided model or fall back to default
-        const model = data.model || context.defaultModel || DEFAULT_MODEL;
+        const model =
+            data.modelRequest?.models[0] ||
+            data.model ||
+            context.defaultModel ||
+            DEFAULT_MODEL;
 
         // LLM-based routing
         if (!provider) {
@@ -205,7 +211,9 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
 
         let supportsImages = false;
         if (context.attachments && context.attachments.length > 0) {
-            const capabilities = await provider.getModelCapabilities(model);
+            const capabilities = await (
+                context.modelGateway ?? provider
+            ).getModelCapabilities(model);
             supportsImages =
                 capabilities?.inputModalities?.includes('image') ?? false;
         }
@@ -243,21 +251,26 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
             });
         }
 
-        const result = await provider.chat(model, messagesForLLM, {
-            temperature: 0, // Deterministic for consistent routing
-            maxTokens: 100,
+        const result = await callModelForNode({
+            context,
+            nodeId: node.id,
+            provider,
+            legacyModel: model,
+            modelRequest: data.modelRequest,
+            messages: messagesForLLM,
+            generation: {
+                maxOutputTokens: 100,
+            },
             tools,
-            // toolChoice might not be strictly typed yet
             toolChoice: {
                 type: 'function',
                 function: { name: 'select_route' },
             },
-            signal: context.signal,
         });
 
         if (context.tokenCounter && context.onTokenUsage) {
             let usage = estimateTokenUsage({
-                model,
+                model: result.actualModel ?? model,
                 messages: messagesForLLM,
                 output: result.content || '',
                 tokenCounter: context.tokenCounter,
@@ -267,9 +280,13 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
             if (result.usage) {
                 usage = {
                     ...usage,
-                    promptTokens: result.usage.promptTokens,
-                    completionTokens: result.usage.completionTokens,
-                    totalTokens: result.usage.totalTokens,
+                    promptTokens:
+                        result.usage.inputTokens ?? usage.promptTokens,
+                    completionTokens:
+                        result.usage.outputTokens ??
+                        usage.completionTokens,
+                    totalTokens:
+                        result.usage.totalTokens ?? usage.totalTokens,
                 };
             }
 
@@ -397,7 +414,10 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
             }
 
             return {
-                output: `Routed to ${selectedOption?.name || selectedRouteId}`,
+                // A router controls graph flow; it must not replace the data
+                // flowing through that graph with a diagnostic route label.
+                // Selection details remain available in metadata/events.
+                output: context.input,
                 nextNodes,
                 metadata: {
                     selectedRoute: selectedRouteId,
@@ -432,7 +452,9 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
         }
 
         return {
-            output: `Routed to ${selectedOption?.name || selectedRouteId}`,
+            // Preserve the routed payload for downstream agent/parallel nodes.
+            // Returning "Routed to …" here silently discarded the user's task.
+            output: context.input,
             nextNodes,
             metadata: {
                 selectedRoute: selectedRouteId,

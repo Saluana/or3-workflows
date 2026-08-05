@@ -565,6 +565,25 @@ describe('AgentNodeExtension tool iterations', () => {
             expect(provider.chat).toHaveBeenCalledTimes(1);
         });
 
+        it('should not report a limit when a one-turn agent finishes naturally', async () => {
+            const provider = createMockProvider({
+                responses: [{ content: 'Finished immediately' }],
+            });
+            const node = createAgentNode({
+                maxToolIterations: 1,
+                onMaxToolIterations: 'error',
+            });
+
+            const result = await AgentNodeExtension.execute!(
+                createMockContext(),
+                node,
+                provider
+            );
+
+            expect(result.output).toBe('Finished immediately');
+            expect(provider.chat).toHaveBeenCalledOnce();
+        });
+
         it('should execute tool handlers and include results', async () => {
             const toolHandler = vi
                 .fn()

@@ -217,6 +217,12 @@ export {
     type OutputNodeData,
     type OutputFormat,
     isOutputNodeData,
+    // Structured value runtime (R4)
+    SchemaValidationNodeExtension,
+    createSchemaValidationNodeExtension,
+    createStructuredAgentPreset,
+    type SchemaValidationNodeData,
+    type StructuredAgentPresetOptions,
     interpolateTemplate,
     formatOutput,
     extractTemplatePlaceholders,
@@ -257,6 +263,66 @@ export {
     isCompactionConfig,
 } from './compaction';
 
+// Provider-neutral model gateway (R2)
+export {
+    // Types
+    type JsonValue,
+    type JsonPrimitive,
+    type NonEmptyModels,
+    type ModelCapability,
+    type CapabilitySupport,
+    type CapabilityEvidence,
+    type CapabilityCheck,
+    type ModelCapabilityReport,
+    type ReasoningEffort,
+    type ReasoningConfig,
+    type StructuredOutputRequest,
+    type GenerationSettings,
+    type DataCollectionPolicy,
+    type MaxPricePolicy,
+    type ProviderPercentileCutoffs,
+    type ProviderSortPolicy,
+    type ProviderRoutingPolicy,
+    type ToolChoice,
+    type ModelToolDescriptor,
+    type ProviderPluginDescriptor,
+    type ModelRequest,
+    type FinishReason,
+    type ModelUsage,
+    type ModelIdentifiers,
+    type ModelTiming,
+    type ProviderAnnotation,
+    type ModelCallResult,
+    type ModelGateway,
+    // Runtime values
+    toNonEmptyModels,
+    GatewayError,
+    CapabilityPreflightError,
+    ProviderCallError,
+    LegacyLLMProviderGateway,
+    type LegacyLLMProviderGatewayOptions,
+    isModelGateway,
+    isLLMProvider,
+    resolveToModelGateway,
+    gatewayAsLLMProvider,
+} from './gateway';
+
+// OpenRouter v1 model gateway (R3)
+export {
+    OpenRouterModelGateway,
+    type OpenRouterGatewayOptions,
+    type OpenRouterV1Client,
+    type PublicRequestOptions,
+    CapabilityResolver,
+    type PreflightResult,
+    mapRoutingPolicy,
+    type OpenRouterProviderPreferences,
+    normalizeMessages,
+    type ORRequestMessage,
+    createOpenRouterModelGateway,
+    createOpenRouterLLMProvider,
+} from './providers/openrouter';
+
 // Model Registry
 export {
     // Types
@@ -280,6 +346,144 @@ export {
     extractProvider,
     toModelInfo,
     // Default models
+    DEFAULT_WORKFLOW_MODEL,
     DEFAULT_MODELS,
     registerDefaultModels,
 } from './models';
+
+// Structured value runtime (R4)
+export {
+    type StructuredOutputSpec,
+    type StructuredRepairPolicy,
+    type SchemaRef,
+    type StructuredValidationIssue,
+    type StructuredValidationResult,
+    type RegisteredSchema,
+    type RepairRegenerator,
+    stableStringify,
+    projectValueToString,
+    SchemaRegistry,
+    schemaRegistry,
+    schemaKey,
+    parseJsonCandidate,
+    validateStructuredValue,
+    parseAndValidate,
+    parseValidateRepair,
+    StructuredValidationError,
+    specFromJsonSchema,
+    registerAndSpec,
+} from './schema';
+
+// Typed tools and policy (R5)
+export {
+    type ToolAuthority,
+    type ToolSideEffect,
+    type ToolApproval,
+    type ToolDescriptor,
+    type ToolExecutionContext,
+    type WorkflowTool,
+    type ToolExecutionPolicy,
+    type ToolCallDisposition,
+    type ToolCallPlan,
+    type ToolBatchPlan,
+    type ToolReceipt,
+    type ToolIntent,
+    type ToolReconciler,
+    type ToolReconciliationDecision,
+    type ToolCallOutcome,
+    type ToolCallInput,
+    type LegacyAdapterOptions,
+    type ToolReceiptStore,
+    type ToolApprovalGate,
+    type ToolBatchCall,
+    type ExecuteToolBatchOptions,
+    DEFAULT_TOOL_POLICY,
+    decideDisposition,
+    planToolBatch,
+    adaptExecutableTool,
+    adaptRegisteredTool,
+    providerServerTool,
+    toModelToolDescriptor,
+    WorkflowToolRegistry,
+    executeToolBatch,
+    ToolReconciliationRequiredError,
+    isToolReconciliationRequiredError,
+} from './tools';
+
+// Durable run journal (R7)
+export {
+    RUN_SCHEMA_VERSION,
+    ConcurrentRunWriterError,
+    type RunStatus,
+    type PersistedRunEvent,
+    type RunSnapshot,
+    type ReconciliationState,
+    type RunRecord,
+    type RunStore,
+    InMemoryRunStore,
+    CheckpointRunStoreAdapter,
+    createRunId,
+    planRetryNode,
+    forkRun,
+    type RetryNodePlan,
+    buildWaveSnapshot,
+    persistWaveBoundary,
+    snapshotToResumeFrom,
+    loadResumeSnapshot,
+    type WaveBoundaryState,
+} from './runstore';
+
+// Observability and evaluations (R8)
+export {
+    type WorkflowEventV2,
+    type WorkflowEventV2Type,
+    type WorkflowEventEnvelope,
+    type WorkflowEventV2Handler,
+    RunSequencer,
+    projectToLegacyEvent,
+    redactEnvelope,
+    isSafeForExport,
+    type RedactionOptions,
+    OtelWorkflowAdapter,
+    type OtelAdapterOptions,
+    type TracerLike,
+    type SpanLike,
+    type MeterLike,
+    type CounterLike,
+    runEvaluationSuite,
+    summarizeEvaluation,
+    compareCandidates,
+    type EvaluationCase,
+    type EvaluationAssertion,
+    type EvaluationRunOutput,
+    type EvaluationRunner,
+    type EvaluationResult,
+    type AssertionResult,
+    type EvaluationReport,
+    type RunHarnessOptions,
+    type CandidateComparison,
+    type EvaluationArtifact,
+    type EvaluationArtifactStore,
+    InMemoryEvaluationArtifactStore,
+} from './observability';
+
+// Agent-loop backends (R6) — native only; optional OpenRouter Agent backend
+// lives at the `or3-workflow-core/openrouter-agent` subpath.
+export {
+    type AgentLoopBackend,
+    type AgentLoopInput,
+    type AgentLoopResult,
+    type AgentToolInvocation,
+    type AgentToolExecutor,
+    NativeAgentLoopBackend,
+    nativeAgentLoopBackend,
+    aggregateUsage,
+} from './agent';
+
+// Supervisor pattern (R9)
+export {
+    createSupervisorTemplate,
+    type SupervisorConfig,
+    type SupervisorWorker,
+    type SupervisorBudget,
+} from './supervisor';

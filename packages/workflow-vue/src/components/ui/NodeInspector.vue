@@ -12,12 +12,16 @@ import {
     registerDefaultModels,
     migrateOutputNodeData,
     type OutputNodeData,
+    type AgentNodeData,
+    DEFAULT_WORKFLOW_MODEL,
 } from 'or3-workflow-core';
 import OutputModeSelector from './output/OutputModeSelector.vue';
 import OutputSourcePicker from './output/OutputSourcePicker.vue';
 import OutputPreview from './output/OutputPreview.vue';
 import { useOutputPreview } from '../../composables/useOutputPreview';
 import { useUpstreamResolver } from '../../composables/useUpstreamResolver';
+
+type NodeModelRequestV1 = NonNullable<AgentNodeData['modelRequest']>;
 
 // Type guard for configurable node data
 interface ConfigurableNodeData {
@@ -28,6 +32,7 @@ interface ConfigurableNodeData {
     tools?: string[];
     temperature?: number;
     maxTokens?: number;
+    modelRequest?: NodeModelRequestV1;
 }
 
 function isConfigurableData(data: unknown): data is ConfigurableNodeData {
@@ -224,6 +229,64 @@ const nodeData = computed<ConfigurableNodeData>(() => {
     const data = selectedNode.value?.data;
     return isConfigurableData(data) ? data : { label: 'Unknown' };
 });
+
+const modelRequest = computed<NodeModelRequestV1 | undefined>(
+    () => nodeData.value.modelRequest
+);
+const primaryModel = computed(
+    () =>
+        modelRequest.value?.models?.[0] ||
+        nodeData.value.model ||
+        DEFAULT_WORKFLOW_MODEL
+);
+const fallbackModelsText = computed(() =>
+    (modelRequest.value?.models ?? []).slice(1).join('\n')
+);
+const serverToolChoices = [
+    'openrouter:web_search',
+    'openrouter:web_fetch',
+    'openrouter:datetime',
+    'openrouter:image_generation',
+] as const;
+
+const updateModernModelRequest = (
+    patch: Partial<NodeModelRequestV1>
+) => {
+    if (!selectedNode.value) return;
+    const current = modelRequest.value ?? {
+        version: 1 as const,
+        models: [primaryModel.value] as [string, ...string[]],
+    };
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        modelRequest: { ...current, ...patch },
+    });
+};
+
+const updateFallbackModels = (event: Event) => {
+    const fallbacks = (event.target as HTMLTextAreaElement).value
+        .split(/[\n,]/)
+        .map((model) => model.trim())
+        .filter(
+            (model, index, all) =>
+                model.length > 0 &&
+                model !== primaryModel.value &&
+                all.indexOf(model) === index
+        );
+    updateModernModelRequest({
+        models: [
+            primaryModel.value,
+            ...fallbacks,
+        ] as [string, ...string[]],
+    });
+};
+
+const toggleServerTool = (name: (typeof serverToolChoices)[number]) => {
+    const tools = [...(modelRequest.value?.serverTools ?? [])];
+    const index = tools.findIndex((tool) => tool.name === name);
+    if (index >= 0) tools.splice(index, 1);
+    else tools.push({ name, transport: 'either' });
+    updateModernModelRequest({ serverTools: tools });
+};
 
 const whileData = computed(() => {
     const data = selectedNode.value?.data as any;
@@ -582,37 +645,49 @@ const errorCodes: { id: ErrorCode; label: string }[] = [
     { id: 'VALIDATION', label: 'Validation' },
 ];
 
-// Update handlers with debounce
-let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
-const debouncedUpdate = (field: string, value: unknown) => {
+// Write through immediately so controlled :value bindings stay in sync with
+// keystrokes. Debouncing here left the DOM ahead of editor state; any editor
+// `update` re-render then snapped inputs back to the stale value.
+const updateNodeField = (field: string, value: unknown) => {
     if (!selectedNode.value) return;
-    if (debounceTimeout) clearTimeout(debounceTimeout);
-    debounceTimeout = setTimeout(() => {
-        props.editor.commands.updateNodeData(selectedNode.value!.id, {
-            [field]: value,
-        });
-    }, 200);
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        [field]: value,
+    });
 };
 
 const updateLabel = (event: Event) => {
-    debouncedUpdate('label', (event.target as HTMLInputElement).value);
+    updateNodeField('label', (event.target as HTMLInputElement).value);
 };
 
 const updateDescription = (event: Event) => {
-    debouncedUpdate('description', (event.target as HTMLTextAreaElement).value);
+    updateNodeField(
+        'description',
+        (event.target as HTMLTextAreaElement).value
+    );
 };
 
 const updateModel = (event: Event) => {
     const value = (event.target as HTMLSelectElement).value;
     props.editor.commands.updateNodeData(selectedNode.value!.id, {
         ...(isWhileNode.value ? { conditionModel: value } : { model: value }),
+        ...(!isWhileNode.value && modelRequest.value
+            ? {
+                  modelRequest: {
+                      ...modelRequest.value,
+                      models: [
+                          value,
+                          ...modelRequest.value.models.slice(1),
+                      ],
+                  },
+              }
+            : {}),
     });
 };
 
 const updatePrompt = (event: Event) => {
     const value = (event.target as HTMLTextAreaElement).value;
     const field = isWhileNode.value ? 'conditionPrompt' : 'prompt';
-    debouncedUpdate(field, value);
+    updateNodeField(field, value);
 };
 
 // Toggle tool selection
@@ -673,18 +748,18 @@ const onRetryNumberChange = (
 
 const updateMaxIterations = (event: Event) => {
     const value = Number((event.target as HTMLInputElement).value);
-    debouncedUpdate('maxIterations', Number.isFinite(value) ? value : 1);
+    updateNodeField('maxIterations', Number.isFinite(value) ? value : 1);
 };
 
 const updateOnMaxBehavior = (event: Event) => {
-    debouncedUpdate(
+    updateNodeField(
         'onMaxIterations',
         (event.target as HTMLSelectElement).value
     );
 };
 
 const updateCustomEvaluator = (event: Event) => {
-    debouncedUpdate(
+    updateNodeField(
         'customEvaluator',
         (event.target as HTMLInputElement).value
     );
@@ -692,7 +767,7 @@ const updateCustomEvaluator = (event: Event) => {
 
 // Loop mode handlers
 const updateLoopMode = (event: Event) => {
-    debouncedUpdate('loopMode', (event.target as HTMLSelectElement).value);
+    updateNodeField('loopMode', (event.target as HTMLSelectElement).value);
 };
 
 const setLoopOutputMode = (mode: 'last' | 'accumulate') => {
@@ -719,7 +794,7 @@ const toggleIncludeIterationContext = () => {
 };
 
 const updateLoopPrompt = (event: Event) => {
-    debouncedUpdate('loopPrompt', (event.target as HTMLTextAreaElement).value);
+    updateNodeField('loopPrompt', (event.target as HTMLTextAreaElement).value);
 };
 
 // HITL update handlers
@@ -744,11 +819,7 @@ const updateHITLMode = (mode: HITLMode) => {
 
 const updateHITLPrompt = (event: Event) => {
     if (!selectedNode.value) return;
-    const value = (event.target as HTMLTextAreaElement).value;
-    if (debounceTimeout) clearTimeout(debounceTimeout);
-    debounceTimeout = setTimeout(() => {
-        updateHITL({ prompt: value });
-    }, 200);
+    updateHITL({ prompt: (event.target as HTMLTextAreaElement).value });
 };
 
 const updateHITLTimeout = (event: Event) => {
@@ -766,7 +837,7 @@ const updateHITLDefaultAction = (event: Event) => {
 
 // Subflow update handlers
 const setSubflowId = (value: string) => {
-    debouncedUpdate('subflowId', value);
+    updateNodeField('subflowId', value);
 };
 
 const updateSubflowIdInput = (event: Event) => {
@@ -1438,8 +1509,8 @@ Example: "Improve this text, making it clearer and more engaging."'
                     class="model-select"
                     :value="
                         isWhileNode
-                            ? whileData.conditionModel || 'z-ai/glm-4.6:exacto'
-                            : nodeData.model || 'z-ai/glm-4.6:exacto'
+                            ? whileData.conditionModel || DEFAULT_WORKFLOW_MODEL
+                            : primaryModel
                     "
                     @change="updateModel"
                 >
@@ -1457,11 +1528,88 @@ Example: "Improve this text, making it clearer and more engaging."'
                         {{
                             isWhileNode
                                 ? whileData.conditionModel ||
-                                  'z-ai/glm-4.6:exacto'
-                                : nodeData.model || 'z-ai/glm-4.6:exacto'
+                                  DEFAULT_WORKFLOW_MODEL
+                                : primaryModel
                         }}
                     </code>
                 </div>
+                <template v-if="!isWhileNode">
+                    <label class="field-label">Fallback models</label>
+                    <textarea
+                        class="textarea-input"
+                        rows="3"
+                        :value="fallbackModelsText"
+                        placeholder="One model ID per line, in priority order"
+                        @change="updateFallbackModels"
+                    ></textarea>
+                    <label class="checkbox-label">
+                        <input
+                            type="checkbox"
+                            :checked="
+                                modelRequest?.routing
+                                    ?.requireParameters ?? false
+                            "
+                            @change="
+                                updateModernModelRequest({
+                                    routing: {
+                                        ...(modelRequest?.routing ?? {}),
+                                        requireParameters: (
+                                            $event.target as HTMLInputElement
+                                        ).checked,
+                                    },
+                                })
+                            "
+                        />
+                        Require provider parameter support
+                    </label>
+                    <template v-if="isAgentNode">
+                        <label class="field-label">Agent loop backend</label>
+                        <select
+                            class="model-select"
+                            :value="
+                                modelRequest?.backend ?? 'native'
+                            "
+                            @change="
+                                updateModernModelRequest({
+                                    backend: (
+                                        $event.target as HTMLSelectElement
+                                    ).value,
+                                    transport:
+                                        (
+                                            $event.target as HTMLSelectElement
+                                        ).value === 'openrouter-agent'
+                                            ? 'responses'
+                                            : 'chat',
+                                })
+                            "
+                        >
+                            <option value="native">
+                                OR3 native (Chat)
+                            </option>
+                            <option value="openrouter-agent">
+                                @openrouter/agent (Responses)
+                            </option>
+                        </select>
+                        <label class="field-label">OpenRouter server tools</label>
+                        <label
+                            v-for="tool in serverToolChoices"
+                            :key="tool"
+                            class="checkbox-label"
+                        >
+                            <input
+                                type="checkbox"
+                                :checked="
+                                    modelRequest?.serverTools?.some(
+                                        (selected) =>
+                                            selected.name === tool
+                                    ) ?? false
+                                "
+                                @change="toggleServerTool(tool)"
+                            />
+                            {{ tool }}
+                        </label>
+                    </template>
+                </template>
             </div>
 
             <!-- Routes Tab -->
@@ -1726,7 +1874,7 @@ Example: "Improve this text, making it clearer and more engaging."'
                                 class="model-select"
                                 :value="
                                     parallelData.mergeModel ||
-                                    'z-ai/glm-4.6:exacto'
+                                    DEFAULT_WORKFLOW_MODEL
                                 "
                                 @change="(e) => props.editor.commands.updateNodeData(selectedNode!.id, { model: (e.target as HTMLSelectElement).value })"
                             >
@@ -1744,7 +1892,7 @@ Example: "Improve this text, making it clearer and more engaging."'
                             <textarea
                                 class="prompt-textarea"
                                 :value="parallelData.mergePrompt"
-                                @input="(e) => debouncedUpdate('prompt', (e.target as HTMLTextAreaElement).value)"
+                                @input="(e) => updateNodeField('prompt', (e.target as HTMLTextAreaElement).value)"
                                 placeholder="Instructions for merging branch outputs..."
                                 rows="4"
                             ></textarea>
@@ -2181,7 +2329,7 @@ Example: "Improve this text, making it clearer and more engaging."'
                             class="model-select"
                             :value="
                                 outputData.synthesis?.model ||
-                                'z-ai/glm-4.6:exacto'
+                                DEFAULT_WORKFLOW_MODEL
                             "
                             @change="updateSynthesisModel"
                         >

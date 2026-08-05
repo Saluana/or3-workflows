@@ -131,6 +131,7 @@ export interface StarterKitOptions {
      * @default true
      */
     output?: boolean;
+
 }
 
 // ============================================================================
@@ -264,6 +265,7 @@ export const StarterKit = {
         if (opts.output !== false) {
             extensions.push(OutputNodeExtension);
         }
+
 
         return extensions;
     },
