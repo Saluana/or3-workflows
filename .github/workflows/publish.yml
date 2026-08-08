@@ -69,6 +69,36 @@ jobs:
         if: steps.package.outputs.directory == 'packages/workflow-core'
         working-directory: packages/workflow-core
         run: bun run test
-      - name: Publish
+      - name: Validate package archive
         working-directory: ${{ steps.package.outputs.directory }}
-        run: npm publish --access public
+        run: npm pack --dry-run --json > "$RUNNER_TEMP/package-pack.json"
+      - name: Reject an already published tag version
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: ${{ steps.package.outputs.directory }}
+        run: |
+          set -euo pipefail
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          output="$(npm view "$name@$version" version 2>&1)" || status=$?
+          if [[ "${status:-0}" -eq 0 ]]; then
+            echo "$name@$version already exists; choose a new version." >&2
+            exit 1
+          fi
+          grep -Eq 'E404|404 Not Found|not found' <<<"$output" || { echo "$output" >&2; exit "${status}"; }
+      - name: Publish immutable package
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: ${{ steps.package.outputs.directory }}
+        run: npm publish --access public --provenance
+      - name: Verify exact npm propagation
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: ${{ steps.package.outputs.directory }}
+        run: |
+          set -euo pipefail
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          for attempt in {1..8}; do
+            if [[ "$(npm view "$name@$version" version 2>/dev/null || true)" == "$version" ]]; then exit 0; fi
+            sleep 5
+          done
+          echo "Timed out waiting for $name@$version to become visible on npm." >&2
+          exit 1
