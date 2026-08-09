@@ -76,9 +76,20 @@ The main canvas component for displaying and editing workflows.
 ```vue
 <WorkflowCanvas
     :editor="editor"
+    :node-issues="issuesByNodeId"
     @node-click="handleNodeClick"
     @edge-click="handleEdgeClick"
 />
+```
+
+The canvas pans when empty space is dragged and moves nodes directly, without an application-level mode switch. Dragging an output connection onto empty canvas opens a compact picker that creates and connects an Agent, Decision, or Output node. Double-clicking empty canvas opens the same picker without a connection.
+
+`nodeIssues` accepts validation messages keyed by node ID. The first issue is rendered as an actionable node indicator:
+
+```ts
+const issuesByNodeId = {
+    agent: [{ type: 'warning', message: 'Assistant needs a system prompt' }],
+};
 ```
 
 ### NodePalette
@@ -99,10 +110,14 @@ Property inspector for the selected node.
 
 ### ValidationOverlay
 
-Displays validation errors on the canvas.
+Displays automatically updating validation errors and warnings on the canvas. Node issues use labels instead of technical IDs, and `open-node` is emitted when an actionable issue is selected.
 
 ```vue
-<ValidationOverlay :editor="editor" />
+<ValidationOverlay
+    :editor="editor"
+    :expanded="true"
+    @open-node="openInspectorForNode"
+/>
 ```
 
 ## Composables

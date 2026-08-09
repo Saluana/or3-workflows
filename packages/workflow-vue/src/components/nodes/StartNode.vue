@@ -11,7 +11,11 @@ const props = defineProps<{
   selected?: boolean;
 }>();
 
-const label = computed(() => props.data.label || 'Start');
+const label = computed(() =>
+  props.data.label && props.data.label !== 'Start'
+    ? props.data.label
+    : 'Start trigger'
+);
 const status = computed(() => props.data.status || 'idle');
 </script>
 
@@ -26,7 +30,7 @@ const status = computed(() => props.data.status || 'idle');
       </svg>
       <span>{{ label }}</span>
     </div>
-    <Handle type="source" :position="Position.Bottom" class="handle" />
+    <Handle type="source" :position="Position.Bottom" class="handle" title="Output" aria-label="Output connection" />
   </div>
 </template>
 
@@ -35,10 +39,10 @@ const status = computed(() => props.data.status || 'idle');
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, var(--or3-color-success, #22c55e), #16a34a);
-  border: 1px solid transparent;
-  border-radius: var(--or3-radius-full, 9999px);
-  padding: var(--or3-spacing-sm, 8px) var(--or3-spacing-lg, 24px);
+  background: color-mix(in srgb, var(--or3-color-success, #22c55e) 9%, var(--or3-color-bg-elevated, #22222e));
+  border: 1px solid color-mix(in srgb, var(--or3-color-success, #22c55e) 55%, transparent);
+  border-radius: var(--or3-radius-lg, 16px);
+  padding: 10px 18px;
   box-shadow: var(--or3-shadow-md, 0 4px 12px rgba(0, 0, 0, 0.4));
   transition: all 0.25s ease;
   min-width: 100px;
@@ -48,7 +52,7 @@ const status = computed(() => props.data.status || 'idle');
   display: flex;
   align-items: center;
   gap: var(--or3-spacing-sm, 8px);
-  color: white;
+  color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
   font-weight: 600;
   font-size: 13px;
 }
@@ -60,7 +64,8 @@ const status = computed(() => props.data.status || 'idle');
 
 .start-node:hover {
   transform: translateY(-1px);
-  box-shadow: 0 0 20px rgba(34, 197, 94, 0.4);
+  border-color: var(--or3-color-success, #22c55e);
+  box-shadow: var(--or3-shadow-md, 0 4px 12px rgba(0, 0, 0, 0.4));
 }
 
 .status-active {
@@ -72,7 +77,8 @@ const status = computed(() => props.data.status || 'idle');
 }
 
 .selected {
-  box-shadow: 0 0 0 2px var(--or3-color-accent, #8b5cf6), var(--or3-shadow-md, 0 4px 12px rgba(0, 0, 0, 0.4));
+  border-color: var(--or3-color-accent, #8b5cf6);
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.18), var(--or3-shadow-md, 0 4px 12px rgba(0, 0, 0, 0.4));
 }
 
 .handle {

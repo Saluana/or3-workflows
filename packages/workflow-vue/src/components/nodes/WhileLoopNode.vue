@@ -13,23 +13,28 @@ const props = defineProps<{
         status?: 'idle' | 'active' | 'completed' | 'error';
         loopMode?: 'condition' | 'fixed';
         outputMode?: 'last' | 'accumulate';
+        validationIssues?: Array<{
+            type: 'error' | 'warning';
+            message: string;
+        }>;
     };
     selected?: boolean;
 }>();
 
 const label = computed(() => props.data.label || 'While Loop');
 const status = computed(() => props.data.status || 'idle');
+const issue = computed(() => props.data.validationIssues?.[0]);
 const maxIterations = computed(() => props.data.maxIterations ?? 10);
 const loopMode = computed(() => props.data.loopMode ?? 'condition');
 const outputMode = computed(() => props.data.outputMode ?? 'last');
 const iteration = computed(() =>
     typeof (props.data as any).iteration === 'number'
         ? (props.data as any).iteration
-        : null
+        : null,
 );
 
 const modeLabel = computed(() =>
-    loopMode.value === 'fixed' ? 'Fixed' : 'While'
+    loopMode.value === 'fixed' ? 'Fixed' : 'While',
 );
 const emit = defineEmits<{
     (e: 'inspect'): void;
@@ -37,8 +42,21 @@ const emit = defineEmits<{
 </script>
 
 <template>
-    <NodeWrapper :id="id" :selected="selected" :status="status" variant="info" @inspect="emit('inspect')">
-        <Handle type="target" :position="Position.Top" class="handle" />
+    <NodeWrapper
+        :id="id"
+        :selected="selected"
+        :status="status"
+        :issue="issue"
+        variant="info"
+        @inspect="emit('inspect')"
+    >
+        <Handle
+            type="target"
+            :position="Position.Top"
+            class="handle"
+            title="Input"
+            aria-label="Input connection"
+        />
 
         <div class="while-node">
             <div class="node-header">
@@ -78,6 +96,8 @@ const emit = defineEmits<{
             :position="Position.Bottom"
             id="body"
             class="handle body-handle"
+            title="Loop body"
+            aria-label="Loop body connection"
             :style="{ left: '30%' }"
         />
         <Handle
@@ -85,6 +105,8 @@ const emit = defineEmits<{
             :position="Position.Bottom"
             id="done"
             class="handle done-handle"
+            title="Exit"
+            aria-label="Exit connection"
             :style="{ left: '70%' }"
         />
     </NodeWrapper>

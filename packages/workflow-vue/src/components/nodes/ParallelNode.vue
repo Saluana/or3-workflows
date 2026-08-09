@@ -11,12 +11,17 @@ const props = defineProps<{
         status?: 'idle' | 'active' | 'completed' | 'error';
         branches?: Array<{ id: string; label: string }>;
         mergeEnabled?: boolean;
+        validationIssues?: Array<{
+            type: 'error' | 'warning';
+            message: string;
+        }>;
     };
     selected?: boolean;
 }>();
 
 const label = computed(() => props.data.label || 'Parallel');
 const status = computed(() => props.data.status || 'idle');
+const issue = computed(() => props.data.validationIssues?.[0]);
 const mergeEnabled = computed(() => props.data.mergeEnabled !== false);
 
 // No default branches - user must add them
@@ -34,8 +39,21 @@ const emit = defineEmits<{
 </script>
 
 <template>
-    <NodeWrapper :id="id" :selected="selected" :status="status" variant="info" @inspect="emit('inspect')">
-        <Handle type="target" :position="Position.Top" class="handle" />
+    <NodeWrapper
+        :id="id"
+        :selected="selected"
+        :status="status"
+        :issue="issue"
+        variant="info"
+        @inspect="emit('inspect')"
+    >
+        <Handle
+            type="target"
+            :position="Position.Top"
+            class="handle"
+            title="Input"
+            aria-label="Input connection"
+        />
 
         <div class="parallel-node">
             <div class="node-header">
@@ -61,6 +79,8 @@ const emit = defineEmits<{
                 :position="Position.Bottom"
                 id="merged"
                 class="handle merged-output"
+                title="Merged output"
+                aria-label="Merged output connection"
             />
         </template>
 
@@ -73,6 +93,8 @@ const emit = defineEmits<{
                 :position="Position.Bottom"
                 :id="branch.id"
                 class="handle branch-handle"
+                :title="branch.label || branch.id"
+                :aria-label="`${branch.label || branch.id} connection`"
                 :style="{ left: `${handlePositions[index]}%` }"
             />
         </template>

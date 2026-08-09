@@ -10,6 +10,11 @@ import {
 
 const props = defineProps<{
     editor: WorkflowEditor;
+    expanded?: boolean;
+}>();
+
+const emit = defineEmits<{
+    (event: 'open-node', nodeId: string): void;
 }>();
 
 const validation = ref<ValidationResult>({
@@ -18,7 +23,7 @@ const validation = ref<ValidationResult>({
     warnings: [],
 });
 const lastRunAt = ref<number | null>(null);
-const isCollapsed = ref(true);
+const isCollapsed = ref(!props.expanded);
 
 let unsubUpdate: (() => void) | null = null;
 let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -26,7 +31,7 @@ let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
 const runValidation = () => {
     validation.value = validateWorkflow(
         [...props.editor.getNodes()],
-        [...props.editor.getEdges()]
+        [...props.editor.getEdges()],
     );
     lastRunAt.value = Date.now();
 };
@@ -51,9 +56,26 @@ const issues = computed<(ValidationError | ValidationWarning)[]>(() => [
     ...validation.value.warnings,
 ]);
 const isClean = computed(() => issues.value.length === 0);
-const lastRunLabel = computed(() =>
-    lastRunAt.value ? new Date(lastRunAt.value).toLocaleTimeString() : ''
-);
+const lastRunLabel = computed(() => (lastRunAt.value ? 'Just now' : ''));
+
+function nodeLabel(nodeId: string) {
+    const node = props.editor.getNodes().find((item) => item.id === nodeId);
+    return typeof node?.data?.label === 'string' && node.data.label.trim()
+        ? node.data.label.trim()
+        : 'Node';
+}
+
+function issueMessage(issue: ValidationError | ValidationWarning) {
+    if (!issue.nodeId) return issue.message;
+    const label = nodeLabel(issue.nodeId);
+    if (issue.code === 'EMPTY_PROMPT') return `${label} needs a system prompt`;
+    return `${label}: ${issue.message.replace(/^\w+ node\s*/i, '')}`;
+}
+
+function openNode(nodeId: string) {
+    props.editor.commands.selectNode(nodeId);
+    emit('open-node', nodeId);
+}
 </script>
 
 <template>
@@ -128,7 +150,7 @@ const lastRunLabel = computed(() =>
                     </span>
                     <span v-if="isClean" class="count ok">All clear</span>
                     <span v-if="lastRunLabel" class="timestamp">
-                        Updated {{ lastRunLabel }}
+                        {{ lastRunLabel }}
                     </span>
                 </div>
 
@@ -147,12 +169,17 @@ const lastRunLabel = computed(() =>
                             {{ issue.type === 'error' ? 'Error' : 'Warning' }}
                         </span>
                         <div class="details">
-                            <div class="message">{{ issue.message }}</div>
-                            <div class="meta" v-if="issue.nodeId">
-                                Node: {{ issue.nodeId }}
-                            </div>
+                            <div class="message">{{ issueMessage(issue) }}</div>
+                            <button
+                                v-if="issue.nodeId"
+                                type="button"
+                                class="open-node"
+                                @click="openNode(issue.nodeId)"
+                            >
+                                Open node
+                            </button>
                             <div class="meta" v-else-if="issue.edgeId">
-                                Edge: {{ issue.edgeId }}
+                                Connection issue
                             </div>
                         </div>
                     </div>
@@ -227,8 +254,12 @@ const lastRunLabel = computed(() =>
 }
 
 .header-count.warning {
-    color: #facc15;
-    border-color: rgba(250, 204, 21, 0.3);
+    color: var(--or3-color-warning, #d97706);
+    border-color: color-mix(
+        in srgb,
+        var(--or3-color-warning, #d97706) 35%,
+        transparent
+    );
 }
 
 .header-count.ok {
@@ -274,8 +305,8 @@ const lastRunLabel = computed(() =>
 }
 
 .status-dot.warn {
-    background: #fbbf24;
-    box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.12);
+    background: var(--or3-color-warning, #d97706);
+    box-shadow: 0 0 0 4px var(--or3-color-warning-muted, rgba(217, 119, 6, 0.12));
 }
 
 .refresh {
@@ -292,6 +323,24 @@ const lastRunLabel = computed(() =>
 .refresh:hover {
     border-color: var(--or3-color-accent, #8b5cf6);
     color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
+}
+
+.open-node {
+    width: fit-content;
+    margin-top: 7px;
+    padding: 4px 8px;
+    color: var(--or3-color-accent, #8b5cf6);
+    background: var(--or3-color-accent-muted, rgba(139, 92, 246, 0.12));
+    border: 1px solid
+        color-mix(in srgb, var(--or3-color-accent, #8b5cf6) 30%, transparent);
+    border-radius: var(--or3-radius-sm, 6px);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 650;
+}
+
+.open-node:hover {
+    border-color: var(--or3-color-accent, #8b5cf6);
 }
 
 .summary {
@@ -316,8 +365,12 @@ const lastRunLabel = computed(() =>
 }
 
 .count.warning {
-    color: #facc15;
-    border-color: rgba(250, 204, 21, 0.3);
+    color: var(--or3-color-warning, #d97706);
+    border-color: color-mix(
+        in srgb,
+        var(--or3-color-warning, #d97706) 35%,
+        transparent
+    );
 }
 
 .count.ok {
@@ -351,7 +404,11 @@ const lastRunLabel = computed(() =>
 }
 
 .issue.warning {
-    border-color: rgba(250, 204, 21, 0.25);
+    border-color: color-mix(
+        in srgb,
+        var(--or3-color-warning, #d97706) 30%,
+        transparent
+    );
 }
 
 .badge {
@@ -360,11 +417,12 @@ const lastRunLabel = computed(() =>
     border-radius: 999px;
     font-size: 11px;
     font-weight: 600;
-    color: #0a0a0f;
-    background: #facc15;
+    color: var(--or3-color-bg-primary, #ffffff);
+    background: var(--or3-color-warning, #d97706);
 }
 
 .issue.error .badge {
+    color: #0a0a0f;
     background: #ff8a8a;
 }
 

@@ -12,6 +12,10 @@ const props = defineProps<{
         template?: string;
         includeMetadata?: boolean;
         status?: 'idle' | 'active' | 'completed' | 'error';
+        validationIssues?: Array<{
+            type: 'error' | 'warning';
+            message: string;
+        }>;
     };
     selected?: boolean;
 }>();
@@ -21,16 +25,17 @@ const format = computed(() => props.data.format || 'text');
 const hasTemplate = computed(() => !!props.data.template);
 const includeMetadata = computed(() => props.data.includeMetadata ?? false);
 const status = computed(() => props.data.status || 'idle');
+const issue = computed(() => props.data.validationIssues?.[0]);
 
 const formatLabel = computed(() => {
     switch (format.value) {
         case 'json':
             return 'JSON';
         case 'markdown':
-            return 'MD';
+            return 'Markdown';
         case 'text':
         default:
-            return 'TXT';
+            return 'Text';
     }
 });
 const emit = defineEmits<{
@@ -43,10 +48,17 @@ const emit = defineEmits<{
         :id="id"
         :selected="selected"
         :status="status"
+        :issue="issue"
         variant="info"
         @inspect="emit('inspect')"
     >
-        <Handle type="target" :position="Position.Top" class="handle" />
+        <Handle
+            type="target"
+            :position="Position.Top"
+            class="handle"
+            title="Input"
+            aria-label="Input connection"
+        />
 
         <div class="output-node">
             <div class="node-header">

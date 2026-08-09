@@ -16,6 +16,10 @@ const props = defineProps<{
             backend?: string;
         };
         status?: 'idle' | 'active' | 'completed' | 'error';
+        validationIssues?: Array<{
+            type: 'error' | 'warning';
+            message: string;
+        }>;
     };
     selected?: boolean;
 }>();
@@ -25,12 +29,13 @@ const model = computed(
     () =>
         props.data.modelRequest?.models?.[0] ||
         props.data.model ||
-        DEFAULT_WORKFLOW_MODEL
+        DEFAULT_WORKFLOW_MODEL,
 );
-const fallbackCount = computed(
-    () => Math.max(0, (props.data.modelRequest?.models?.length ?? 1) - 1)
+const fallbackCount = computed(() =>
+    Math.max(0, (props.data.modelRequest?.models?.length ?? 1) - 1),
 );
 const status = computed(() => props.data.status || 'idle');
+const issue = computed(() => props.data.validationIssues?.[0]);
 
 const modelShort = computed(() => {
     const parts = model.value.split('/');
@@ -46,10 +51,17 @@ const emit = defineEmits<{
         :id="id"
         :selected="selected"
         :status="status"
+        :issue="issue"
         variant="accent"
         @inspect="emit('inspect')"
     >
-        <Handle type="target" :position="Position.Top" class="handle" />
+        <Handle
+            type="target"
+            :position="Position.Top"
+            class="handle"
+            title="Input"
+            aria-label="Input connection"
+        />
 
         <div class="agent-node">
             <div class="node-header">
@@ -63,7 +75,9 @@ const emit = defineEmits<{
             <div class="model-badge">
                 <span class="model-name">{{ modelShort }}</span>
                 <span v-if="fallbackCount" class="model-name">
-                    +{{ fallbackCount }} fallback{{ fallbackCount === 1 ? '' : 's' }}
+                    +{{ fallbackCount }} fallback{{
+                        fallbackCount === 1 ? '' : 's'
+                    }}
                 </span>
                 <span
                     v-if="props.data.modelRequest?.backend"
@@ -74,12 +88,20 @@ const emit = defineEmits<{
             </div>
         </div>
 
-        <Handle type="source" :position="Position.Bottom" class="handle" />
+        <Handle
+            type="source"
+            :position="Position.Bottom"
+            class="handle"
+            title="Output"
+            aria-label="Output connection"
+        />
         <Handle
             type="source"
             :position="Position.Right"
             id="error"
             class="handle error-handle"
+            title="Error"
+            aria-label="Error connection"
         />
     </NodeWrapper>
 </template>

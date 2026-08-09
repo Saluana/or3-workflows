@@ -10,12 +10,14 @@ const props = defineProps<{
     label: string;
     status?: 'idle' | 'active' | 'completed' | 'error';
     routes?: Array<{ id: string; label: string }>;
+    validationIssues?: Array<{ type: 'error' | 'warning'; message: string }>;
   };
   selected?: boolean;
 }>();
 
 const label = computed(() => props.data.label || 'Router');
 const status = computed(() => props.data.status || 'idle');
+const issue = computed(() => props.data.validationIssues?.[0]);
 
 const DEFAULT_ROUTES = [
   { id: 'route-1', label: 'Route 1' },
@@ -38,8 +40,8 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <NodeWrapper :id="id" :selected="selected" :status="status" variant="warning" @inspect="emit('inspect')">
-    <Handle type="target" :position="Position.Top" class="handle" />
+  <NodeWrapper :id="id" :selected="selected" :status="status" :issue="issue" variant="warning" @inspect="emit('inspect')">
+    <Handle type="target" :position="Position.Top" class="handle" title="Input" aria-label="Input connection" />
     
     <div class="router-node">
       <div class="node-header">
@@ -65,6 +67,7 @@ const emit = defineEmits<{
       class="handle route-handle"
       :data-route-label="route.label || route.id"
       :title="route.label || route.id"
+      :aria-label="`${route.label || route.id} connection`"
       :style="{ left: `${handlePositions[index]}%` }"
     />
     <Handle
@@ -72,6 +75,8 @@ const emit = defineEmits<{
       :position="Position.Right"
       id="error"
       class="handle error-handle"
+      title="Error"
+      aria-label="Error connection"
     />
   </NodeWrapper>
 </template>

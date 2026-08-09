@@ -8,6 +8,7 @@ import {
     Connection,
     NodeMouseEvent,
     EdgeMouseEvent,
+    MarkerType,
     type SelectionMode,
     type GraphNode,
     type GraphEdge,
@@ -15,7 +16,7 @@ import {
 import type { KeyFilter } from '@vueuse/core';
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
-import { WorkflowEditor } from 'or3-workflow-core';
+import { DEFAULT_WORKFLOW_MODEL, WorkflowEditor } from 'or3-workflow-core';
 import StartNode from './nodes/StartNode.vue';
 import AgentNode from './nodes/AgentNode.vue';
 import RouterNode from './nodes/RouterNode.vue';
@@ -24,14 +25,23 @@ import WhileLoopNode from './nodes/WhileLoopNode.vue';
 import SubflowNode from './nodes/SubflowNode.vue';
 import OutputNode from './nodes/OutputNode.vue';
 
-const props = defineProps<{
-    editor: WorkflowEditor;
-    nodeStatuses?: Record<string, 'idle' | 'active' | 'completed' | 'error'>;
-    panOnDrag?: boolean | number[];
-    selectionKeyCode?: KeyFilter | boolean | null;
-    selectionMode?: SelectionMode;
-    canvasId?: string;
-}>();
+const props = withDefaults(
+    defineProps<{
+        editor: WorkflowEditor;
+        nodeStatuses?: Record<string, 'idle' | 'active' | 'completed' | 'error'>;
+        panOnDrag?: boolean | number[];
+        selectionKeyCode?: KeyFilter | boolean | null;
+        selectionMode?: SelectionMode;
+        canvasId?: string;
+        nodeIssues?: Record<
+            string,
+            Array<{ type: 'error' | 'warning'; message: string }>
+        >;
+    }>(),
+    {
+        panOnDrag: true,
+    },
+);
 
 type CreateNodeData = Parameters<WorkflowEditor['commands']['createNode']>[1];
 
@@ -67,6 +77,8 @@ const {
     panOnDrag: panOnDragState,
     selectionKeyCode: selectionKeyCodeState,
     selectionMode: selectionModeState,
+    onConnectStart,
+    onConnectEnd,
 } = useVueFlow();
 
 const initialPanOnDrag = panOnDragState.value;
@@ -78,7 +90,7 @@ watch(
     (value) => {
         panOnDragState.value = value ?? initialPanOnDrag;
     },
-    { immediate: true }
+    { immediate: true },
 );
 
 watch(
@@ -86,7 +98,7 @@ watch(
     (value) => {
         selectionKeyCodeState.value = value ?? initialSelectionKeyCode;
     },
-    { immediate: true }
+    { immediate: true },
 );
 
 watch(
@@ -94,7 +106,7 @@ watch(
     (value) => {
         selectionModeState.value = value ?? initialSelectionMode;
     },
-    { immediate: true }
+    { immediate: true },
 );
 
 const nodes = ref<Node[]>([]);
@@ -114,7 +126,10 @@ let lastGlobalVersion = -1;
  */
 const getNodeFingerprint = (nodeId: string, status: string): string => {
     const version = props.editor.getNodeVersion(nodeId);
-    return `${version}:${status}`;
+    const issueSignature = (props.nodeIssues?.[nodeId] ?? [])
+        .map((issue) => `${issue.type}:${issue.message}`)
+        .join('|');
+    return `${version}:${status}:${issueSignature}`;
 };
 
 /**
@@ -139,7 +154,11 @@ const syncFromEditor = () => {
 
     // Quick check: if global version hasn't changed and no status changes, skip entirely
     // This is the fast path for most renders
-    if (lastGlobalVersion === currentGlobalVersion && !props.nodeStatuses) {
+    if (
+        lastGlobalVersion === currentGlobalVersion &&
+        !props.nodeStatuses &&
+        !props.nodeIssues
+    ) {
         return;
     }
 
@@ -185,6 +204,7 @@ const syncFromEditor = () => {
             data: {
                 ...n.data,
                 status: props.nodeStatuses?.[n.id] || 'idle',
+                validationIssues: props.nodeIssues?.[n.id] ?? [],
             },
             // Use editor's selection state as the source of truth
             selected: n.selected,
@@ -240,6 +260,7 @@ const syncFromEditor = () => {
             targetHandle: e.targetHandle,
             label: e.label,
             data: e.data,
+            markerEnd: MarkerType.ArrowClosed,
             animated:
                 props.nodeStatuses?.[e.source] === 'active' ||
                 props.nodeStatuses?.[e.target] === 'active',
@@ -265,7 +286,15 @@ watch(
     () => {
         syncFromEditor();
     },
-    { deep: true }
+    { deep: true },
+);
+
+watch(
+    () => props.nodeIssues,
+    () => {
+        syncFromEditor();
+    },
+    { deep: true },
 );
 
 let unsubUpdate: (() => void) | null = null;
@@ -280,35 +309,34 @@ const selectionFingerprint = computed(() =>
         .filter((n: GraphNode) => n.selected)
         .map((n) => n.id)
         .sort()
-        .join(',')
+        .join(','),
 );
 
 // Watch Vue Flow's selection state and sync it TO the editor
 // This handles box-select and other Vue Flow-initiated selection changes
-watch(
-    selectionFingerprint,
-    (newFingerprint, oldFingerprint) => {
-        if (!canUseEditor() || isSyncingSelectionFromEditor) return;
-        if (newFingerprint === oldFingerprint) return;
+watch(selectionFingerprint, (newFingerprint, oldFingerprint) => {
+    if (!canUseEditor() || isSyncingSelectionFromEditor) return;
+    if (newFingerprint === oldFingerprint) return;
 
-        const selectedIds = newFingerprint ? newFingerprint.split(',') : [];
-        
-        // Sync Vue Flow's selection state TO the editor
-        props.editor.commands.setSelection(selectedIds);
-    }
-);
+    const selectedIds = newFingerprint ? newFingerprint.split(',') : [];
+
+    // Sync Vue Flow's selection state TO the editor
+    props.editor.commands.setSelection(selectedIds);
+});
 
 onMounted(() => {
     if (!canUseEditor()) return;
     syncFromEditor();
     unsubUpdate = props.editor.on('update', syncFromEditor);
-    
+
     // When editor's selection changes, set flag before syncing to Vue Flow
     unsubSelection = props.editor.on('selectionUpdate', () => {
         isSyncingSelectionFromEditor = true;
         syncFromEditor();
         // Reset flag after Vue reactivity has settled
-        void nextTick(() => { isSyncingSelectionFromEditor = false; });
+        void nextTick(() => {
+            isSyncingSelectionFromEditor = false;
+        });
     });
 
     // Fit view after initial render
@@ -321,25 +349,160 @@ onUnmounted(() => {
 });
 
 // Handle connections
+let connectionCreated = false;
+let connectionStart: {
+    nodeId: string;
+    handleId?: string;
+} | null = null;
+const quickAdd = ref<{
+    x: number;
+    y: number;
+    flowX: number;
+    flowY: number;
+} | null>(null);
+const quickAddMenuRef = ref<HTMLElement | null>(null);
+
+const quickNodeTypes = [
+    {
+        type: 'agent',
+        label: 'Agent',
+        data: {
+            label: 'New Agent',
+            model: DEFAULT_WORKFLOW_MODEL,
+            prompt: '',
+        },
+    },
+    {
+        type: 'router',
+        label: 'Decision',
+        data: { label: 'Decision' },
+    },
+    {
+        type: 'output',
+        label: 'Output',
+        data: {
+            label: 'Output',
+            format: 'text',
+            template: '',
+            includeMetadata: false,
+        },
+    },
+];
+
+function showQuickAdd(
+    clientX: number,
+    clientY: number,
+    flowPoint: { x: number; y: number },
+) {
+    const root = getCanvasElement()?.getBoundingClientRect();
+    const localX = clientX - (root?.left ?? 0);
+    const localY = clientY - (root?.top ?? 0);
+    quickAdd.value = {
+        x: Math.max(8, Math.min(localX, (root?.width ?? localX + 190) - 190)),
+        y: Math.max(8, Math.min(localY, (root?.height ?? localY + 150) - 150)),
+        flowX: flowPoint.x,
+        flowY: flowPoint.y,
+    };
+    void nextTick(() => {
+        quickAddMenuRef.value?.querySelector<HTMLButtonElement>('button')?.focus();
+    });
+}
+
+onConnectStart(({ nodeId, handleId, handleType }) => {
+    connectionCreated = false;
+    quickAdd.value = null;
+    connectionStart =
+        nodeId && handleType === 'source'
+            ? { nodeId, handleId: handleId ?? undefined }
+            : null;
+});
+
 onConnect((params: Connection) => {
     if (!canUseEditor()) return;
+    connectionCreated = true;
     props.editor.commands.createEdge(
         params.source,
         params.target,
         params.sourceHandle ?? undefined,
-        params.targetHandle ?? undefined
+        params.targetHandle ?? undefined,
     );
 });
+
+onConnectEnd((event) => {
+    if (!event || connectionCreated || !connectionStart) {
+        connectionStart = null;
+        return;
+    }
+    const target = event.target as Element | null;
+    if (
+        !target?.closest('.vue-flow') ||
+        target.closest('.vue-flow__node, .vue-flow__controls')
+    ) {
+        connectionStart = null;
+        return;
+    }
+    const point = event instanceof TouchEvent ? event.changedTouches[0] : event;
+    if (!point) {
+        connectionStart = null;
+        return;
+    }
+    const flowPoint = screenToFlowCoordinate({
+        x: point.clientX,
+        y: point.clientY,
+    });
+    showQuickAdd(point.clientX, point.clientY, flowPoint);
+});
+
+function createConnectedNode(option: (typeof quickNodeTypes)[number]) {
+    if (!quickAdd.value || !canUseEditor()) return;
+    const existingIds = new Set(props.editor.getNodes().map((node) => node.id));
+    const created = props.editor.commands.createNode(option.type, option.data, {
+        x: quickAdd.value.flowX,
+        y: quickAdd.value.flowY,
+    });
+    const createdNode = props.editor
+        .getNodes()
+        .find((node) => !existingIds.has(node.id));
+    if (created && createdNode && connectionStart) {
+        props.editor.commands.createEdge(
+            connectionStart.nodeId,
+            createdNode.id,
+            connectionStart.handleId,
+        );
+        props.editor.commands.selectNode(createdNode.id);
+    }
+    quickAdd.value = null;
+    connectionStart = null;
+}
+
+function onCanvasDoubleClick(event: MouseEvent) {
+    const target = event.target as Element | null;
+    if (
+        !target?.closest('.vue-flow') ||
+        target.closest(
+            '.vue-flow__node, .vue-flow__edge, .vue-flow__controls, .quick-add-menu',
+        )
+    )
+        return;
+    const flowPoint = screenToFlowCoordinate({
+        x: event.clientX,
+        y: event.clientY,
+    });
+    connectionStart = null;
+    showQuickAdd(event.clientX, event.clientY, flowPoint);
+}
 
 // Handle node drag - update ALL selected nodes, not just the primary one
 onNodeDragStop(() => {
     if (!canUseEditor()) return;
-    
+
     // Use Vue Flow's nodes ref to get the actual current positions.
     // The local nodes ref synced from editor may not have the updated positions
     // from the drag operation - Vue Flow updates its internal state during drag.
-    const selectedNodes = vueFlowNodes.value.filter((n: GraphNode) => n.selected);
-    
+    const selectedNodes = vueFlowNodes.value.filter(
+        (n: GraphNode) => n.selected,
+    );
+
     for (const node of selectedNodes) {
         props.editor.commands.setNodePosition(node.id, node.position);
     }
@@ -363,6 +526,8 @@ const onEdgeClick = (event: EdgeMouseEvent) => {
 // Handle pane click (deselect)
 const onPaneClick = () => {
     if (!canUseEditor()) return;
+    quickAdd.value = null;
+    connectionStart = null;
     props.editor.commands.deselectAll();
     emit('paneClick');
 };
@@ -384,7 +549,9 @@ const onDrop = (event: DragEvent) => {
     }
 
     // Type guard for validation
-    const isValidNodeData = (data: unknown): data is { label: string } & Record<string, unknown> => {
+    const isValidNodeData = (
+        data: unknown,
+    ): data is { label: string } & Record<string, unknown> => {
         return (
             typeof data === 'object' &&
             data !== null &&
@@ -430,7 +597,7 @@ const onMobileNodeDrop = (event: Event) => {
     }>;
 
     const { nodeType, defaultData, x, y } = customEvent.detail;
-    
+
     const position = screenToFlowCoordinate({ x, y });
     props.editor.commands.createNode(nodeType, defaultData, position);
 };
@@ -448,7 +615,7 @@ onMounted(() => {
     if (canvas) {
         canvas.addEventListener(
             'mobileNodeDrop',
-            onMobileNodeDrop as EventListener
+            onMobileNodeDrop as EventListener,
         );
     }
 });
@@ -458,7 +625,7 @@ onUnmounted(() => {
     if (canvas) {
         canvas.removeEventListener(
             'mobileNodeDrop',
-            onMobileNodeDrop as EventListener
+            onMobileNodeDrop as EventListener,
         );
     }
 });
@@ -469,6 +636,12 @@ const onKeyDown = (event: KeyboardEvent) => {
     // Ignore if in input
     const target = event.target as HTMLElement;
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+
+    if (event.key === 'Escape' && quickAdd.value) {
+        quickAdd.value = null;
+        connectionStart = null;
+        return;
+    }
 
     // Delete selected
     if (event.key === 'Delete' || event.key === 'Backspace') {
@@ -483,7 +656,7 @@ const onKeyDown = (event: KeyboardEvent) => {
 
         if (selectedEdgeIds.length) {
             selectedEdgeIds.forEach((id) =>
-                props.editor.commands.deleteEdge(id)
+                props.editor.commands.deleteEdge(id),
             );
             return;
         }
@@ -536,6 +709,7 @@ defineExpose({
         @dragover="onDragOver"
         @keydown="onKeyDown"
         @mousedown="onCanvasPointerDown"
+        @dblclick.capture="onCanvasDoubleClick"
         tabindex="0"
     >
         <VueFlow
@@ -615,6 +789,30 @@ defineExpose({
                 <div v-if="label" class="edge-label">{{ label }}</div>
             </template>
         </VueFlow>
+
+        <div
+            v-if="quickAdd"
+            ref="quickAddMenuRef"
+            class="quick-add-menu nodrag nopan"
+            :style="{ left: `${quickAdd.x}px`, top: `${quickAdd.y}px` }"
+            role="menu"
+            aria-label="Add connected node"
+            @mousedown.stop
+        >
+            <div class="quick-add-title">
+                {{ connectionStart ? 'Add and connect' : 'Add node' }}
+            </div>
+            <button
+                v-for="option in quickNodeTypes"
+                :key="option.type"
+                type="button"
+                role="menuitem"
+                @click="createConnectedNode(option)"
+            >
+                <span class="quick-add-icon">+</span>
+                {{ option.label }}
+            </button>
+        </div>
     </div>
 </template>
 
@@ -626,6 +824,60 @@ defineExpose({
     outline: none;
     /* Prevent browser handling of touch gestures - canvas handles its own pan/zoom */
     touch-action: none;
+}
+
+.quick-add-menu {
+    position: absolute;
+    z-index: 30;
+    display: grid;
+    min-width: 172px;
+    padding: 6px;
+    transform: translate(8px, 8px);
+    color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
+    background: var(--or3-color-bg-elevated, #22222e);
+    border: 1px solid var(--or3-color-border-hover, rgba(255, 255, 255, 0.15));
+    border-radius: var(--or3-radius-md, 10px);
+    box-shadow: var(--or3-shadow-lg, 0 10px 30px rgba(0, 0, 0, 0.35));
+}
+
+.quick-add-title {
+    padding: 5px 8px 7px;
+    color: var(--or3-color-text-muted, rgba(255, 255, 255, 0.45));
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.quick-add-menu button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    border-radius: var(--or3-radius-sm, 6px);
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+}
+
+.quick-add-menu button:hover,
+.quick-add-menu button:focus-visible {
+    outline: none;
+    background: var(--or3-color-surface-hover, rgba(255, 255, 255, 0.06));
+}
+
+.quick-add-icon {
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    color: var(--or3-color-accent, #8b5cf6);
+    background: var(--or3-color-accent-muted, rgba(139, 92, 246, 0.15));
+    border-radius: 5px;
 }
 
 .edge-label {
@@ -651,6 +903,10 @@ defineExpose({
 .vue-flow__edge-path {
     stroke: var(--or3-color-border-hover, rgba(255, 255, 255, 0.15)) !important;
     stroke-width: 2px !important;
+}
+
+.vue-flow__edge marker path {
+    fill: var(--or3-color-border-hover, rgba(255, 255, 255, 0.35)) !important;
 }
 
 .vue-flow__edge.selected .vue-flow__edge-path,
@@ -684,6 +940,12 @@ defineExpose({
     border-color: var(--or3-color-accent, #8b5cf6) !important;
 }
 
+.vue-flow__handle::before {
+    content: '';
+    position: absolute;
+    inset: -7px;
+}
+
 .vue-flow__controls {
     background: var(--or3-color-surface, rgba(26, 26, 36, 0.8)) !important;
     border: 1px solid var(--or3-color-border, rgba(255, 255, 255, 0.08)) !important;
@@ -712,7 +974,10 @@ defineExpose({
 /* Active state for lock button */
 .vue-flow__controls-button:active,
 .vue-flow__controls-button.active {
-    background: var(--or3-color-accent-muted, rgba(139, 92, 246, 0.15)) !important;
+    background: var(
+        --or3-color-accent-muted,
+        rgba(139, 92, 246, 0.15)
+    ) !important;
     color: var(--or3-color-accent, #8b5cf6) !important;
 }
 

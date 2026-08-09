@@ -12,6 +12,10 @@ const props = defineProps<{
         inputMappings?: Record<string, unknown>;
         shareSession?: boolean;
         status?: 'idle' | 'active' | 'completed' | 'error';
+        validationIssues?: Array<{
+            type: 'error' | 'warning';
+            message: string;
+        }>;
     };
     selected?: boolean;
 }>();
@@ -20,6 +24,7 @@ const label = computed(() => props.data.label || 'Subflow');
 const subflowId = computed(() => props.data.subflowId || '');
 const shareSession = computed(() => props.data.shareSession !== false);
 const status = computed(() => props.data.status || 'idle');
+const issue = computed(() => props.data.validationIssues?.[0]);
 
 const subflowLabel = computed(() => {
     if (!subflowId.value) return 'No subflow selected';
@@ -40,10 +45,17 @@ const emit = defineEmits<{
         :id="id"
         :selected="selected"
         :status="status"
+        :issue="issue"
         variant="secondary"
         @inspect="emit('inspect')"
     >
-        <Handle type="target" :position="Position.Top" class="handle" />
+        <Handle
+            type="target"
+            :position="Position.Top"
+            class="handle"
+            title="Input"
+            aria-label="Input connection"
+        />
 
         <div class="subflow-node">
             <div class="node-header">
@@ -111,12 +123,20 @@ const emit = defineEmits<{
             </div>
         </div>
 
-        <Handle type="source" :position="Position.Bottom" class="handle" />
+        <Handle
+            type="source"
+            :position="Position.Bottom"
+            class="handle"
+            title="Output"
+            aria-label="Output connection"
+        />
         <Handle
             type="source"
             :position="Position.Right"
             id="error"
             class="handle error-handle"
+            title="Error"
+            aria-label="Error connection"
         />
     </NodeWrapper>
 </template>
