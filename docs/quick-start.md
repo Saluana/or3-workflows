@@ -76,7 +76,7 @@ import OpenRouter from '@openrouter/sdk';
 const client = new OpenRouter({ apiKey: 'your-api-key' });
 
 const adapter = new OpenRouterExecutionAdapter(client, {
-    defaultModel: 'openai/gpt-4o-mini',
+    defaultModel: 'deepseek/deepseek-v4-flash-latest',
     maxRetries: 2,
 });
 
@@ -134,7 +134,7 @@ import { LocalStorageAdapter, StarterKit, OpenRouterExecutionAdapter } from 'or3
 // Editor setup
 const editor = useWorkflowEditor({
     extensions: StarterKit.configure({
-        agent: { defaultModel: 'openai/gpt-4o-mini' },
+        agent: { defaultModel: 'deepseek/deepseek-v4-flash-latest' },
     }),
 });
 
@@ -156,7 +156,7 @@ async function onSendMessage(message: string) {
 
     const client = new OpenRouter({ apiKey: apiKey.value });
     adapter = new OpenRouterExecutionAdapter(client, {
-        defaultModel: 'openai/gpt-4o-mini',
+        defaultModel: 'deepseek/deepseek-v4-flash-latest',
     });
 
     streamingContent.value = '';

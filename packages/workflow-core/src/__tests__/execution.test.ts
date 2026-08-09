@@ -372,8 +372,18 @@ describe('OpenRouterExecutionAdapter - Router Node', () => {
                     data: {
                         label: 'Router',
                         routes: [
-                            { id: 'route-a', label: 'Technical' },
-                            { id: 'route-b', label: 'General' },
+                            {
+                                id: 'route-a',
+                                label: 'Technical',
+                                description:
+                                    'Choose this route for programming questions.',
+                            },
+                            {
+                                id: 'route-b',
+                                label: 'General',
+                                description:
+                                    'Choose this route for non-technical questions.',
+                            },
                         ],
                     },
                 },
@@ -456,6 +466,16 @@ describe('OpenRouterExecutionAdapter - Router Node', () => {
         const routerRequest = mockClient.chat.send.mock.calls[0]?.[0]
             ?.chatRequest as Record<string, unknown>;
         expect(routerRequest).not.toHaveProperty('temperature');
+        expect(routerRequest.messages).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    role: 'system',
+                    content: expect.stringContaining(
+                        'Choose this route for programming questions.'
+                    ),
+                }),
+            ])
+        );
         const routedAgentRequest = mockClient.chat.send.mock.calls[1]?.[0]
             ?.chatRequest as {
             messages?: Array<{ role?: string; content?: unknown }>;

@@ -99,6 +99,7 @@ const EdgeDataSchema = z
 const RouteDefinitionSchema = z.object({
     id: z.string(),
     label: z.string(),
+    description: z.string().optional(),
     condition: z
         .object({
             type: z.enum(['contains', 'equals', 'regex', 'custom']),

@@ -116,15 +116,23 @@ export const RouterNodeExtension: NodeExtension = {
             const targetData = targetNode?.data as
                 | { label?: string; description?: string }
                 | undefined;
+            const configuredRoute = data.routes?.find(
+                (route) => route.id === edge.sourceHandle
+            );
 
             return {
                 index,
                 id: edge.sourceHandle || `route-${index}`,
                 nodeId: edge.target,
-                // Use target node's label as the route name
-                name: targetData?.label || edge.label || `Route ${index + 1}`,
-                // Use target node's description for routing context
-                description: targetData?.description || '',
+                name:
+                    configuredRoute?.label ||
+                    edge.label ||
+                    targetData?.label ||
+                    `Route ${index + 1}`,
+                description:
+                    configuredRoute?.description ||
+                    targetData?.description ||
+                    '',
             };
         });
 

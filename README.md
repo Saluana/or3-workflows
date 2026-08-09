@@ -340,7 +340,7 @@ import {
 
 const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY! });
 const adapter = new OpenRouterExecutionAdapter(client, {
-    defaultModel: 'openai/gpt-4o-mini',
+    defaultModel: 'deepseek/deepseek-v4-flash-latest',
 });
 
 const workflow: WorkflowData = /* editor.getJSON() or saved workflow */;

@@ -6,9 +6,18 @@ import {
     ModelInfo,
     extractProvider,
     toModelInfo,
+    DEFAULT_WORKFLOW_MODEL,
     DEFAULT_MODELS,
     registerDefaultModels,
 } from '../models';
+
+describe('DEFAULT_WORKFLOW_MODEL', () => {
+    it('uses the current default for new nodes and execution fallbacks', () => {
+        expect(DEFAULT_WORKFLOW_MODEL).toBe(
+            'deepseek/deepseek-v4-flash-latest'
+        );
+    });
+});
 
 // Sample model matching OpenRouter SDK format (camelCase)
 const sampleGPT4Model: Model = {

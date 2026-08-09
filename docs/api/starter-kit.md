@@ -137,7 +137,7 @@ interface WhileLoopOptions {
 StarterKit.configure({
     whileLoop: {
         maxIterations: 100,
-        defaultModel: 'openai/gpt-4o-mini',
+        defaultModel: 'deepseek/deepseek-v4-flash-latest',
     },
 });
 ```

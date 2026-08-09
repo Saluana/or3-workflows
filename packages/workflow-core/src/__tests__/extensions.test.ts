@@ -12,6 +12,7 @@ import {
     isConfigurableExtension,
 } from '../extensions/configure';
 import { StarterKit } from '../extensions/StarterKit';
+import { DEFAULT_WORKFLOW_MODEL } from '../models';
 import type { WorkflowNode, WorkflowEdge, NodeExtension } from '../types';
 
 // Helper to create nodes
@@ -157,7 +158,7 @@ describe('AgentNodeExtension', () => {
     it('should have default data with model', () => {
         expect(AgentNodeExtension.defaultData).toMatchObject({
             label: 'Agent',
-            model: 'openai/gpt-4o-mini',
+            model: DEFAULT_WORKFLOW_MODEL,
             prompt: '',
         });
     });

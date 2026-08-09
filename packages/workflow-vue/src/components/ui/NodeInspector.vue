@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, watchEffect } from 'vue';
+import { ref, computed, watch, watchEffect, nextTick } from 'vue';
 import {
     WorkflowEditor,
     WorkflowNode,
@@ -14,7 +14,9 @@ import {
     type OutputNodeData,
     type AgentNodeData,
     DEFAULT_WORKFLOW_MODEL,
+    validateWorkflow,
 } from 'or3-workflow-core';
+import InspectorIcon from './InspectorIcon.vue';
 import OutputModeSelector from './output/OutputModeSelector.vue';
 import OutputSourcePicker from './output/OutputSourcePicker.vue';
 import OutputPreview from './output/OutputPreview.vue';
@@ -33,6 +35,7 @@ interface ConfigurableNodeData {
     temperature?: number;
     maxTokens?: number;
     modelRequest?: NodeModelRequestV1;
+    structuredOutput?: AgentNodeData['structuredOutput'];
 }
 
 function isConfigurableData(data: unknown): data is ConfigurableNodeData {
@@ -63,8 +66,11 @@ const emit = defineEmits<{
 }>();
 
 const selectedNode = ref<WorkflowNode | null>(null);
-const activeTab = ref<
+type InspectorSectionId =
+    | 'overview'
+    | 'general'
     | 'prompt'
+    | 'structured'
     | 'model'
     | 'tools'
     | 'errors'
@@ -73,7 +79,32 @@ const activeTab = ref<
     | 'output'
     | 'routes'
     | 'branches'
->('prompt');
+    | 'advanced';
+
+interface InspectorSection {
+    id: InspectorSectionId;
+    icon:
+        | 'general'
+        | 'instructions'
+        | 'structured'
+        | 'model'
+        | 'tools'
+        | 'routes'
+        | 'parallel'
+        | 'failure'
+        | 'human'
+        | 'subflow'
+        | 'output'
+        | 'advanced';
+    title: string;
+    description: string;
+    summary?: string;
+    tone?: 'default' | 'accent' | 'warning';
+}
+
+const activeTab = ref<InspectorSectionId>('overview');
+const inspectorBody = ref<HTMLElement | null>(null);
+const overviewScrollTop = ref(0);
 
 // Prefer host-provided tools; fall back to built-in demo list if none supplied
 const availableTools = computed<ToolOption[]>(() => {
@@ -159,12 +190,8 @@ const updateSelection = () => {
 
             // Only reset tab if selection changed
             if (previousId !== node.id) {
-                activeTab.value =
-                    node.type === 'output'
-                        ? 'output'
-                        : node.type === 'parallel'
-                        ? 'branches'
-                        : 'prompt';
+                activeTab.value = 'overview';
+                overviewScrollTop.value = 0;
             }
         }
     } else {
@@ -205,7 +232,6 @@ const isAgentNode = computed(() => selectedNode.value?.type === 'agent');
 const isRouterNode = computed(() => selectedNode.value?.type === 'router');
 const isParallelNode = computed(() => selectedNode.value?.type === 'parallel');
 const isWhileNode = computed(() => selectedNode.value?.type === 'whileLoop');
-const isStartNode = computed(() => selectedNode.value?.type === 'start');
 const isSubflowNode = computed(() => selectedNode.value?.type === 'subflow');
 const isOutputNode = computed(() => selectedNode.value?.type === 'output');
 const canDelete = computed(
@@ -239,14 +265,59 @@ const primaryModel = computed(
         nodeData.value.model ||
         DEFAULT_WORKFLOW_MODEL
 );
-const fallbackModelsText = computed(() =>
-    (modelRequest.value?.models ?? []).slice(1).join('\n')
+const fallbackModels = computed(() =>
+    (modelRequest.value?.models ?? []).slice(1)
 );
 const serverToolChoices = [
-    'openrouter:web_search',
-    'openrouter:web_fetch',
-    'openrouter:datetime',
-    'openrouter:image_generation',
+    {
+        name: 'openrouter:web_search',
+        label: 'Web search',
+        description: 'Search the web for current sources and evidence.',
+    },
+    {
+        name: 'openrouter:web_fetch',
+        label: 'Web page reader',
+        description: 'Open and read pages returned by web search.',
+    },
+    {
+        name: 'openrouter:datetime',
+        label: 'Date and time',
+        description: 'Resolve the current date, time, and timezone context.',
+    },
+    {
+        name: 'openrouter:image_generation',
+        label: 'Image generation',
+        description: 'Generate images through a compatible provider.',
+    },
+] as const;
+type ServerToolName = (typeof serverToolChoices)[number]['name'];
+
+const capabilityChoices = [
+    {
+        id: 'tools',
+        label: 'Tool use',
+        description: 'Function calls and provider-managed tools.',
+    },
+    {
+        id: 'structured-output',
+        label: 'Structured output',
+        description: 'Strict responses that follow a JSON schema.',
+    },
+    {
+        id: 'reasoning',
+        label: 'Reasoning',
+        description: 'Provider-supported reasoning controls.',
+    },
+    {
+        id: 'vision',
+        label: 'Images',
+        description: 'Accept image attachments as model input.',
+    },
+    {
+        id: 'file-input',
+        label: 'Files',
+        description: 'Accept supported file attachments as model input.',
+    },
 ] as const;
 
 const updateModernModelRequest = (
@@ -262,30 +333,57 @@ const updateModernModelRequest = (
     });
 };
 
-const updateFallbackModels = (event: Event) => {
-    const fallbacks = (event.target as HTMLTextAreaElement).value
-        .split(/[\n,]/)
-        .map((model) => model.trim())
-        .filter(
-            (model, index, all) =>
-                model.length > 0 &&
-                model !== primaryModel.value &&
-                all.indexOf(model) === index
-        );
+const setFallbackModels = (fallbacks: string[]) => {
     updateModernModelRequest({
         models: [
             primaryModel.value,
-            ...fallbacks,
+            ...fallbacks.filter(
+                (model, index, all) =>
+                    model !== primaryModel.value &&
+                    all.indexOf(model) === index
+            ),
         ] as [string, ...string[]],
     });
 };
 
-const toggleServerTool = (name: (typeof serverToolChoices)[number]) => {
+const addFallbackModel = () => {
+    const candidate = availableModels.value.find(
+        (model) =>
+            model.id !== primaryModel.value &&
+            !fallbackModels.value.includes(model.id)
+    );
+    if (candidate) setFallbackModels([...fallbackModels.value, candidate.id]);
+};
+
+const updateFallbackModel = (index: number, event: Event) => {
+    const value = (event.target as HTMLSelectElement).value;
+    const fallbacks = [...fallbackModels.value];
+    fallbacks[index] = value;
+    setFallbackModels(fallbacks);
+};
+
+const removeFallbackModel = (index: number) => {
+    setFallbackModels(fallbackModels.value.filter((_, item) => item !== index));
+};
+
+const toggleServerTool = (name: ServerToolName) => {
     const tools = [...(modelRequest.value?.serverTools ?? [])];
     const index = tools.findIndex((tool) => tool.name === name);
     if (index >= 0) tools.splice(index, 1);
     else tools.push({ name, transport: 'either' });
     updateModernModelRequest({ serverTools: tools });
+};
+
+const toggleRequiredCapability = (
+    capability: (typeof capabilityChoices)[number]['id']
+) => {
+    const capabilities = [...(modelRequest.value?.requiredCapabilities ?? [])];
+    const index = capabilities.indexOf(capability);
+    if (index >= 0) capabilities.splice(index, 1);
+    else capabilities.push(capability);
+    updateModernModelRequest({
+        requiredCapabilities: capabilities.length ? capabilities : undefined,
+    });
 };
 
 const whileData = computed(() => {
@@ -590,6 +688,16 @@ const updateRouteLabel = (routeId: string, label: string) => {
     props.editor.commands.updateNodeData(selectedNode.value.id, { routes });
 };
 
+const updateRouteDescription = (routeId: string, description: string) => {
+    if (!selectedNode.value) return;
+    const routes = routerData.value.routes.map((route: any) =>
+        route.id === routeId
+            ? { ...route, description: description || undefined }
+            : route
+    );
+    props.editor.commands.updateNodeData(selectedNode.value.id, { routes });
+};
+
 const errorHandling = computed<NodeErrorConfig>(() => {
     const data = selectedNode.value?.data as
         | { errorHandling?: NodeErrorConfig }
@@ -617,17 +725,17 @@ const hitlModes: Array<{ id: HITLMode; label: string; description: string }> = [
     {
         id: 'approval',
         label: 'Approval',
-        description: 'Pause before execution for approve/reject',
+        description: 'Pause before execution to approve or reject.',
     },
     {
         id: 'input',
         label: 'Input',
-        description: 'Collect human input before execution',
+        description: 'Ask the reviewer to provide information.',
     },
     {
         id: 'review',
         label: 'Review',
-        description: 'Pause after execution to review output',
+        description: 'Let the reviewer inspect and edit the output.',
     },
 ];
 
@@ -638,12 +746,442 @@ const hitlDefaultActions = [
 ];
 
 const errorCodes: { id: ErrorCode; label: string }[] = [
-    { id: 'RATE_LIMIT', label: 'Rate Limit' },
+    { id: 'RATE_LIMIT', label: 'Rate limit' },
     { id: 'TIMEOUT', label: 'Timeout' },
     { id: 'NETWORK', label: 'Network' },
-    { id: 'LLM_ERROR', label: 'LLM Error' },
-    { id: 'VALIDATION', label: 'Validation' },
+    { id: 'LLM_ERROR', label: '5xx errors' },
+    { id: 'VALIDATION', label: 'Validation errors' },
 ];
+
+const toolSearch = ref('');
+const enabledToolOptions = computed(() =>
+    selectedTools.value.map(
+        (id) =>
+            availableTools.value.find((tool) => tool.id === id) ?? {
+                id,
+                name: id,
+                description: '',
+            }
+    )
+);
+const filteredAvailableTools = computed(() => {
+    const query = toolSearch.value.trim().toLowerCase();
+    return availableTools.value.filter((tool) => {
+        if (selectedTools.value.includes(tool.id)) return false;
+        if (!query) return true;
+        return `${tool.name} ${tool.description ?? ''} ${tool.id}`
+            .toLowerCase()
+            .includes(query);
+    });
+});
+
+const selectedModelId = computed(() =>
+    isWhileNode.value
+        ? whileData.value.conditionModel || DEFAULT_WORKFLOW_MODEL
+        : primaryModel.value
+);
+const currentModelInfo = computed(() =>
+    availableModels.value.find((model) => model.id === selectedModelId.value)
+);
+const isStructuredAgent = computed(
+    () => isAgentNode.value && Boolean(nodeData.value.structuredOutput)
+);
+const isResearchAgent = computed(
+    () =>
+        isAgentNode.value &&
+        (modelRequest.value?.serverTools ?? []).some((tool) =>
+            [
+                'openrouter:web_search',
+                'openrouter:web_fetch',
+                'openrouter:datetime',
+            ].includes(tool.name)
+        )
+);
+
+type StructuredFieldType = 'text' | 'number' | 'boolean' | 'json';
+interface StructuredField {
+    name: string;
+    type: StructuredFieldType;
+    description: string;
+    required: boolean;
+}
+
+const structuredOutput = computed(() => nodeData.value.structuredOutput);
+const structuredFields = computed<StructuredField[]>(() => {
+    const schema = structuredOutput.value?.schema;
+    const properties =
+        schema && typeof schema.properties === 'object' && schema.properties
+            ? (schema.properties as Record<string, Record<string, unknown>>)
+            : {};
+    const required = Array.isArray(schema?.required)
+        ? (schema.required as string[])
+        : [];
+    return Object.entries(properties).map(([name, field]) => {
+        const type =
+            field.type === 'string'
+                ? 'text'
+                : field.type === 'number' || field.type === 'integer'
+                  ? 'number'
+                  : field.type === 'boolean'
+                    ? 'boolean'
+                    : 'json';
+        return {
+            name,
+            type,
+            description:
+                typeof field.description === 'string' ? field.description : '',
+            required: required.includes(name),
+        };
+    });
+});
+
+const updateStructuredSchema = (
+    properties: Record<string, Record<string, unknown>>,
+    required: string[]
+) => {
+    if (!selectedNode.value || !structuredOutput.value) return;
+    props.editor.commands.updateNodeData(selectedNode.value.id, {
+        structuredOutput: {
+            ...structuredOutput.value,
+            schema: {
+                ...structuredOutput.value.schema,
+                type: 'object',
+                properties,
+                required,
+                additionalProperties: false,
+            },
+        },
+    });
+};
+
+const structuredSchemaParts = () => {
+    const schema = structuredOutput.value?.schema;
+    return {
+        properties:
+            schema && typeof schema.properties === 'object' && schema.properties
+                ? {
+                      ...(schema.properties as Record<
+                          string,
+                          Record<string, unknown>
+                      >),
+                  }
+                : {},
+        required: Array.isArray(schema?.required)
+            ? [...(schema.required as string[])]
+            : [],
+    };
+};
+
+const addStructuredField = () => {
+    const { properties, required } = structuredSchemaParts();
+    let index = Object.keys(properties).length + 1;
+    let name = `field_${index}`;
+    while (name in properties) name = `field_${++index}`;
+    properties[name] = {
+        type: 'string',
+        description: 'Describe what this value should contain.',
+    };
+    required.push(name);
+    updateStructuredSchema(properties, required);
+};
+
+const renameStructuredField = (oldName: string, event: Event) => {
+    const requested = (event.target as HTMLInputElement).value.trim();
+    if (!requested || requested === oldName) return;
+    const { properties, required } = structuredSchemaParts();
+    let name = requested;
+    let suffix = 2;
+    while (name in properties && name !== oldName) {
+        name = `${requested}_${suffix++}`;
+    }
+    properties[name] = properties[oldName] ?? { type: 'string' };
+    delete properties[oldName];
+    updateStructuredSchema(
+        properties,
+        required.map((item) => (item === oldName ? name : item))
+    );
+};
+
+const updateStructuredFieldType = (name: string, event: Event) => {
+    const type = (event.target as HTMLSelectElement).value as StructuredFieldType;
+    const { properties, required } = structuredSchemaParts();
+    const description = properties[name]?.description;
+    properties[name] = {
+        ...(type === 'text'
+            ? { type: 'string' }
+            : type === 'number'
+              ? { type: 'number' }
+              : type === 'boolean'
+                ? { type: 'boolean' }
+                : {}),
+        ...(typeof description === 'string' ? { description } : {}),
+    };
+    updateStructuredSchema(properties, required);
+};
+
+const updateStructuredFieldDescription = (name: string, event: Event) => {
+    const description = (event.target as HTMLInputElement).value;
+    const { properties, required } = structuredSchemaParts();
+    properties[name] = {
+        ...(properties[name] ?? {}),
+        ...(description ? { description } : {}),
+    };
+    if (!description) delete properties[name].description;
+    updateStructuredSchema(properties, required);
+};
+
+const toggleStructuredFieldRequired = (name: string) => {
+    const { properties, required } = structuredSchemaParts();
+    updateStructuredSchema(
+        properties,
+        required.includes(name)
+            ? required.filter((item) => item !== name)
+            : [...required, name]
+    );
+};
+
+const removeStructuredField = (name: string) => {
+    const { properties, required } = structuredSchemaParts();
+    delete properties[name];
+    updateStructuredSchema(
+        properties,
+        required.filter((item) => item !== name)
+    );
+};
+
+const nodeTypeLabel = computed(() => {
+    switch (selectedNode.value?.type) {
+        case 'agent':
+            return isStructuredAgent.value
+                ? 'Structured agent'
+                : isResearchAgent.value
+                  ? 'Research agent'
+                  : 'AI agent';
+        case 'router':
+            return 'Router node';
+        case 'parallel':
+            return 'Parallel node';
+        case 'whileLoop':
+            return 'Loop node';
+        case 'subflow':
+            return 'Subflow node';
+        case 'output':
+            return 'Output node';
+        case 'start':
+            return 'Start trigger';
+        default:
+            return 'Workflow node';
+    }
+});
+const nodeIconName = computed<
+    'agent' | 'router' | 'parallel' | 'whileLoop' | 'subflow' | 'output' | 'start'
+>(() => {
+    const type = selectedNode.value?.type;
+    return type === 'agent' ||
+        type === 'router' ||
+        type === 'parallel' ||
+        type === 'whileLoop' ||
+        type === 'subflow' ||
+        type === 'output' ||
+        type === 'start'
+        ? type
+        : 'start';
+});
+const nodePurpose = computed(() => {
+    switch (selectedNode.value?.type) {
+        case 'agent':
+            return isStructuredAgent.value
+                ? 'Returns validated fields that follow the response schema below.'
+                : isResearchAgent.value
+                  ? 'Researches current information with provider-managed web tools.'
+                  : 'Uses a model to perform tasks, with optional tools and review.';
+        case 'router':
+            return 'Chooses the best route for incoming work.';
+        case 'parallel':
+            return 'Runs multiple branches at the same time, then optionally merges them.';
+        case 'whileLoop':
+            return 'Repeats work until a condition is met or a limit is reached.';
+        case 'subflow':
+            return 'Runs another workflow as part of this workflow.';
+        case 'output':
+            return 'Combines or synthesizes results into the final response.';
+        case 'start':
+            return 'Starts workflow execution and passes input to the first step.';
+        default:
+            return 'Configure this workflow step.';
+    }
+});
+const nodeIssues = computed(() => {
+    if (!selectedNode.value) return [];
+    const result = validateWorkflow(
+        [...props.editor.getNodes()],
+        [...props.editor.getEdges()]
+    );
+    return [...result.errors, ...result.warnings].filter(
+        (issue) => issue.nodeId === selectedNode.value?.id
+    );
+});
+const retryEnabled = computed(() => retryConfig.value.maxRetries > 0);
+const errorModeSummary = computed(() => {
+    const mode = errorHandling.value.mode;
+    const label =
+        mode === 'continue'
+            ? 'Continue'
+            : mode === 'branch'
+              ? 'Route to error output'
+              : 'Stop workflow';
+    return retryEnabled.value
+        ? `${label} · ${retryConfig.value.maxRetries} retries`
+        : label;
+});
+const overviewSections = computed<InspectorSection[]>(() => {
+    const sections: InspectorSection[] = [];
+    if (isConfigurable.value) {
+        sections.push({
+            id: 'general',
+            icon: 'general',
+            title: 'General',
+            description: 'Name, description, and basic settings',
+            summary: nodeData.value.label,
+        });
+    }
+    if (isAgentNode.value || isRouterNode.value || isWhileNode.value) {
+        const prompt = isWhileNode.value
+            ? whileData.value.conditionPrompt || whileData.value.loopPrompt || ''
+            : nodeData.value.prompt || '';
+        sections.push({
+            id: 'prompt',
+            icon: 'instructions',
+            title: isWhileNode.value ? 'Loop behavior' : 'Instructions',
+            description: isWhileNode.value
+                ? 'Strategy, stop condition, and loop context'
+                : 'System prompt and node instructions',
+            summary: prompt ? `${prompt.length.toLocaleString()} chars` : 'Not configured',
+            tone: prompt ? 'default' : 'warning',
+        });
+        sections.push({
+            id: 'model',
+            icon: 'model',
+            title: 'Model',
+            description: 'Primary model and fallback settings',
+            summary: currentModelInfo.value?.name ?? primaryModel.value.split('/').pop(),
+            tone: 'accent',
+        });
+    }
+    if (isStructuredAgent.value) {
+        sections.splice(2, 0, {
+            id: 'structured',
+            icon: 'structured',
+            title: 'Response fields',
+            description: 'Named values the agent must return',
+            summary: `${structuredFields.value.length} field${structuredFields.value.length === 1 ? '' : 's'}`,
+            tone: structuredFields.value.length ? 'accent' : 'warning',
+        });
+    }
+    if (isAgentNode.value) {
+        sections.push({
+            id: 'tools',
+            icon: 'tools',
+            title: 'Tools',
+            description: 'Tools available to this agent',
+            summary: `${selectedTools.value.length} enabled`,
+        });
+    }
+    if (isRouterNode.value) {
+        sections.push({
+            id: 'routes',
+            icon: 'routes',
+            title: 'Routes',
+            description: 'Define output routes for this node',
+            summary: `${routerData.value.routes.length} defined`,
+        });
+    }
+    if (isParallelNode.value) {
+        sections.push({
+            id: 'branches',
+            icon: 'parallel',
+            title: 'Branches',
+            description: 'Parallel paths and merge configuration',
+            summary: `${parallelData.value.branches.length} branches`,
+        });
+    }
+    if (hasErrorHandling.value) {
+        sections.push({
+            id: 'errors',
+            icon: 'failure',
+            title: 'Failure handling',
+            description: 'What happens when this node fails',
+            summary: errorModeSummary.value,
+        });
+    }
+    if (hasHITL.value) {
+        sections.push({
+            id: 'hitl',
+            icon: 'human',
+            title: 'Human review',
+            description: 'Pause for approval, input, or review',
+            summary: hitlConfig.value.enabled ? hitlConfig.value.mode : 'Off',
+        });
+    }
+    if (isSubflowNode.value) {
+        sections.push({
+            id: 'subflow',
+            icon: 'subflow',
+            title: 'Subflow',
+            description: 'Workflow selection, session, and inputs',
+            summary: selectedSubflow.value?.name || 'Not selected',
+        });
+    }
+    if (isOutputNode.value) {
+        sections.push({
+            id: 'output',
+            icon: 'output',
+            title: 'Output',
+            description: 'Sources, formatting, and synthesis',
+            summary:
+                outputData.value.mode === 'synthesis'
+                    ? 'AI synthesis'
+                    : 'Combine',
+        });
+    }
+    if (isAgentNode.value || isRouterNode.value || isWhileNode.value) {
+        sections.push({
+            id: 'advanced',
+            icon: 'advanced',
+            title: 'Advanced',
+            description: 'Backend, IDs, and provider settings',
+            summary:
+                modelRequest.value?.backend === 'openrouter-agent'
+                    ? 'OpenRouter agent'
+                    : 'Default backend',
+        });
+    }
+    return sections;
+});
+const activeSection = computed(() =>
+    overviewSections.value.find((section) => section.id === activeTab.value)
+);
+
+const openSection = (section: InspectorSectionId) => {
+    if (inspectorBody.value) {
+        overviewScrollTop.value = inspectorBody.value.scrollTop;
+    }
+    activeTab.value = section;
+    void nextTick(() => inspectorBody.value?.scrollTo({ top: 0 }));
+};
+
+const showOverview = () => {
+    activeTab.value = 'overview';
+    void nextTick(() =>
+        inspectorBody.value?.scrollTo({ top: overviewScrollTop.value })
+    );
+};
+
+const toggleRetryEnabled = () => {
+    updateRetryConfig({
+        maxRetries: retryEnabled.value ? 0 : 3,
+    });
+};
 
 // Write through immediately so controlled :value bindings stay in sync with
 // keystrokes. Debouncing here left the DOM ahead of editor state; any editor
@@ -898,333 +1436,243 @@ const handleDelete = () => {
 
 <template>
     <div class="node-inspector" v-if="selectedNode">
-        <!-- Header -->
-        <div class="inspector-header">
-            <div class="header-icon" :class="selectedNode.type">
-                <svg
-                    v-if="isAgentNode"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                >
-                    <rect x="3" y="11" width="18" height="10" rx="2"></rect>
-                    <circle cx="12" cy="5" r="2"></circle>
-                    <path d="M12 7v4"></path>
-                </svg>
-                <svg
-                    v-else-if="isRouterNode"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                >
-                    <line x1="6" y1="3" x2="6" y2="15"></line>
-                    <circle cx="18" cy="6" r="3"></circle>
-                    <circle cx="6" cy="18" r="3"></circle>
-                    <path d="M18 9a9 9 0 0 1-9 9"></path>
-                </svg>
-                <svg
-                    v-else-if="isParallelNode"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                >
-                    <circle cx="18" cy="18" r="3"></circle>
-                    <circle cx="6" cy="6" r="3"></circle>
-                    <path d="M6 21V9a9 9 0 0 0 9 9"></path>
-                </svg>
-                <svg
-                    v-else
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                >
-                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                </svg>
+        <header class="inspector-header">
+            <div class="inspector-header-title">
+                <span class="header-icon" :class="selectedNode.type">
+                    <InspectorIcon :name="nodeIconName" />
+                </span>
+                <span>Node inspector</span>
             </div>
-            <input
-                class="label-input"
-                :value="nodeData.label"
-                @input="updateLabel"
-                placeholder="Node name"
-            />
-            <button
-                v-if="canDelete"
-                class="delete-btn"
-                @click="handleDelete"
-                title="Delete node"
-            >
-                <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
+            <div class="inspector-header-actions">
+                <details v-if="canDelete" class="inspector-menu">
+                    <summary class="header-action" aria-label="More node actions">
+                        <InspectorIcon name="more" />
+                    </summary>
+                    <div class="inspector-menu-popover">
+                        <button class="menu-danger" type="button" @click="handleDelete">
+                            Delete node
+                        </button>
+                    </div>
+                </details>
+                <button
+                    class="header-action"
+                    type="button"
+                    aria-label="Close inspector"
+                    @click="emit('close')"
                 >
-                    <polyline points="3 6 5 6 21 6"></polyline>
-                    <path
-                        d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
-                    ></path>
-                </svg>
-            </button>
-            <button
-                class="close-btn"
-                @click="emit('close')"
-                title="Close inspector"
-            >
-                <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                >
-                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-            </button>
-        </div>
+                    <InspectorIcon name="close" />
+                </button>
+            </div>
+        </header>
 
-        <!-- Description field - helps router understand what this node does -->
-        <div v-if="isConfigurable" class="description-section">
-            <label class="description-label">
-                <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                >
-                    <path
-                        d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
-                    ></path>
-                    <polyline points="14 2 14 8 20 8"></polyline>
-                    <line x1="16" y1="13" x2="8" y2="13"></line>
-                    <line x1="16" y1="17" x2="8" y2="17"></line>
-                    <polyline points="10 9 9 9 8 9"></polyline>
-                </svg>
-                Description
-                <span class="description-hint"
-                    >(used by router for decisions)</span
-                >
-            </label>
-            <textarea
-                class="description-textarea"
-                :value="nodeData.description || ''"
-                placeholder="Describe what this node does... e.g., 'Handles complex math problems and coding questions'"
-                @input="updateDescription"
-            ></textarea>
-        </div>
-
-        <!-- Tabs for Agent/Router/Parallel nodes -->
-        <div v-if="isConfigurable || hasErrorHandling" class="tabs">
-            <button
-                class="tab"
-                :class="{ active: activeTab === 'prompt' }"
-                @click="activeTab = 'prompt'"
-                v-if="isConfigurable && !isOutputNode && !isParallelNode"
-            >
-                <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                >
-                    <rect x="3" y="11" width="18" height="10" rx="2"></rect>
-                    <circle cx="12" cy="5" r="2"></circle>
-                    <path d="M12 7v4"></path>
-                </svg>
-                {{
-                    isRouterNode
-                        ? 'Instructions'
-                        : isWhileNode
-                        ? 'Condition'
-                        : 'Instructions'
-                }}
-            </button>
-            <button
-                class="tab"
-                :class="{ active: activeTab === 'model' }"
-                @click="activeTab = 'model'"
-                v-if="isConfigurable && !isOutputNode && !isParallelNode"
-            >
-                <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                >
-                    <rect
-                        x="4"
-                        y="4"
-                        width="16"
-                        height="16"
-                        rx="2"
-                        ry="2"
-                    ></rect>
-                    <rect x="9" y="9" width="6" height="6"></rect>
-                    <line x1="9" y1="1" x2="9" y2="4"></line>
-                    <line x1="15" y1="1" x2="15" y2="4"></line>
-                    <line x1="9" y1="20" x2="9" y2="23"></line>
-                    <line x1="15" y1="20" x2="15" y2="23"></line>
-                    <line x1="20" y1="9" x2="23" y2="9"></line>
-                    <line x1="20" y1="14" x2="23" y2="14"></line>
-                    <line x1="1" y1="9" x2="4" y2="9"></line>
-                    <line x1="1" y1="14" x2="4" y2="14"></line>
-                </svg>
-                Model
-            </button>
-            <button
-                v-if="isRouterNode"
-                class="tab"
-                :class="{ active: activeTab === 'routes' }"
-                @click="activeTab = 'routes'"
-            >
-                <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                >
-                    <path d="M9 18l6-6-6-6"></path>
-                </svg>
-                Routes
-                <span class="tool-count">{{ routerData.routes.length }}</span>
-            </button>
-            <button
-                v-if="isParallelNode"
-                class="tab"
-                :class="{ active: activeTab === 'branches' }"
-                @click="activeTab = 'branches'"
-            >
-                <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                >
-                    <circle cx="18" cy="18" r="3"></circle>
-                    <circle cx="6" cy="6" r="3"></circle>
-                    <circle cx="18" cy="6" r="3"></circle>
-                    <path d="M6 9v12"></path>
-                    <path d="M18 9v6"></path>
-                </svg>
-                Branches
-                <span class="tool-count">{{
-                    parallelData.branches.length
-                }}</span>
-            </button>
-            <button
-                v-if="isAgentNode"
-                class="tab"
-                :class="{ active: activeTab === 'tools' }"
-                @click="activeTab = 'tools'"
-            >
-                <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                >
-                    <path
-                        d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
-                    ></path>
-                </svg>
-                Tools
-                <span v-if="selectedTools.length" class="tool-count">{{
-                    selectedTools.length
-                }}</span>
-            </button>
-            <button
-                v-if="hasErrorHandling"
-                class="tab"
-                :class="{ active: activeTab === 'errors' }"
-                @click="activeTab = 'errors'"
-            >
-                <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                >
-                    <path
-                        d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
-                    ></path>
-                    <line x1="12" y1="9" x2="12" y2="13"></line>
-                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
-                </svg>
-                Errors
-            </button>
-            <button
-                v-if="hasHITL"
-                class="tab"
-                :class="{ active: activeTab === 'hitl' }"
-                @click="activeTab = 'hitl'"
-            >
-                <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                >
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                    <circle cx="12" cy="7" r="4"></circle>
-                </svg>
-                HITL
-                <span v-if="hitlConfig.enabled" class="hitl-badge">ON</span>
-            </button>
-            <button
-                v-if="isSubflowNode"
-                class="tab"
-                :class="{ active: activeTab === 'subflow' }"
-                @click="activeTab = 'subflow'"
-            >
-                <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                >
-                    <rect x="3" y="3" width="7" height="7" rx="1"></rect>
-                    <rect x="14" y="3" width="7" height="7" rx="1"></rect>
-                    <rect x="8.5" y="14" width="7" height="7" rx="1"></rect>
-                    <path d="M6.5 10v2a2 2 0 002 2h1"></path>
-                    <path d="M17.5 10v2a2 2 0 01-2 2h-1"></path>
-                </svg>
-                Subflow
-            </button>
-            <button
-                v-if="isOutputNode"
-                class="tab"
-                :class="{ active: activeTab === 'output' }"
-                @click="activeTab = 'output'"
-            >
-                <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                >
-                    <path
-                        d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"
-                    ></path>
-                    <line x1="4" y1="22" x2="4" y2="15"></line>
-                </svg>
-                Output
-            </button>
-        </div>
-
-        <!-- Tab Content -->
         <div
-            v-if="
-                isConfigurable ||
-                hasErrorHandling ||
-                hasHITL ||
-                isSubflowNode ||
-                isOutputNode
-            "
-            class="tab-content"
+            ref="inspectorBody"
+            class="inspector-body"
         >
+            <section v-if="activeTab === 'overview'" class="inspector-overview">
+                <div class="node-summary">
+                    <span class="node-summary-icon" :class="selectedNode.type">
+                        <InspectorIcon :name="nodeIconName" />
+                    </span>
+                    <div class="node-summary-copy">
+                        <div class="node-summary-title-row">
+                            <h2>{{ nodeData.label }}</h2>
+                            <span class="node-type-badge">{{ nodeTypeLabel }}</span>
+                        </div>
+                        <p>{{ nodePurpose }}</p>
+                        <span
+                            class="node-status"
+                            :class="{ 'has-issues': nodeIssues.length > 0 }"
+                        >
+                            <span class="status-mark" />
+                            {{
+                                nodeIssues.length
+                                    ? `${nodeIssues.length} issue${nodeIssues.length === 1 ? '' : 's'}`
+                                    : 'Ready'
+                            }}
+                        </span>
+                    </div>
+                </div>
+
+                <div v-if="overviewSections.length" class="section-navigation">
+                    <button
+                        v-for="section in overviewSections"
+                        :key="section.id"
+                        class="section-navigation-row"
+                        type="button"
+                        @click="openSection(section.id)"
+                    >
+                        <span class="section-navigation-icon">
+                            <InspectorIcon :name="section.icon" />
+                        </span>
+                        <span class="section-navigation-copy">
+                            <strong>{{ section.title }}</strong>
+                            <small>{{ section.description }}</small>
+                        </span>
+                        <span
+                            v-if="section.summary"
+                            class="section-navigation-summary"
+                            :class="section.tone"
+                        >
+                            {{ section.summary }}
+                        </span>
+                        <InspectorIcon class="section-chevron" name="chevron" />
+                    </button>
+                </div>
+
+                <div v-else class="overview-note">
+                    {{ nodePurpose }} Connect it to another node to continue.
+                </div>
+
+                <div class="inspector-tip">
+                    <span>?</span>
+                    Choose a section to configure this node. Changes are applied immediately.
+                </div>
+            </section>
+
+            <div v-else class="inspector-section-page">
+                <div class="section-page-header">
+                    <button class="back-button" type="button" @click="showOverview">
+                        <InspectorIcon name="back" />
+                        Back
+                    </button>
+                    <div v-if="activeSection" class="section-page-title">
+                        <span class="section-page-icon">
+                            <InspectorIcon :name="activeSection.icon" />
+                        </span>
+                        <div>
+                            <h2>{{ activeSection.title }}</h2>
+                            <p>{{ activeSection.description }}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-if="activeTab === 'general'" class="general-tab section-panel">
+                    <div class="field-group">
+                        <label class="field-label" for="node-inspector-name">Node name</label>
+                        <input
+                            id="node-inspector-name"
+                            class="text-input"
+                            :value="nodeData.label"
+                            placeholder="Node name"
+                            @input="updateLabel"
+                        />
+                    </div>
+                    <div class="field-group">
+                        <label class="field-label" for="node-inspector-description">Description</label>
+                        <textarea
+                            id="node-inspector-description"
+                            class="description-textarea"
+                            :value="nodeData.description || ''"
+                            placeholder="Describe what this node does"
+                            @input="updateDescription"
+                        />
+                        <p class="field-hint">
+                            Used by the router when deciding where to send work.
+                        </p>
+                    </div>
+                    <div v-if="isResearchAgent" class="preset-note">
+                        <strong>Research Agent preset</strong>
+                        <p>
+                            Uses the same agent runtime as AI Agent, with web search,
+                            page reading, date/time tools, and tool-capable provider
+                            matching enabled by default.
+                        </p>
+                    </div>
+                    <div v-else-if="isStructuredAgent" class="preset-note">
+                        <strong>Structured Agent preset</strong>
+                        <p>
+                            Uses the agent runtime with strict structured-output
+                            validation and provider matching enabled by default.
+                        </p>
+                    </div>
+                </div>
+
+                <div
+                    v-if="activeTab === 'structured' && isStructuredAgent"
+                    class="structured-tab section-panel"
+                >
+                    <div class="settings-section-heading structured-heading">
+                        <div>
+                            <h3>Response object</h3>
+                            <p>
+                                Define each value the model must return. Clear names and
+                                descriptions make the response more reliable.
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            class="secondary-button"
+                            @click="addStructuredField"
+                        >
+                            + Add field
+                        </button>
+                    </div>
+
+                    <div v-if="structuredFields.length" class="structured-fields">
+                        <article
+                            v-for="field in structuredFields"
+                            :key="field.name"
+                            class="structured-field-card"
+                        >
+                            <div class="structured-field-topline">
+                                <div class="field-group">
+                                    <label class="field-label">Field name</label>
+                                    <input
+                                        class="text-input"
+                                        type="text"
+                                        :value="field.name"
+                                        placeholder="field_name"
+                                        @change="renameStructuredField(field.name, $event)"
+                                    />
+                                </div>
+                                <div class="field-group">
+                                    <label class="field-label">Value type</label>
+                                    <select
+                                        class="model-select"
+                                        :value="field.type"
+                                        @change="updateStructuredFieldType(field.name, $event)"
+                                    >
+                                        <option value="text">Text</option>
+                                        <option value="number">Number</option>
+                                        <option value="boolean">Yes / no</option>
+                                        <option value="json">JSON</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="field-group">
+                                <label class="field-label">Description</label>
+                                <input
+                                    class="text-input"
+                                    type="text"
+                                    :value="field.description"
+                                    placeholder="Explain what the model should put here"
+                                    @input="updateStructuredFieldDescription(field.name, $event)"
+                                />
+                            </div>
+                            <div class="structured-field-footer">
+                                <label class="compact-checkbox">
+                                    <input
+                                        type="checkbox"
+                                        :checked="field.required"
+                                        @change="toggleStructuredFieldRequired(field.name)"
+                                    />
+                                    Required
+                                </label>
+                                <button
+                                    type="button"
+                                    class="text-danger-button"
+                                    @click="removeStructuredField(field.name)"
+                                >
+                                    Remove field
+                                </button>
+                            </div>
+                        </article>
+                    </div>
+                    <div v-else class="empty-settings-card">
+                        Add at least one field to define the response object.
+                    </div>
+                </div>
             <!-- Prompt Tab -->
             <div
                 v-if="
@@ -1500,75 +1948,190 @@ Example: "Improve this text, making it clearer and more engaging."'
             <!-- Model Tab -->
             <div
                 v-if="activeTab === 'model' && !isParallelNode"
-                class="model-tab"
+                class="model-tab section-panel"
             >
-                <label class="field-label">
-                    {{ isWhileNode ? 'Condition Model' : 'Select Model' }}
-                </label>
-                <select
-                    class="model-select"
-                    :value="
-                        isWhileNode
-                            ? whileData.conditionModel || DEFAULT_WORKFLOW_MODEL
-                            : primaryModel
-                    "
-                    @change="updateModel"
-                >
-                    <option
-                        v-for="m in availableModels"
-                        :key="m.id"
-                        :value="m.id"
+                <div class="field-group">
+                    <label class="field-label">
+                        {{ isWhileNode ? 'Condition model' : 'Primary model' }}
+                    </label>
+                    <select
+                        class="model-select"
+                        :value="selectedModelId"
+                        @change="updateModel"
                     >
-                        {{ m.name }} ({{ m.provider }})
-                    </option>
-                </select>
-                <div class="model-id">
-                    <span class="model-id-label">Model ID:</span>
-                    <code>
+                        <option
+                            v-if="!currentModelInfo"
+                            :value="selectedModelId"
+                        >
+                            Current › {{ selectedModelId.split('/').pop() }}
+                        </option>
+                        <option
+                            v-for="m in availableModels"
+                            :key="m.id"
+                            :value="m.id"
+                        >
+                            {{ m.provider }} › {{ m.name }}
+                        </option>
+                    </select>
+                    <p class="field-hint">
+                        The model used for this node's primary request.
+                    </p>
+                </div>
+
+                <template v-if="!isWhileNode">
+                    <div class="settings-section">
+                        <div class="settings-section-heading">
+                            <div>
+                                <h3>Fallback models</h3>
+                                <p>Used in order when the primary model is unavailable.</p>
+                            </div>
+                        </div>
+
+                        <div v-if="fallbackModels.length" class="fallback-model-list">
+                            <div
+                                v-for="(model, index) in fallbackModels"
+                                :key="`${model}-${index}`"
+                                class="fallback-model-row"
+                            >
+                                <span class="fallback-order">{{ index + 1 }}</span>
+                                <select
+                                    class="model-select"
+                                    :value="model"
+                                    @change="updateFallbackModel(index, $event)"
+                                >
+                                    <option
+                                        v-if="!availableModels.some(
+                                            (item) => item.id === model
+                                        )"
+                                        :value="model"
+                                    >
+                                        Current › {{ model.split('/').pop() }}
+                                    </option>
+                                    <option
+                                        v-for="option in availableModels.filter(
+                                            (item) => item.id !== primaryModel
+                                        )"
+                                        :key="option.id"
+                                        :value="option.id"
+                                    >
+                                        {{ option.provider }} › {{ option.name }}
+                                    </option>
+                                </select>
+                                <button
+                                    type="button"
+                                    class="row-remove-button"
+                                    :aria-label="`Remove fallback model ${index + 1}`"
+                                    @click="removeFallbackModel(index)"
+                                >
+                                    <InspectorIcon name="close" />
+                                </button>
+                            </div>
+                        </div>
+                        <p v-else class="empty-setting-copy">
+                            No fallback models configured.
+                        </p>
+                        <button
+                            type="button"
+                            class="secondary-button"
+                            :disabled="fallbackModels.length >= availableModels.length - 1"
+                            @click="addFallbackModel"
+                        >
+                            + Add fallback model
+                        </button>
+                    </div>
+
+                    <div class="settings-section">
+                        <div class="settings-section-heading">
+                            <div>
+                                <h3>Run capabilities</h3>
+                                <p>
+                                    Tools and response fields add requirements automatically.
+                                    Select any additional capabilities this run must support.
+                                </p>
+                            </div>
+                        </div>
+                        <div class="capability-grid">
+                            <label
+                                v-for="capability in capabilityChoices"
+                                :key="capability.id"
+                                class="capability-option"
+                            >
+                                <input
+                                    type="checkbox"
+                                    :checked="
+                                        modelRequest?.requiredCapabilities?.includes(
+                                            capability.id
+                                        ) ?? false
+                                    "
+                                    @change="toggleRequiredCapability(capability.id)"
+                                />
+                                <span>
+                                    <strong>{{ capability.label }}</strong>
+                                    <small>{{ capability.description }}</small>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <div class="settings-section-heading">
+                            <div>
+                                <h3>Provider matching</h3>
+                                <p>
+                                    Controls how OpenRouter chooses a provider for the
+                                    selected model.
+                                </p>
+                            </div>
+                        </div>
+                        <label class="setting-toggle-row">
+                            <span>
+                                <strong>Require parameter compatibility</strong>
+                                <small>
+                                    Only route this run to providers that support all
+                                    requested capabilities and parameters.
+                                </small>
+                            </span>
+                            <input
+                                type="checkbox"
+                                :checked="modelRequest?.routing?.requireParameters ?? false"
+                                @change="
+                                    updateModernModelRequest({
+                                        routing: {
+                                            ...(modelRequest?.routing ?? {}),
+                                            requireParameters: (
+                                                $event.target as HTMLInputElement
+                                            ).checked,
+                                        },
+                                    })
+                                "
+                            />
+                        </label>
+                    </div>
+                </template>
+            </div>
+
+            <div
+                v-if="activeTab === 'advanced' && (isAgentNode || isRouterNode || isWhileNode)"
+                class="advanced-tab section-panel"
+            >
+                <div class="field-group">
+                    <label class="field-label">Model ID</label>
+                    <div class="technical-value">
                         {{
                             isWhileNode
-                                ? whileData.conditionModel ||
-                                  DEFAULT_WORKFLOW_MODEL
+                                ? whileData.conditionModel || DEFAULT_WORKFLOW_MODEL
                                 : primaryModel
                         }}
-                    </code>
+                    </div>
+                    <p class="field-hint">Provider-specific identifier for this model.</p>
                 </div>
+
                 <template v-if="!isWhileNode">
-                    <label class="field-label">Fallback models</label>
-                    <textarea
-                        class="textarea-input"
-                        rows="3"
-                        :value="fallbackModelsText"
-                        placeholder="One model ID per line, in priority order"
-                        @change="updateFallbackModels"
-                    ></textarea>
-                    <label class="checkbox-label">
-                        <input
-                            type="checkbox"
-                            :checked="
-                                modelRequest?.routing
-                                    ?.requireParameters ?? false
-                            "
-                            @change="
-                                updateModernModelRequest({
-                                    routing: {
-                                        ...(modelRequest?.routing ?? {}),
-                                        requireParameters: (
-                                            $event.target as HTMLInputElement
-                                        ).checked,
-                                    },
-                                })
-                            "
-                        />
-                        Require provider parameter support
-                    </label>
-                    <template v-if="isAgentNode">
-                        <label class="field-label">Agent loop backend</label>
+                    <div class="field-group">
+                        <label class="field-label">Execution backend</label>
                         <select
                             class="model-select"
-                            :value="
-                                modelRequest?.backend ?? 'native'
-                            "
+                            :value="modelRequest?.backend ?? 'native'"
                             @change="
                                 updateModernModelRequest({
                                     backend: (
@@ -1583,42 +2146,22 @@ Example: "Improve this text, making it clearer and more engaging."'
                                 })
                             "
                         >
-                            <option value="native">
-                                OR3 native (Chat)
-                            </option>
+                            <option value="native">OR3 native (Chat)</option>
                             <option value="openrouter-agent">
                                 @openrouter/agent (Responses)
                             </option>
                         </select>
-                        <label class="field-label">OpenRouter server tools</label>
-                        <label
-                            v-for="tool in serverToolChoices"
-                            :key="tool"
-                            class="checkbox-label"
-                        >
-                            <input
-                                type="checkbox"
-                                :checked="
-                                    modelRequest?.serverTools?.some(
-                                        (selected) =>
-                                            selected.name === tool
-                                    ) ?? false
-                                "
-                                @change="toggleServerTool(tool)"
-                            />
-                            {{ tool }}
-                        </label>
-                    </template>
+                    </div>
                 </template>
             </div>
 
             <!-- Routes Tab -->
             <div
                 v-if="activeTab === 'routes' && isRouterNode"
-                class="routes-tab"
+                class="routes-tab section-panel"
             >
                 <div class="routes-header">
-                    <label class="field-label">Defined Routes</label>
+                    <label class="field-label">Defined routes</label>
                     <button class="add-btn with-label" @click="addRoute">
                         <svg
                             viewBox="0 0 24 24"
@@ -1629,12 +2172,12 @@ Example: "Improve this text, making it clearer and more engaging."'
                             <line x1="12" y1="5" x2="12" y2="19"></line>
                             <line x1="5" y1="12" x2="19" y2="12"></line>
                         </svg>
-                        Add Route
+                        Add route
                     </button>
                 </div>
                 <p class="field-hint">
-                    Define the possible routes for this node. Each route creates
-                    an output handle.
+                    Give each route a short name and clear selection guidance. The
+                    decision model uses both when choosing an output handle.
                 </p>
 
                 <div class="routes-list">
@@ -1643,15 +2186,31 @@ Example: "Improve this text, making it clearer and more engaging."'
                         :key="route.id"
                         class="route-item"
                     >
+                        <span
+                            class="route-color"
+                            aria-hidden="true"
+                        />
                         <div class="route-inputs">
-                            <input
-                                type="text"
-                                class="text-input route-label"
-                                :value="route.label"
-                                @input="(e) => updateRouteLabel(route.id, (e.target as HTMLInputElement).value)"
-                                placeholder="Route Label"
-                            />
-                            <code class="route-id">{{ route.id }}</code>
+                            <div class="field-group">
+                                <label class="field-label">Route name</label>
+                                <input
+                                    type="text"
+                                    class="text-input route-label"
+                                    :value="route.label"
+                                    @input="(e) => updateRouteLabel(route.id, (e.target as HTMLInputElement).value)"
+                                    placeholder="For example: Yes"
+                                />
+                            </div>
+                            <div class="field-group">
+                                <label class="field-label">When to choose this route</label>
+                                <textarea
+                                    class="description-textarea route-description"
+                                    :value="route.description || ''"
+                                    rows="2"
+                                    placeholder="Choose this when the text mentions God."
+                                    @input="(e) => updateRouteDescription(route.id, (e.target as HTMLTextAreaElement).value)"
+                                />
+                            </div>
                         </div>
                         <button
                             class="delete-btn"
@@ -1902,219 +2461,286 @@ Example: "Improve this text, making it clearer and more engaging."'
             </div>
 
             <!-- Tools Tab -->
-            <div v-if="activeTab === 'tools' && isAgentNode" class="tools-tab">
+            <div
+                v-if="activeTab === 'tools' && isAgentNode"
+                class="tools-tab section-panel"
+            >
                 <template v-if="availableTools.length > 0">
-                    <label class="field-label">Available Tools</label>
-                    <p class="field-hint">
-                        Select which tools this agent can use during execution.
-                    </p>
-
-                    <div class="tools-list">
-                        <label
-                            v-for="tool in availableTools"
-                            :key="tool.id"
-                            class="tool-item"
-                            :class="{
-                                enabled: selectedTools.includes(tool.id),
-                            }"
-                        >
-                            <input
-                                type="checkbox"
-                                :checked="selectedTools.includes(tool.id)"
-                                @change="toggleTool(tool.id)"
-                            />
-                            <div class="tool-info">
-                                <span class="tool-name">{{ tool.name }}</span>
-                                <span class="tool-description">{{
-                                    tool.description
-                                }}</span>
-                            </div>
+                    <div class="field-group">
+                        <label class="field-label" for="node-inspector-tool-search">
+                            Find tools
                         </label>
+                        <input
+                            id="node-inspector-tool-search"
+                            v-model="toolSearch"
+                            class="text-input search-input"
+                            type="search"
+                            placeholder="Search available tools"
+                        />
                     </div>
 
-                    <div v-if="selectedTools.length > 0" class="selected-tools">
-                        <label class="field-label"
-                            >Enabled Tools ({{ selectedTools.length }})</label
-                        >
-                        <div class="tool-chips">
-                            <span
-                                v-for="toolId in selectedTools"
-                                :key="toolId"
-                                class="tool-chip"
-                            >
-                                {{
-                                    availableTools.find((t) => t.id === toolId)
-                                        ?.name
-                                }}
-                                <button
-                                    class="chip-remove"
-                                    @click="toggleTool(toolId)"
-                                >
-                                    <svg
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                    >
-                                        <line
-                                            x1="18"
-                                            y1="6"
-                                            x2="6"
-                                            y2="18"
-                                        ></line>
-                                        <line
-                                            x1="6"
-                                            y1="6"
-                                            x2="18"
-                                            y2="18"
-                                        ></line>
-                                    </svg>
-                                </button>
-                            </span>
+                    <div class="settings-section">
+                        <div class="settings-section-heading">
+                            <div>
+                                <h3>Enabled tools</h3>
+                                <p>{{ selectedTools.length }} available to this agent.</p>
+                            </div>
                         </div>
+                        <div v-if="enabledToolOptions.length" class="settings-list">
+                            <div
+                                v-for="tool in enabledToolOptions"
+                                :key="tool.id"
+                                class="setting-list-row"
+                            >
+                                <span class="tool-glyph">✓</span>
+                                <span class="setting-list-copy">
+                                    <strong>{{ tool.name }}</strong>
+                                    <small>{{ tool.description || tool.id }}</small>
+                                </span>
+                                <button
+                                    class="row-remove-button"
+                                    type="button"
+                                    :aria-label="`Disable ${tool.name}`"
+                                    @click="toggleTool(tool.id)"
+                                >
+                                    <InspectorIcon name="close" />
+                                </button>
+                            </div>
+                        </div>
+                        <p v-else class="empty-setting-copy">No tools enabled yet.</p>
+                    </div>
+
+                    <div class="settings-section">
+                        <div class="settings-section-heading">
+                            <div>
+                                <h3>Available tools</h3>
+                                <p>Add tools the agent may use while it runs.</p>
+                            </div>
+                        </div>
+                        <div v-if="filteredAvailableTools.length" class="settings-list">
+                            <button
+                                v-for="tool in filteredAvailableTools"
+                                :key="tool.id"
+                                class="setting-list-row available-tool-row"
+                                type="button"
+                                @click="toggleTool(tool.id)"
+                            >
+                                <span class="tool-glyph">+</span>
+                                <span class="setting-list-copy">
+                                    <strong>{{ tool.name }}</strong>
+                                    <small>{{ tool.description || tool.id }}</small>
+                                </span>
+                                <span class="add-label">Add</span>
+                            </button>
+                        </div>
+                        <p v-else class="empty-setting-copy">
+                            No matching tools available.
+                        </p>
                     </div>
                 </template>
                 <div v-else class="tools-empty">
-                    <label class="field-label">Available Tools</label>
+                    <label class="field-label">Available tools</label>
                     <p class="field-hint">
                         No tools are registered. Add tools in or3-chat to enable
                         selections here.
                     </p>
+                </div>
+
+                <div class="settings-section provider-tools-section">
+                    <div class="settings-section-heading">
+                        <div>
+                            <h3>OpenRouter server tools</h3>
+                            <p>
+                                Provider-managed capabilities. Research Agent starts with
+                                search, page reading, and date/time enabled.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="provider-tool-grid">
+                        <label
+                            v-for="tool in serverToolChoices"
+                            :key="tool.name"
+                            class="provider-tool-option"
+                            :class="{
+                                enabled:
+                                    modelRequest?.serverTools?.some(
+                                        (selected) => selected.name === tool.name
+                                    ) ?? false,
+                            }"
+                        >
+                            <input
+                                type="checkbox"
+                                :checked="
+                                    modelRequest?.serverTools?.some(
+                                        (selected) => selected.name === tool.name
+                                    ) ?? false
+                                "
+                                @change="toggleServerTool(tool.name)"
+                            />
+                            <span>
+                                <strong>{{ tool.label }}</strong>
+                                <small>{{ tool.description }}</small>
+                            </span>
+                        </label>
+                    </div>
                 </div>
             </div>
 
             <!-- Error Handling Tab -->
             <div
                 v-if="activeTab === 'errors' && hasErrorHandling"
-                class="errors-tab"
+                class="errors-tab section-panel"
             >
-                <label class="field-label">Error handling mode</label>
-                <div class="mode-buttons">
+                <div class="field-group">
+                    <label class="field-label">Failure behavior</label>
+                    <p class="field-hint">Choose what happens when this node fails.</p>
+                </div>
+                <div class="choice-card-list">
                     <button
-                        class="mode-button"
+                        class="choice-card"
                         :class="{ active: errorHandling.mode === 'stop' }"
                         @click="updateErrorMode('stop')"
                     >
-                        Stop on error
+                        <span class="choice-indicator" />
+                        <span>
+                            <strong>Stop workflow</strong>
+                            <small>End execution and mark the run as failed.</small>
+                        </span>
                     </button>
                     <button
-                        class="mode-button"
+                        class="choice-card"
                         :class="{ active: errorHandling.mode === 'continue' }"
                         @click="updateErrorMode('continue')"
                     >
-                        Continue
+                        <span class="choice-indicator" />
+                        <span>
+                            <strong>Continue</strong>
+                            <small>Continue using an empty or error result.</small>
+                        </span>
                     </button>
                     <button
-                        class="mode-button"
+                        class="choice-card"
                         :class="{ active: errorHandling.mode === 'branch' }"
                         @click="updateErrorMode('branch')"
                     >
-                        Branch to error
+                        <span class="choice-indicator" />
+                        <span>
+                            <strong>Route to error output</strong>
+                            <small>Send the failure through a dedicated error connection.</small>
+                        </span>
                     </button>
                 </div>
 
-                <div class="retry-grid">
-                    <div class="field-group">
-                        <label class="field-label">Max retries</label>
+                <div class="settings-section retry-settings">
+                    <label class="setting-toggle-row">
+                        <span>
+                            <strong>Retry before failing</strong>
+                            <small>Retry the node before applying the failure behavior.</small>
+                        </span>
                         <input
-                            type="number"
-                            min="0"
-                            class="text-input"
-                            :value="retryConfig.maxRetries"
-                            @input="onRetryNumberChange('maxRetries', $event)"
+                            type="checkbox"
+                            :checked="retryEnabled"
+                            @change="toggleRetryEnabled"
                         />
-                    </div>
-                    <div class="field-group">
-                        <label class="field-label">Base delay (ms)</label>
-                        <input
-                            type="number"
-                            min="0"
-                            class="text-input"
-                            :value="retryConfig.baseDelay"
-                            @input="onRetryNumberChange('baseDelay', $event)"
-                        />
-                    </div>
-                    <div class="field-group">
-                        <label class="field-label">Max delay (ms)</label>
-                        <input
-                            type="number"
-                            min="0"
-                            class="text-input"
-                            :value="retryConfig.maxDelay ?? ''"
-                            @input="onRetryNumberChange('maxDelay', $event)"
-                        />
-                    </div>
-                </div>
+                    </label>
 
-                <div class="checkbox-group">
-                    <label class="field-label">Retry on codes</label>
-                    <div class="checkboxes">
-                        <label
-                            v-for="code in errorCodes"
-                            :key="code.id"
-                            class="checkbox-item"
-                        >
-                            <input
-                                type="checkbox"
-                                :checked="
-                                    (retryConfig.retryOn || []).includes(
-                                        code.id
-                                    )
-                                "
-                                @change="toggleRetryOn(code.id)"
-                            />
-                            <span>{{ code.label }}</span>
-                        </label>
-                    </div>
-                </div>
+                    <template v-if="retryEnabled">
+                        <div class="retry-grid">
+                            <div class="field-group">
+                                <label class="field-label">Max retries</label>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    class="text-input"
+                                    :value="retryConfig.maxRetries"
+                                    @input="onRetryNumberChange('maxRetries', $event)"
+                                />
+                            </div>
+                            <div class="field-group">
+                                <label class="field-label">Initial delay (ms)</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    class="text-input"
+                                    :value="retryConfig.baseDelay"
+                                    @input="onRetryNumberChange('baseDelay', $event)"
+                                />
+                            </div>
+                            <div class="field-group">
+                                <label class="field-label">Maximum delay (ms)</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    class="text-input"
+                                    :value="retryConfig.maxDelay ?? ''"
+                                    @input="onRetryNumberChange('maxDelay', $event)"
+                                />
+                            </div>
+                        </div>
 
-                <p class="field-hint">
-                    Branch mode sends errors to the "error" handle if connected.
-                    Continue mode logs the error and moves forward.
-                </p>
+                        <div class="checkbox-group">
+                            <label class="field-label">Retry on</label>
+                            <div class="checkboxes">
+                                <label
+                                    v-for="code in errorCodes"
+                                    :key="code.id"
+                                    class="checkbox-item"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        :checked="(retryConfig.retryOn || []).includes(code.id)"
+                                        @change="toggleRetryOn(code.id)"
+                                    />
+                                    <span>{{ code.label }}</span>
+                                </label>
+                            </div>
+                        </div>
+                    </template>
+                </div>
             </div>
 
             <!-- HITL Tab -->
-            <div v-if="activeTab === 'hitl' && hasHITL" class="hitl-tab">
-                <div class="hitl-toggle">
-                    <label class="toggle-label">
+            <div
+                v-if="activeTab === 'hitl' && hasHITL"
+                class="hitl-tab section-panel"
+            >
+                <div class="settings-section hitl-toggle">
+                    <label class="setting-toggle-row">
+                        <span>
+                            <strong>Enable human review</strong>
+                            <small>Pause this node and wait for a person before continuing.</small>
+                        </span>
                         <input
                             type="checkbox"
                             :checked="hitlConfig.enabled"
                             @change="toggleHITLEnabled"
                         />
-                        <span class="toggle-text">Enable Human Review</span>
                     </label>
-                    <p class="field-hint" style="margin-top: 4px">
-                        Pause execution for human approval, input, or review.
-                    </p>
                 </div>
 
                 <template v-if="hitlConfig.enabled">
                     <div class="hitl-section">
-                        <label class="field-label">Review Mode</label>
-                        <div class="mode-buttons">
+                        <label class="field-label">Review mode</label>
+                        <p class="field-hint">Choose how the reviewer should interact.</p>
+                        <div class="choice-card-list">
                             <button
                                 v-for="mode in hitlModes"
                                 :key="mode.id"
-                                class="mode-button hitl-mode"
+                                class="choice-card"
                                 :class="{ active: hitlConfig.mode === mode.id }"
                                 @click="updateHITLMode(mode.id)"
-                                :title="mode.description"
                             >
-                                {{ mode.label }}
+                                <span class="choice-indicator" />
+                                <span>
+                                    <strong>{{ mode.label }}</strong>
+                                    <small>{{ mode.description }}</small>
+                                </span>
                             </button>
                         </div>
-                        <p class="field-hint">
-                            {{
-                                hitlModes.find((m) => m.id === hitlConfig.mode)
-                                    ?.description
-                            }}
-                        </p>
                     </div>
 
                     <div class="hitl-section">
-                        <label class="field-label">Prompt</label>
+                        <label class="field-label">Review prompt</label>
                         <textarea
                             :value="hitlConfig.prompt || ''"
                             class="prompt-textarea hitl-prompt"
@@ -2136,7 +2762,7 @@ Example: "Improve this text, making it clearer and more engaging."'
                             />
                         </div>
                         <div class="field-group">
-                            <label class="field-label">Default Action</label>
+                            <label class="field-label">Default action</label>
                             <select
                                 class="model-select"
                                 :value="hitlConfig.defaultAction || 'reject'"
@@ -2303,7 +2929,7 @@ Example: "Improve this text, making it clearer and more engaging."'
             <!-- Output Tab -->
             <div
                 v-if="activeTab === 'output' && isOutputNode"
-                class="output-tab"
+                class="output-tab section-panel"
             >
                 <!-- Mode Selection -->
                 <OutputModeSelector
@@ -2355,28 +2981,33 @@ Example: "Improve this text, making it clearer and more engaging."'
                     </div>
                 </div>
 
-                <!-- Intro/Outro -->
-                <div class="field-group">
-                    <label class="field-label">Introduction</label>
-                    <textarea
-                        class="text-input"
-                        :value="outputData.introText || ''"
-                        placeholder="Optional text to prepend..."
-                        rows="2"
-                        @input="updateIntroText"
-                    ></textarea>
-                </div>
+                <!-- Optional formatting -->
+                <details class="settings-disclosure">
+                    <summary>Optional formatting</summary>
+                    <div class="disclosure-content">
+                        <div class="field-group">
+                            <label class="field-label">Text before output</label>
+                            <textarea
+                                class="text-input"
+                                :value="outputData.introText || ''"
+                                placeholder="Optional text to prepend..."
+                                rows="2"
+                                @input="updateIntroText"
+                            ></textarea>
+                        </div>
 
-                <div class="field-group">
-                    <label class="field-label">Conclusion</label>
-                    <textarea
-                        class="text-input"
-                        :value="outputData.outroText || ''"
-                        placeholder="Optional text to append..."
-                        rows="2"
-                        @input="updateOutroText"
-                    ></textarea>
-                </div>
+                        <div class="field-group">
+                            <label class="field-label">Text after output</label>
+                            <textarea
+                                class="text-input"
+                                :value="outputData.outroText || ''"
+                                placeholder="Optional text to append..."
+                                rows="2"
+                                @input="updateOutroText"
+                            ></textarea>
+                        </div>
+                    </div>
+                </details>
 
                 <!-- Preview -->
                 <OutputPreview :previewData="previewData" />
@@ -2454,13 +3085,6 @@ Example: "Improve this text, making it clearer and more engaging."'
                     </div>
                 </div>
             </div>
-        </div>
-
-        <!-- Start node (minimal) -->
-        <div v-if="isStartNode" class="inspector-content">
-            <div class="info-box">
-                The Start node is the entry point for workflow execution.
-                Connect it to other nodes to define your workflow.
             </div>
         </div>
     </div>
@@ -3870,5 +4494,1101 @@ Example: "Improve this text, making it clearer and more engaging."'
     display: flex;
     flex-direction: column;
     gap: var(--or3-spacing-md, 16px);
+}
+
+/* Inspector overview and detail architecture */
+.node-inspector {
+    container-type: inline-size;
+    min-width: 0;
+    background: var(--or3-color-bg-primary, #ffffff);
+    color: var(--or3-color-text-primary, #111827);
+}
+
+.inspector-header {
+    position: relative;
+    z-index: var(--or3-z-sticky, 20);
+    justify-content: space-between;
+    min-height: 56px;
+    margin: 0;
+    padding: 8px 12px;
+    background: var(--or3-color-bg-primary, #ffffff);
+    border-bottom: 1px solid var(--or3-color-border, rgba(0, 0, 0, 0.1));
+}
+
+.inspector-header-title,
+.inspector-header-actions {
+    display: flex;
+    align-items: center;
+}
+
+.inspector-header-title {
+    gap: 9px;
+    min-width: 0;
+    font-size: 14px;
+    font-weight: var(--or3-font-semibold, 600);
+}
+
+.inspector-header-title > span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.inspector-header-actions {
+    gap: 2px;
+}
+
+.header-icon,
+.node-summary-icon,
+.section-page-icon {
+    background: var(--or3-color-accent-muted, rgba(37, 99, 235, 0.12));
+    color: var(--or3-color-accent, #2563eb);
+    border: 1px solid var(--or3-color-border-subtle, rgba(0, 0, 0, 0.05));
+}
+
+.header-icon.start,
+.node-summary-icon.start {
+    background: var(--or3-color-success-muted, rgba(5, 150, 105, 0.12));
+    color: var(--or3-color-success, #059669);
+}
+
+.header-icon.router,
+.node-summary-icon.router {
+    background: var(--or3-color-warning-muted, rgba(217, 119, 6, 0.12));
+    color: var(--or3-color-text-primary, #111827);
+}
+
+.header-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    color: var(--or3-color-text-secondary, #4b5563);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--or3-radius-md, 8px);
+    cursor: pointer;
+}
+
+.header-action:hover,
+.header-action:focus-visible {
+    color: var(--or3-color-text-primary, #111827);
+    background: var(--or3-color-surface-hover, #f3f4f6);
+    border-color: var(--or3-color-border, rgba(0, 0, 0, 0.1));
+    outline: none;
+}
+
+.header-action svg {
+    width: 18px;
+    height: 18px;
+}
+
+.inspector-menu {
+    position: relative;
+}
+
+.inspector-menu > summary {
+    list-style: none;
+}
+
+.inspector-menu > summary::-webkit-details-marker {
+    display: none;
+}
+
+.inspector-menu-popover {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    width: max-content;
+    min-width: 132px;
+    padding: 4px;
+    background: var(--or3-color-bg-elevated, var(--or3-color-bg-primary, #ffffff));
+    border: 1px solid var(--or3-color-border, rgba(0, 0, 0, 0.1));
+    border-radius: var(--or3-radius-md, 8px);
+    box-shadow: var(--or3-shadow-md, 0 8px 24px rgba(0, 0, 0, 0.12));
+}
+
+.menu-danger {
+    width: 100%;
+    padding: 8px 10px;
+    color: var(--or3-color-error, #dc2626);
+    text-align: left;
+    background: transparent;
+    border: 0;
+    border-radius: var(--or3-radius-sm, 6px);
+    cursor: pointer;
+}
+
+.menu-danger:hover {
+    background: var(--or3-color-error-muted, rgba(220, 38, 38, 0.12));
+}
+
+.inspector-body {
+    flex: 1;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-color: var(--or3-color-border, rgba(0, 0, 0, 0.1)) transparent;
+}
+
+.inspector-overview {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 14px;
+}
+
+.node-summary {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+    padding: 4px 2px 8px;
+}
+
+.node-summary-icon,
+.section-page-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: var(--or3-radius-lg, 12px);
+}
+
+.node-summary-icon svg {
+    width: 25px;
+    height: 25px;
+}
+
+.node-summary-copy {
+    min-width: 0;
+}
+
+.node-summary-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.node-summary h2,
+.section-page-title h2 {
+    margin: 0;
+    color: var(--or3-color-text-primary, #111827);
+    font-size: 16px;
+    font-weight: var(--or3-font-semibold, 600);
+    line-height: 1.25;
+}
+
+.node-summary p,
+.section-page-title p {
+    margin: 4px 0 0;
+    color: var(--or3-color-text-secondary, #4b5563);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.node-type-badge {
+    max-width: 100%;
+    padding: 3px 7px;
+    overflow: hidden;
+    color: var(--or3-color-text-secondary, #4b5563);
+    font-size: 10px;
+    font-weight: var(--or3-font-medium, 500);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    background: var(--or3-color-surface-subtle, rgba(0, 0, 0, 0.04));
+    border: 1px solid var(--or3-color-border-subtle, rgba(0, 0, 0, 0.05));
+    border-radius: var(--or3-radius-sm, 6px);
+}
+
+.node-status {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    margin-top: 7px;
+    color: var(--or3-color-success, #059669);
+    font-size: 11px;
+    font-weight: var(--or3-font-medium, 500);
+}
+
+.node-status.has-issues {
+    color: var(--or3-color-text-primary, #111827);
+}
+
+.status-mark {
+    width: 7px;
+    height: 7px;
+    background: currentColor;
+    border-radius: var(--or3-radius-full, 999px);
+}
+
+.section-navigation {
+    overflow: hidden;
+    background: var(--or3-color-bg-primary, #ffffff);
+    border: 1px solid var(--or3-color-border, rgba(0, 0, 0, 0.1));
+    border-radius: var(--or3-radius-lg, 12px);
+}
+
+.section-navigation-row {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) minmax(0, auto) 14px;
+    gap: 10px;
+    align-items: center;
+    width: 100%;
+    min-height: 62px;
+    padding: 9px 11px;
+    color: inherit;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--or3-color-border-subtle, rgba(0, 0, 0, 0.05));
+    cursor: pointer;
+}
+
+.section-navigation-row:last-child {
+    border-bottom: 0;
+}
+
+.section-navigation-row:hover,
+.section-navigation-row:focus-visible {
+    background: var(--or3-color-surface-hover, #f3f4f6);
+    outline: none;
+}
+
+.section-navigation-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    color: var(--or3-color-text-secondary, #4b5563);
+    background: var(--or3-color-surface-subtle, rgba(0, 0, 0, 0.04));
+    border: 1px solid var(--or3-color-border-subtle, rgba(0, 0, 0, 0.05));
+    border-radius: var(--or3-radius-md, 8px);
+}
+
+.section-navigation-icon svg,
+.section-page-icon svg {
+    width: 18px;
+    height: 18px;
+}
+
+.section-navigation-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.section-navigation-copy strong {
+    overflow: hidden;
+    color: var(--or3-color-text-primary, #111827);
+    font-size: 13px;
+    font-weight: var(--or3-font-semibold, 600);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.section-navigation-copy small,
+.section-navigation-summary {
+    color: var(--or3-color-text-muted, #6b7280);
+    font-size: 11px;
+    line-height: 1.3;
+}
+
+.section-navigation-summary {
+    max-width: 116px;
+    overflow: hidden;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.section-navigation-summary.accent {
+    color: var(--or3-color-accent, #2563eb);
+    font-weight: var(--or3-font-medium, 500);
+}
+
+.section-navigation-summary.warning {
+    color: var(--or3-color-text-primary, #111827);
+}
+
+.section-chevron {
+    width: 14px;
+    height: 14px;
+    color: var(--or3-color-text-muted, #6b7280);
+}
+
+.overview-note,
+.inspector-tip {
+    padding: 10px 11px;
+    color: var(--or3-color-text-secondary, #4b5563);
+    font-size: 12px;
+    line-height: 1.4;
+    background: var(--or3-color-surface-subtle, rgba(0, 0, 0, 0.04));
+    border: 1px solid var(--or3-color-border-subtle, rgba(0, 0, 0, 0.05));
+    border-radius: var(--or3-radius-md, 8px);
+}
+
+.inspector-tip {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    color: var(--or3-color-accent, #2563eb);
+    background: var(--or3-color-accent-subtle, rgba(37, 99, 235, 0.06));
+}
+
+.inspector-tip > span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 17px;
+    height: 17px;
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-weight: var(--or3-font-semibold, 600);
+    border: 1px solid currentColor;
+    border-radius: var(--or3-radius-full, 999px);
+}
+
+.inspector-section-page {
+    min-width: 0;
+}
+
+.section-page-header {
+    padding: 10px 14px 14px;
+    border-bottom: 1px solid var(--or3-color-border-subtle, rgba(0, 0, 0, 0.05));
+    margin-bottom: 14px;
+}
+
+.back-button {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    min-height: 30px;
+    margin: 0 0 9px;
+    padding: 4px 7px;
+    color: var(--or3-color-text-secondary, #4b5563);
+    font-size: 12px;
+    background: transparent;
+    border: 0;
+    border-radius: var(--or3-radius-sm, 6px);
+    cursor: pointer;
+}
+
+.back-button:hover,
+.back-button:focus-visible {
+    color: var(--or3-color-text-primary, #111827);
+    background: var(--or3-color-surface-hover, #f3f4f6);
+    outline: none;
+}
+
+.back-button svg {
+    width: 15px;
+    height: 15px;
+}
+
+.section-page-title {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+}
+
+.section-page-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: var(--or3-radius-md, 8px);
+}
+
+.inspector-section-page > div:not(.section-page-header) {
+    padding-right: 14px;
+    padding-left: 14px;
+    margin-bottom: 18px;
+}
+
+.general-tab > .field-group + .field-group,
+.advanced-tab > .field-group + .field-group,
+.prompt-tab > .field-group + .field-group,
+.disclosure-content > .field-group + .field-group,
+.structured-field-card > .field-group {
+    margin-top: 14px;
+}
+
+.field-label {
+    margin-bottom: 3px;
+    color: var(--or3-color-text-primary, #111827);
+    font-size: 12px;
+    font-weight: var(--or3-font-medium, 500);
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+.field-hint {
+    margin: 4px 0 0;
+    color: var(--or3-color-text-muted, #6b7280);
+    font-size: 11px;
+}
+
+.text-input,
+.description-textarea,
+.model-select,
+.textarea-input,
+.prompt-textarea {
+    box-sizing: border-box;
+    width: 100%;
+    color: var(--or3-color-text-primary, #111827);
+    background: var(--or3-color-bg-primary, #ffffff);
+    border-color: var(--or3-color-border, rgba(0, 0, 0, 0.1));
+    border-radius: var(--or3-radius-md, 8px);
+}
+
+.text-input,
+.model-select {
+    min-height: 38px;
+    padding: 8px 10px;
+}
+
+.description-textarea {
+    min-height: 84px;
+    padding: 9px 10px;
+}
+
+.prompt-textarea {
+    min-height: 160px;
+    padding: 10px;
+}
+
+.text-input:focus,
+.description-textarea:focus,
+.model-select:focus,
+.textarea-input:focus,
+.prompt-textarea:focus {
+    background: var(--or3-color-bg-primary, #ffffff);
+    border-color: var(--or3-color-accent, #2563eb);
+    outline: 2px solid var(--or3-color-accent-subtle, rgba(37, 99, 235, 0.06));
+    outline-offset: 1px;
+}
+
+.settings-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 16px;
+    margin-top: 16px;
+    border-top: 1px solid var(--or3-color-border-subtle, rgba(0, 0, 0, 0.05));
+}
+
+.settings-section h3,
+.settings-section-heading h3 {
+    margin: 0;
+    color: var(--or3-color-text-primary, #111827);
+    font-size: 12px;
+    font-weight: var(--or3-font-semibold, 600);
+}
+
+.settings-section-heading p {
+    margin: 3px 0 0;
+    color: var(--or3-color-text-muted, #6b7280);
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.fallback-model-list,
+.settings-list {
+    overflow: hidden;
+    border: 1px solid var(--or3-color-border, rgba(0, 0, 0, 0.1));
+    border-radius: var(--or3-radius-md, 8px);
+}
+
+.fallback-model-row {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr) 32px;
+    gap: 6px;
+    align-items: center;
+    min-height: 48px;
+    padding: 5px 6px 5px 9px;
+    border-bottom: 1px solid var(--or3-color-border-subtle, rgba(0, 0, 0, 0.05));
+}
+
+.fallback-model-row:last-child,
+.setting-list-row:last-child {
+    border-bottom: 0;
+}
+
+.fallback-model-row .model-select {
+    min-height: 34px;
+    padding: 6px 8px;
+    background: transparent;
+    border-color: transparent;
+}
+
+.fallback-order {
+    color: var(--or3-color-text-muted, #6b7280);
+    font-size: 11px;
+    text-align: center;
+}
+
+.row-remove-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    color: var(--or3-color-text-muted, #6b7280);
+    background: transparent;
+    border: 0;
+    border-radius: var(--or3-radius-sm, 6px);
+    cursor: pointer;
+}
+
+.row-remove-button:hover {
+    color: var(--or3-color-error, #dc2626);
+    background: var(--or3-color-error-muted, rgba(220, 38, 38, 0.12));
+}
+
+.row-remove-button svg {
+    width: 15px;
+    height: 15px;
+}
+
+.secondary-button {
+    align-self: flex-start;
+    min-height: 34px;
+    padding: 6px 10px;
+    color: var(--or3-color-text-primary, #111827);
+    font-size: 12px;
+    font-weight: var(--or3-font-medium, 500);
+    background: var(--or3-color-bg-primary, #ffffff);
+    border: 1px solid var(--or3-color-border, rgba(0, 0, 0, 0.1));
+    border-radius: var(--or3-radius-md, 8px);
+    cursor: pointer;
+}
+
+.secondary-button:hover:not(:disabled) {
+    background: var(--or3-color-surface-hover, #f3f4f6);
+    border-color: var(--or3-color-border-hover, rgba(0, 0, 0, 0.18));
+}
+
+.secondary-button:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.empty-setting-copy {
+    margin: 0;
+    color: var(--or3-color-text-muted, #6b7280);
+    font-size: 11px;
+}
+
+.setting-toggle-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 58px;
+    padding: 10px 11px;
+    border: 1px solid var(--or3-color-border, rgba(0, 0, 0, 0.1));
+    border-radius: var(--or3-radius-md, 8px);
+}
+
+.setting-toggle-row > span {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.setting-toggle-row strong {
+    color: var(--or3-color-text-primary, #111827);
+    font-size: 12px;
+    font-weight: var(--or3-font-medium, 500);
+}
+
+.setting-toggle-row small {
+    color: var(--or3-color-text-muted, #6b7280);
+    font-size: 10px;
+    line-height: 1.35;
+}
+
+.setting-toggle-row input[type='checkbox'] {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+    accent-color: var(--or3-color-accent, #2563eb);
+}
+
+.capability-grid,
+.provider-tool-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.capability-option,
+.provider-tool-option {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+    min-height: 58px;
+    padding: 9px;
+    background: var(--or3-color-bg-primary, #ffffff);
+    border: 1px solid var(--or3-color-border, rgba(0, 0, 0, 0.1));
+    border-radius: var(--or3-radius-md, 8px);
+    cursor: pointer;
+}
+
+.capability-option:has(input:checked),
+.provider-tool-option.enabled {
+    background: var(--or3-color-accent-subtle, rgba(37, 99, 235, 0.06));
+    border-color: var(--or3-color-accent, #2563eb);
+}
+
+.capability-option input,
+.provider-tool-option input,
+.compact-checkbox input {
+    width: 16px;
+    height: 16px;
+    margin: 1px 0 0;
+    accent-color: var(--or3-color-accent, #2563eb);
+}
+
+.capability-option > span,
+.provider-tool-option > span {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.capability-option strong,
+.provider-tool-option strong {
+    color: var(--or3-color-text-primary, #111827);
+    font-size: 11px;
+    font-weight: var(--or3-font-medium, 500);
+}
+
+.capability-option small,
+.provider-tool-option small {
+    color: var(--or3-color-text-muted, #6b7280);
+    font-size: 10px;
+    line-height: 1.35;
+}
+
+.provider-tools-section {
+    margin-bottom: 0;
+}
+
+.structured-heading {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    justify-content: space-between;
+}
+
+.structured-heading .secondary-button {
+    flex: 0 0 auto;
+}
+
+.structured-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.structured-field-card {
+    padding: 11px;
+    background: var(--or3-color-bg-primary, #ffffff);
+    border: 1px solid var(--or3-color-border, rgba(0, 0, 0, 0.1));
+    border-radius: var(--or3-radius-md, 8px);
+}
+
+.structured-field-topline {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(96px, 0.8fr);
+    gap: 8px;
+    align-items: end;
+}
+
+.structured-field-footer {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 10px;
+}
+
+.compact-checkbox {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    color: var(--or3-color-text-secondary, #4b5563);
+    font-size: 11px;
+}
+
+.text-danger-button {
+    padding: 4px 6px;
+    color: var(--or3-color-error, #dc2626);
+    font-size: 10px;
+    background: transparent;
+    border: 0;
+    border-radius: var(--or3-radius-sm, 6px);
+    cursor: pointer;
+}
+
+.text-danger-button:hover {
+    background: var(--or3-color-error-muted, rgba(220, 38, 38, 0.12));
+}
+
+.empty-settings-card {
+    margin-top: 12px;
+    padding: 14px;
+    color: var(--or3-color-text-muted, #6b7280);
+    font-size: 11px;
+    text-align: center;
+    background: var(--or3-color-surface-subtle, rgba(0, 0, 0, 0.04));
+    border: 1px dashed var(--or3-color-border, rgba(0, 0, 0, 0.1));
+    border-radius: var(--or3-radius-md, 8px);
+}
+
+.preset-note {
+    margin-top: 14px;
+    padding: 10px 11px;
+    color: var(--or3-color-text-secondary, #4b5563);
+    background: var(--or3-color-accent-subtle, rgba(37, 99, 235, 0.06));
+    border: 1px solid var(--or3-color-border-subtle, rgba(0, 0, 0, 0.05));
+    border-radius: var(--or3-radius-md, 8px);
+}
+
+.preset-note strong {
+    color: var(--or3-color-text-primary, #111827);
+    font-size: 11px;
+    font-weight: var(--or3-font-semibold, 600);
+}
+
+.preset-note p {
+    margin: 3px 0 0;
+    font-size: 10px;
+    line-height: 1.45;
+}
+
+.technical-value {
+    padding: 9px 10px;
+    overflow-wrap: anywhere;
+    color: var(--or3-color-text-secondary, #4b5563);
+    font-family: var(--or3-font-mono, ui-monospace), monospace;
+    font-size: 11px;
+    line-height: 1.4;
+    background: var(--or3-color-surface-subtle, rgba(0, 0, 0, 0.04));
+    border: 1px solid var(--or3-color-border-subtle, rgba(0, 0, 0, 0.05));
+    border-radius: var(--or3-radius-md, 8px);
+}
+
+.search-input {
+    padding-left: 10px;
+}
+
+.setting-list-row {
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+    gap: 9px;
+    align-items: center;
+    width: 100%;
+    min-height: 52px;
+    padding: 7px 8px;
+    color: inherit;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--or3-color-border-subtle, rgba(0, 0, 0, 0.05));
+}
+
+.available-tool-row {
+    cursor: pointer;
+}
+
+.available-tool-row:hover {
+    background: var(--or3-color-surface-hover, #f3f4f6);
+}
+
+.tool-glyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    color: var(--or3-color-accent, #2563eb);
+    font-size: 13px;
+    font-weight: var(--or3-font-semibold, 600);
+    background: var(--or3-color-accent-muted, rgba(37, 99, 235, 0.12));
+    border-radius: var(--or3-radius-md, 8px);
+}
+
+.setting-list-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.setting-list-copy strong,
+.setting-list-copy small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.setting-list-copy strong {
+    color: var(--or3-color-text-primary, #111827);
+    font-size: 12px;
+    font-weight: var(--or3-font-medium, 500);
+}
+
+.setting-list-copy small {
+    color: var(--or3-color-text-muted, #6b7280);
+    font-size: 10px;
+}
+
+.add-label {
+    padding: 4px 6px;
+    color: var(--or3-color-accent, #2563eb);
+    font-size: 10px;
+    font-weight: var(--or3-font-medium, 500);
+}
+
+.choice-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.choice-card {
+    display: grid;
+    grid-template-columns: 16px minmax(0, 1fr);
+    gap: 9px;
+    align-items: start;
+    width: 100%;
+    min-height: 56px;
+    padding: 9px 10px;
+    color: inherit;
+    text-align: left;
+    background: var(--or3-color-bg-primary, #ffffff);
+    border: 1px solid var(--or3-color-border, rgba(0, 0, 0, 0.1));
+    border-radius: var(--or3-radius-md, 8px);
+    cursor: pointer;
+}
+
+.choice-card:hover {
+    background: var(--or3-color-surface-hover, #f3f4f6);
+}
+
+.choice-card.active {
+    background: var(--or3-color-accent-subtle, rgba(37, 99, 235, 0.06));
+    border-color: var(--or3-color-accent, #2563eb);
+}
+
+.choice-card > span:last-child {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.choice-card strong {
+    color: var(--or3-color-text-primary, #111827);
+    font-size: 12px;
+    font-weight: var(--or3-font-medium, 500);
+}
+
+.choice-card small {
+    color: var(--or3-color-text-muted, #6b7280);
+    font-size: 10px;
+    line-height: 1.35;
+}
+
+.choice-indicator {
+    width: 12px;
+    height: 12px;
+    margin-top: 2px;
+    border: 1px solid var(--or3-color-text-muted, #6b7280);
+    border-radius: var(--or3-radius-full, 999px);
+}
+
+.choice-card.active .choice-indicator {
+    background: var(--or3-color-accent, #2563eb);
+    border: 3px solid var(--or3-color-bg-primary, #ffffff);
+    outline: 1px solid var(--or3-color-accent, #2563eb);
+}
+
+.retry-settings {
+    margin-top: 4px;
+}
+
+.retry-grid,
+.hitl-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: end;
+}
+
+.loop-grid {
+    align-items: end;
+}
+
+.checkbox-group .checkboxes {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.checkbox-item {
+    min-width: 0;
+    background: var(--or3-color-bg-primary, #ffffff);
+    border-radius: var(--or3-radius-md, 8px);
+}
+
+.checkbox-item input {
+    accent-color: var(--or3-color-accent, #2563eb);
+}
+
+.hitl-toggle {
+    padding: 0;
+    margin-top: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+}
+
+.route-color {
+    width: 9px;
+    height: 9px;
+    flex: 0 0 auto;
+    background: var(--or3-color-accent, #2563eb);
+    border-radius: var(--or3-radius-full, 999px);
+}
+
+.route-item:nth-child(3n + 2) .route-color {
+    background: var(--or3-color-success, #059669);
+}
+
+.route-item:nth-child(3n) .route-color {
+    background: var(--or3-color-warning, #d97706);
+}
+
+.route-item {
+    align-items: flex-start;
+    background: var(--or3-color-bg-primary, #ffffff);
+}
+
+.route-item .route-color {
+    margin-top: 30px;
+}
+
+.route-item > .delete-btn {
+    margin-top: 24px;
+}
+
+.route-inputs .field-group + .field-group {
+    margin-top: 10px;
+}
+
+.route-description {
+    min-height: 66px;
+    max-height: 120px;
+}
+
+.settings-disclosure {
+    overflow: hidden;
+    border: 1px solid var(--or3-color-border, rgba(0, 0, 0, 0.1));
+    border-radius: var(--or3-radius-md, 8px);
+}
+
+.settings-disclosure > summary {
+    padding: 10px 11px;
+    color: var(--or3-color-text-primary, #111827);
+    font-size: 12px;
+    font-weight: var(--or3-font-medium, 500);
+    cursor: pointer;
+}
+
+.settings-disclosure[open] > summary {
+    background: var(--or3-color-surface-subtle, rgba(0, 0, 0, 0.04));
+    border-bottom: 1px solid var(--or3-color-border-subtle, rgba(0, 0, 0, 0.05));
+}
+
+.disclosure-content {
+    padding: 11px;
+}
+
+@container (max-width: 360px) {
+    .inspector-overview {
+        padding: 10px;
+    }
+
+    .node-summary {
+        grid-template-columns: 42px minmax(0, 1fr);
+        gap: 9px;
+    }
+
+    .node-summary-icon {
+        width: 42px;
+        height: 42px;
+    }
+
+    .section-navigation-row {
+        grid-template-columns: 32px minmax(0, 1fr) 13px;
+        gap: 8px;
+        min-height: 56px;
+        padding: 8px 9px;
+    }
+
+    .section-navigation-icon {
+        width: 32px;
+        height: 32px;
+    }
+
+    .section-navigation-copy small {
+        display: none;
+    }
+
+    .section-navigation-summary {
+        grid-column: 2;
+        max-width: 100%;
+        text-align: left;
+    }
+
+    .section-chevron {
+        grid-column: 3;
+        grid-row: 1 / span 2;
+    }
+
+    .retry-grid,
+    .hitl-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .checkbox-group .checkboxes {
+        grid-template-columns: 1fr;
+    }
+
+    .capability-grid,
+    .provider-tool-grid,
+    .structured-field-topline {
+        grid-template-columns: 1fr;
+    }
+
+    .structured-heading {
+        flex-direction: column;
+    }
+
+    .setting-toggle-row {
+        align-items: flex-start;
+    }
 }
 </style>

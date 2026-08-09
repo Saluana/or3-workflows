@@ -222,7 +222,7 @@ When max is reached:
 StarterKit.configure({
     whileLoop: {
         maxIterations: 20, // Default max
-        defaultModel: 'openai/gpt-4o-mini',
+        defaultModel: 'deepseek/deepseek-v4-flash-latest',
     },
 });
 ```

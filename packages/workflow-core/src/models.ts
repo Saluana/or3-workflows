@@ -57,7 +57,7 @@
 type OpenString<TKnown extends string> = TKnown | (string & {});
 
 /** One compatibility-safe default used by the core runtime and visual editor. */
-export const DEFAULT_WORKFLOW_MODEL = 'openai/gpt-4o-mini';
+export const DEFAULT_WORKFLOW_MODEL = 'deepseek/deepseek-v4-flash-latest';
 
 /** Supported model input modalities (open union). */
 export type ModelInputModality = OpenString<

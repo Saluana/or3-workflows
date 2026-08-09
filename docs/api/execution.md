@@ -22,7 +22,7 @@ const client = new OpenRouter({
 });
 
 const adapter = new OpenRouterExecutionAdapter(client, {
-    defaultModel: 'openai/gpt-4o-mini',
+    defaultModel: 'deepseek/deepseek-v4-flash-latest',
 });
 ```
 

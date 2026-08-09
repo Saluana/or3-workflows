@@ -82,6 +82,25 @@ const result = await editor.execute({
 | `subflow`    | Embed another workflow as a node                     |
 | `output`     | Format and return final results                      |
 
+Router routes can include an optional plain-language `description`. During
+execution, the router includes that guidance in its classification prompt, so
+short labels such as `Yes` and `No` can still have precise selection rules.
+
+```typescript
+const routes = [
+    {
+        id: 'yes',
+        label: 'Yes',
+        description: 'Choose when the input mentions God.',
+    },
+    {
+        id: 'no',
+        label: 'No',
+        description: 'Choose when the input does not mention God.',
+    },
+];
+```
+
 ## Configuration
 
 ```typescript

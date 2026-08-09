@@ -108,6 +108,11 @@ Property inspector for the selected node.
 <NodeInspector :editor="editor" />
 ```
 
+The inspector uses an overview-to-detail layout. Structured Agent response
+fields can be edited as named text, number, yes/no, or JSON values; router
+routes support plain-language selection descriptions; and model settings expose
+explicit run-capability requirements alongside provider matching.
+
 ### ValidationOverlay
 
 Displays automatically updating validation errors and warnings on the canvas. Node issues use labels instead of technical IDs, and `open-node` is emitted when an actionable issue is selected.

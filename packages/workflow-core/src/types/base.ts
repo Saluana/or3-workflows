@@ -366,6 +366,8 @@ export interface RouterNodeData extends BaseNodeData {
 export interface RouteDefinition {
     id: string;
     label: string;
+    /** Plain-language guidance used by the router when choosing this route. */
+    description?: string;
     condition?: RouteCondition;
 }
 
