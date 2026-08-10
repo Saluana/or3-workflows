@@ -22,7 +22,7 @@ const client = new OpenRouter({
 });
 
 const adapter = new OpenRouterExecutionAdapter(client, {
-    defaultModel: 'deepseek/deepseek-v4-flash-latest',
+    defaultModel: 'openai/gpt-5.6-luna',
 });
 ```
 
@@ -61,7 +61,7 @@ interface ExecutionOptions {
     /** Pluggable long-term memory adapter */
     memory?: MemoryAdapter;
 
-    /** Provide an existing session ID to reuse */
+    /** Stable ID used for OpenRouter provider stickiness and prompt-cache routing */
     sessionId?: string;
 
     /** Registry of available subflows */
@@ -147,22 +147,19 @@ if (!result.success && result.error?.message.includes('validation failed')) {
 }
 ```
 
-## With Conversation History
+## Agent context and prompt caching
 
-```typescript
-const history: ChatMessage[] = [
-    { role: 'user', content: 'My name is Alice' },
-    { role: 'assistant', content: 'Hello Alice! How can I help?' },
-];
+Agent nodes are isolated dataflow stages, not turns from one shared assistant.
+Each provider request contains stable system instructions followed by the
+resolved inbound edge data and optional node `task`. Prior Agent outputs are
+available through `result.nodeOutputs`, but are not replayed into unrelated
+model requests. Connect required context through edges, using input mappings
+when several sources must be labeled or combined.
 
-const result = await adapter.execute({
-    nodes,
-    edges,
-    input: 'What is my name?',
-    conversationHistory: history,
-});
-// Output: "Your name is Alice."
-```
+The adapter sends the same run-scoped `session_id` and `prompt_cache_key` on
+every model request. This keeps OpenRouter routing sticky while providers reuse
+matching prompt prefixes. Supplying a stable `ExecutionOptions.sessionId` also
+lets a host deliberately retain that routing identity across resumed work.
 
 ## Callbacks
 
@@ -303,6 +300,12 @@ interface ExecutionResult {
 
     /** Per-request token usage details */
     tokenUsageDetails?: Array<TokenUsageDetails & { nodeId: string }>;
+
+    /** Provider/model attempt records, including nested subflows */
+    modelCalls?: ModelCallRecord[];
+
+    /** Sum of provider-reported model costs, including nested subflows */
+    costUsd?: number;
 }
 
 interface TokenUsage {
@@ -324,6 +327,14 @@ interface TokenUsageDetails extends TokenUsage {
     remainingContext: number;
 }
 ```
+
+Model-call and token-usage records from subflows are included in the parent
+result with scoped node IDs, so parent-level observability and cost totals cover
+the complete nested execution.
+
+When a provider reports prompt-cache activity, each model call's `usage`
+includes `cachedTokens` and `cacheWriteTokens`. Missing provider fields remain
+`undefined` rather than being reported as zero.
 
 ## Error Handling
 

@@ -720,7 +720,6 @@ defineExpose({
             :max-zoom="2"
             fit-view-on-init
             :pan-on-drag="panOnDrag"
-            :selection-key-code="selectionKeyCode"
             :selection-mode="selectionMode"
             :delete-key-code="null"
             @node-click="onNodeClick"

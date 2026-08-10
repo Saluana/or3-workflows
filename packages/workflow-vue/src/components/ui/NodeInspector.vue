@@ -1204,6 +1204,17 @@ const updateDescription = (event: Event) => {
     );
 };
 
+const updateMaxTokens = (event: Event) => {
+    const value = (event.target as HTMLInputElement).value.trim();
+    const maxTokens = Number(value);
+    updateNodeField(
+        'maxTokens',
+        value && Number.isInteger(maxTokens) && maxTokens > 0
+            ? maxTokens
+            : undefined
+    );
+};
+
 const updateModel = (event: Event) => {
     const value = (event.target as HTMLSelectElement).value;
     props.editor.commands.updateNodeData(selectedNode.value!.id, {
@@ -2106,6 +2117,26 @@ Example: "Improve this text, making it clearer and more engaging."'
                                 "
                             />
                         </label>
+                    </div>
+                    <div v-if="isAgentNode" class="field-group">
+                        <label class="field-label" for="agent-max-output-tokens">
+                            Maximum output tokens <span class="field-optional">Optional</span>
+                        </label>
+                        <input
+                            id="agent-max-output-tokens"
+                            type="number"
+                            min="1"
+                            step="1"
+                            inputmode="numeric"
+                            class="text-input"
+                            :value="nodeData.maxTokens ?? ''"
+                            placeholder="Provider default"
+                            @input="updateMaxTokens"
+                        />
+                        <p class="field-hint">
+                            Leave blank to send no output cap. The provider then applies
+                            the model's own limit.
+                        </p>
                     </div>
                 </template>
             </div>
@@ -3360,6 +3391,11 @@ Example: "Improve this text, making it clearer and more engaging."'
     text-transform: uppercase;
     letter-spacing: 0.5px;
     margin-bottom: var(--or3-spacing-sm, 8px);
+}
+
+.field-optional {
+    color: var(--or3-color-text-muted, #6b7280);
+    font-weight: var(--or3-font-normal, 400);
 }
 
 .field-hint {

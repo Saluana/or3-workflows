@@ -56,8 +56,14 @@
  */
 type OpenString<TKnown extends string> = TKnown | (string & {});
 
-/** One compatibility-safe default used by the core runtime and visual editor. */
-export const DEFAULT_WORKFLOW_MODEL = 'deepseek/deepseek-v4-flash-latest';
+/** One high-context multimodal default used by the core runtime and visual editor. */
+export const DEFAULT_WORKFLOW_MODEL = 'openai/gpt-5.6-luna';
+
+/**
+ * One high-context, multimodal fallback for legacy node configurations.
+ * Explicit model lists remain entirely under the workflow author's control.
+ */
+export const DEFAULT_WORKFLOW_FALLBACK_MODEL = 'openai/gpt-5.6-luna';
 
 /** Supported model input modalities (open union). */
 export type ModelInputModality = OpenString<

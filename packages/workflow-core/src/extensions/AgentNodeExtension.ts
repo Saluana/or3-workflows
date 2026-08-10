@@ -80,17 +80,6 @@ async function runToolLoop(
 
 
 /**
- * Convert message content to a string for comparison.
- * Handles both string and array content formats.
- */
-function contentToString(content: unknown): string {
-    if (typeof content === 'string') {
-        return content;
-    }
-    return JSON.stringify(content);
-}
-
-/**
  * Agent Node Extension
  *
  * Represents an LLM agent that processes input and generates output.
@@ -182,26 +171,12 @@ export const AgentNodeExtension: NodeExtension = {
             }
         }
 
-        // Build context from previous nodes
-        let contextInfo = '';
-        if (context.nodeChain && context.nodeChain.length > 0) {
-            const previousOutputs = context.nodeChain
-                .filter((id) => context.outputs[id])
-                .map((id) => {
-                    const prevNode = context.getNode(id);
-                    const label = prevNode?.data.label || id;
-                    return `[${label}]: ${context.outputs[id]}`;
-                });
-
-            if (previousOutputs.length > 0) {
-                contextInfo = `\n\nContext from previous agents:\n${previousOutputs.join(
-                    '\n\n'
-                )}`;
-            }
-        }
-
         // Construct user content with attachments
-        let userContent: string | OpenRouterContentPart[] = context.input;
+        const taskSuffix = data.task?.trim()
+            ? `\n\nTask:\n${data.task.trim()}`
+            : '';
+        let userContent: string | OpenRouterContentPart[] =
+            context.input + taskSuffix;
         const debug = context.debug ?? false;
         if (debug && context.attachments && context.attachments.length > 0) {
             console.log(
@@ -217,7 +192,7 @@ export const AgentNodeExtension: NodeExtension = {
 
         if (context.attachments && context.attachments.length > 0) {
             const contentParts: OpenRouterContentPart[] = [
-                { type: 'text', text: context.input },
+                { type: 'text', text: context.input + taskSuffix },
             ];
 
             for (const attachment of context.attachments) {
@@ -263,30 +238,18 @@ export const AgentNodeExtension: NodeExtension = {
             }
         }
 
-        // Construct messages
-        // Check if history already ends with the same user message to avoid duplication
-        const lastMessage = context.history[context.history.length - 1];
-        const inputContentStr = contentToString(userContent);
-        const lastMessageContentStr = lastMessage
-            ? contentToString(lastMessage.content)
-            : '';
-        const isDuplicateUserMessage =
-            lastMessage?.role === 'user' &&
-            lastMessageContentStr === inputContentStr;
-
+        // Workflow nodes are dataflow stages, not turns from one assistant.
+        // Keep the static node instruction first and the resolved inbound data
+        // last so provider prefix caches can reuse the stable portion. Tool-loop
+        // turns are appended to this local message list below as a real chat.
         const messages: ChatMessage[] = [
-            { role: 'system' as const, content: systemPrompt + contextInfo },
-            ...context.history,
-        ];
-
-        // Only add user message if it's not already the last message in history
-        if (!isDuplicateUserMessage) {
-            messages.push({
+            { role: 'system' as const, content: systemPrompt },
+            {
                 role: 'user' as const,
                 // Cast to string since ChatMessage.content is string, but OpenRouter accepts arrays
                 content: userContent as unknown as string,
-            });
-        }
+            },
+        ];
 
         // Build tools array from node config and global context tools
         const nodeToolNames = data.tools || [];

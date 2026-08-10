@@ -134,6 +134,12 @@ export function classifyError(error: unknown): ErrorCode {
             msg.includes('econnrefused')
         )
             return 'NETWORK';
+        if (
+            (msg.includes('max iterations') ||
+                msg.includes('maximum tool iterations')) &&
+            msg.includes('reached')
+        )
+            return 'VALIDATION';
         if (msg.includes('validation') || msg.includes('invalid'))
             return 'VALIDATION';
     }

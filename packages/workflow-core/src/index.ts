@@ -347,6 +347,7 @@ export {
     toModelInfo,
     // Default models
     DEFAULT_WORKFLOW_MODEL,
+    DEFAULT_WORKFLOW_FALLBACK_MODEL,
     DEFAULT_MODELS,
     registerDefaultModels,
 } from './models';

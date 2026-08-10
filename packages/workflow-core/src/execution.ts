@@ -402,7 +402,7 @@ export function registerExtension(extension: NodeExtension): void {
  *
  * const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
  * const adapter = new OpenRouterExecutionAdapter(client, {
- *   defaultModel: 'deepseek/deepseek-v4-flash-latest',
+ *   defaultModel: 'openai/gpt-5.6-luna',
  *   maxRetries: 2,
  * });
  *
@@ -1080,16 +1080,6 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     finalNodeId = nodeId;
                     executionOrder.push(nodeId);
                     lastActiveNodeId = nodeId;
-
-                    // Append agent outputs to session in deterministic wave order
-                    // (avoids race when multiple agents ran concurrently)
-                    const waveNode = graph.nodeMap.get(nodeId);
-                    if (waveNode?.type === 'agent') {
-                        context.session.addMessage({
-                            role: 'assistant',
-                            content: result.output,
-                        });
-                    }
 
                     // Handle skipped nodes (children not in nextNodes) - except while loops which manage their own control flow
                     const currentNode = graph.nodeMap.get(nodeId);
@@ -2068,7 +2058,46 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     }
                 );
 
-                return subAdapter.execute(wf, input, subflowCallbacks);
+                const subflowResult = await subAdapter.execute(
+                    wf,
+                    input,
+                    subflowCallbacks
+                );
+
+                // Child adapters own their execution state, so their model
+                // calls and token usage must be folded back into the parent
+                // result explicitly. Keep nested records that are already
+                // scoped and scope direct child records to this subflow node.
+                for (const call of subflowResult.modelCalls ?? []) {
+                    const scopedNodeId = call.nodeId.startsWith(
+                        SUBFLOW_SCOPE_PREFIX
+                    )
+                        ? call.nodeId
+                        : scopeNodeId(call.nodeId, subflowPath);
+                    const scopedCallId = call.callId.startsWith(
+                        SUBFLOW_SCOPE_PREFIX
+                    )
+                        ? call.callId
+                        : scopeNodeId(call.callId, subflowPath);
+                    this.modelCalls.push({
+                        ...call,
+                        callId: scopedCallId,
+                        nodeId: scopedNodeId,
+                    });
+                }
+                for (const detail of subflowResult.tokenUsageDetails ?? []) {
+                    const { nodeId: detailNodeId, ...usage } = detail;
+                    this.tokenUsageEvents.push({
+                        nodeId: detailNodeId.startsWith(
+                            SUBFLOW_SCOPE_PREFIX
+                        )
+                            ? detailNodeId
+                            : scopeNodeId(detailNodeId, subflowPath),
+                        usage,
+                    });
+                }
+
+                return subflowResult;
             },
         };
 

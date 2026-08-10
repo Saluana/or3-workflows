@@ -13,6 +13,7 @@ const KEYS: UsageKey[] = [
     'outputTokens',
     'reasoningTokens',
     'cachedTokens',
+    'cacheWriteTokens',
     'totalTokens',
     'costUsd',
 ];

@@ -106,6 +106,13 @@ export async function runValidatedToolLoop(options: {
 
     while (iterations < maxIterations) {
         const requestMessages = [...currentMessages];
+        // `required` is a node-level guarantee that at least one tool is used,
+        // not an instruction to force another tool call after a successful
+        // result is already present in the conversation.
+        const effectiveToolChoice =
+            options.toolChoice === 'required' && iterations > 0
+                ? 'auto'
+                : options.toolChoice;
         const result = await callModelForNode({
             context,
             nodeId,
@@ -146,7 +153,7 @@ export async function runValidatedToolLoop(options: {
                     : undefined,
             },
             tools: toolsForLLM,
-            toolChoice: options.toolChoice,
+            toolChoice: effectiveToolChoice,
             parallelToolCalls: options.parallelToolCalls,
             onTextDelta: options.onToken,
             onReasoningDelta: options.onReasoning,
@@ -182,6 +189,11 @@ export async function runValidatedToolLoop(options: {
 
         if (!result.toolCalls || result.toolCalls.length === 0) {
             finalContent = result.content || '';
+            if (!finalContent.trim()) {
+                throw new Error(
+                    `Model returned no content (finish reason: ${result.finishReason ?? 'unknown'})`
+                );
+            }
             break;
         }
 

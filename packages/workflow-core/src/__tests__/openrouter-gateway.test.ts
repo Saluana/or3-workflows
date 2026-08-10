@@ -271,6 +271,73 @@ describe('OpenRouterModelGateway request building', () => {
         );
     });
 
+    it('uses the session id for provider stickiness and cache routing', async () => {
+        const record: { request?: unknown } = {};
+        const gateway = createOpenRouterModelGateway(
+            fakeClient(
+                {
+                    model: 'm',
+                    choices: [{ message: { content: 'ok' } }],
+                },
+                record
+            )
+        );
+        await gateway.generate({
+            models: ['m'],
+            messages,
+            sessionId: 'workflow-run-123',
+        });
+        const request = record.request as {
+            chatRequest: {
+                sessionId?: string;
+                promptCacheKey?: string;
+            };
+        };
+        expect(request.chatRequest.sessionId).toBe('workflow-run-123');
+        expect(request.chatRequest.promptCacheKey).toBe('workflow-run-123');
+    });
+
+    it('bounds long prompt cache keys while keeping the full session id', async () => {
+        const record: { request?: unknown } = {};
+        const gateway = createOpenRouterModelGateway(
+            fakeClient(
+                {
+                    model: 'm',
+                    choices: [{ message: { content: 'ok' } }],
+                },
+                record
+            )
+        );
+        const sessionId =
+            'workflow:1a09df1e-d8f2-46d2-ae18-06f050e609df:476945e2-557a-4fcf-8763-ef8d0451dccd';
+        await gateway.generate({ models: ['m'], messages, sessionId });
+        const request = record.request as {
+            chatRequest: { sessionId?: string; promptCacheKey?: string };
+        };
+
+        expect(request.chatRequest.sessionId).toBe(sessionId);
+        expect(request.chatRequest.promptCacheKey).toHaveLength(64);
+        expect(request.chatRequest.promptCacheKey).toMatch(
+            /^workflow:1a09df1e-d8f2-46d2-ae18-06f050e609df:4:[0-9a-f]{16}$/
+        );
+
+        const secondRecord: { request?: unknown } = {};
+        const secondGateway = createOpenRouterModelGateway(
+            fakeClient(
+                {
+                    model: 'm',
+                    choices: [{ message: { content: 'ok' } }],
+                },
+                secondRecord
+            )
+        );
+        await secondGateway.generate({ models: ['m'], messages, sessionId });
+        expect(
+            (secondRecord.request as { chatRequest: { promptCacheKey: string } })
+                .chatRequest.promptCacheKey
+        ).toBe(request.chatRequest.promptCacheKey);
+    });
+
     it('sends json_schema response format when structured output requested', async () => {
         const record: { request?: unknown } = {};
         const registry = new ModelRegistry();
@@ -410,6 +477,10 @@ describe('OpenRouterModelGateway normalization', () => {
                 completionTokens: 8,
                 totalTokens: 20,
                 cost: 0.0003,
+                promptTokensDetails: {
+                    cachedTokens: 9,
+                    cacheWriteTokens: 3,
+                },
             },
         });
         const gateway = createOpenRouterModelGateway(client);
@@ -420,6 +491,8 @@ describe('OpenRouterModelGateway normalization', () => {
             inputTokens: 12,
             outputTokens: 8,
             totalTokens: 20,
+            cachedTokens: 9,
+            cacheWriteTokens: 3,
             costUsd: 0.0003,
         });
         expect(result.identifiers).toEqual({
@@ -598,6 +671,113 @@ describe('OpenRouterModelGateway streaming', () => {
             onTextDelta: () => undefined,
         });
         expect(result.provider).toBe('Provider B');
+    });
+
+    it('preserves canonical provider details from stream errors', async () => {
+        async function* stream() {
+            yield {
+                choices: [],
+                error: {
+                    code: 502,
+                    message: 'Provider returned error',
+                    metadata: {
+                        errorType: 'provider_internal_error',
+                        providerCode: 'upstream_failed',
+                    },
+                },
+            };
+        }
+        const gateway = new OpenRouterModelGateway({
+            client: {
+                chat: {
+                    async send() {
+                        return stream();
+                    },
+                },
+            },
+        });
+
+        await expect(
+            gateway.generate({
+                models: ['openai/gpt-5.6-luna-pro'],
+                messages,
+                onTextDelta: () => undefined,
+            })
+        ).rejects.toMatchObject({
+            message:
+                'Provider returned error (provider_internal_error, provider code upstream_failed)',
+            statusCode: 502,
+            retryable: true,
+        });
+    });
+
+    it('unwraps JSON-encoded stream error messages', async () => {
+        async function* stream() {
+            yield {
+                choices: [],
+                error: {
+                    code: 400,
+                    message: JSON.stringify({
+                        error: {
+                            message:
+                                "Invalid 'prompt_cache_key': string too long.",
+                            type: 'invalid_request_error',
+                        },
+                    }),
+                },
+            };
+        }
+        const gateway = new OpenRouterModelGateway({
+            client: {
+                chat: {
+                    async send() {
+                        return stream();
+                    },
+                },
+            },
+        });
+
+        await expect(
+            gateway.generate({
+                models: ['openai/gpt-5.6-luna-pro'],
+                messages,
+                onTextDelta: () => undefined,
+            })
+        ).rejects.toMatchObject({
+            message: "Invalid 'prompt_cache_key': string too long.",
+            statusCode: 400,
+        });
+    });
+});
+
+describe('OpenRouterModelGateway provider errors', () => {
+    it('uses structured upstream details from HTTP errors', async () => {
+        const failure = Object.assign(new Error('Request failed'), {
+            statusCode: 400,
+            body: JSON.stringify({
+                error: {
+                    message: 'Provider returned error',
+                    metadata: {
+                        raw: 'reasoning effort is not supported',
+                    },
+                },
+            }),
+        });
+        const gateway = createOpenRouterModelGateway({
+            chat: {
+                async send() {
+                    throw failure;
+                },
+            },
+        });
+
+        await expect(
+            gateway.generate({ models: ['m'], messages })
+        ).rejects.toMatchObject({
+            message: 'reasoning effort is not supported',
+            statusCode: 400,
+            retryable: false,
+        });
     });
 });
 

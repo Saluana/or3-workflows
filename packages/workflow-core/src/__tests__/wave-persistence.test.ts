@@ -94,7 +94,93 @@ function diamondWorkflow(): WorkflowData {
     };
 }
 
+function threeWayJoinWorkflow(): WorkflowData {
+    return {
+        meta: { version: '2.0.0', name: 'three-way-join' },
+        nodes: [
+            {
+                id: 'start',
+                type: 'start',
+                position: { x: 0, y: 0 },
+                data: { label: 'Start' },
+            },
+            ...['writer-a', 'writer-b', 'writer-c', 'judge'].map((id) => ({
+                id,
+                type: 'agent',
+                position: { x: 0, y: 0 },
+                data: {
+                    label: id,
+                    model: 'test/model',
+                    prompt: `You are ${id}.`,
+                },
+            })),
+        ],
+        edges: [
+            { id: 'start-a', source: 'start', target: 'writer-a' },
+            { id: 'start-b', source: 'start', target: 'writer-b' },
+            { id: 'start-c', source: 'start', target: 'writer-c' },
+            { id: 'a-judge', source: 'writer-a', target: 'judge' },
+            { id: 'b-judge', source: 'writer-b', target: 'judge' },
+            { id: 'c-judge', source: 'writer-c', target: 'judge' },
+        ],
+    };
+}
+
 describe('wave-boundary RunStore persistence (R7.AC1, R7.AC2)', () => {
+    it('fans out three agents concurrently and runs their join without a Parallel node', async () => {
+        const finished: string[] = [];
+        let writersInFlight = 0;
+        let peakWritersInFlight = 0;
+        const provider: LLMProvider = {
+            chat: vi.fn(async (_model, messages) => {
+                const instruction = String(messages[0]?.content ?? '');
+                if (instruction.includes('judge')) {
+                    return {
+                        content: 'judged three drafts',
+                        finishReason: 'stop' as const,
+                    };
+                }
+                writersInFlight += 1;
+                peakWritersInFlight = Math.max(
+                    peakWritersInFlight,
+                    writersInFlight
+                );
+                await Promise.resolve();
+                writersInFlight -= 1;
+                return {
+                    content: instruction.match(/writer-[abc]/)?.[0] ?? 'draft',
+                    finishReason: 'stop' as const,
+                };
+            }),
+            getModelCapabilities: async () => null,
+        };
+        const adapter = new OpenRouterExecutionAdapter(provider, {
+            preflight: false,
+        });
+
+        const result = await adapter.execute(
+            threeWayJoinWorkflow(),
+            { text: 'Write a story.' },
+            {
+                ...silentCallbacks(),
+                onNodeFinish: (nodeId) => finished.push(nodeId),
+            }
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.executionOrder).toEqual([
+            'start',
+            'writer-a',
+            'writer-b',
+            'writer-c',
+            'judge',
+        ]);
+        expect(finished).toEqual(result.executionOrder);
+        expect(result.nodeOutputs?.judge).toBe('judged three drafts');
+        expect(provider.chat).toHaveBeenCalledTimes(4);
+        expect(peakWritersInFlight).toBe(3);
+    });
+
     it('persists pending/completed/transcript at every DAG wave', async () => {
         const store = new InMemoryRunStore();
         let calls = 0;

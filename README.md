@@ -299,7 +299,8 @@ LLM-powered node with configurable model, prompt, and parameters.
 interface AgentNodeData {
     label: string;
     model: string; // e.g., 'openai/gpt-4o', 'anthropic/claude-3.5-sonnet'
-    prompt: string; // System prompt
+    prompt: string; // Stable system instructions
+    task?: string; // Dynamic task appended after inbound data
     temperature?: number; // 0-2, default 1
     maxTokens?: number;
     tools?: string[]; // Tool IDs to enable
@@ -340,7 +341,7 @@ import {
 
 const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY! });
 const adapter = new OpenRouterExecutionAdapter(client, {
-    defaultModel: 'deepseek/deepseek-v4-flash-latest',
+    defaultModel: 'openai/gpt-5.6-luna',
 });
 
 const workflow: WorkflowData = /* editor.getJSON() or saved workflow */;

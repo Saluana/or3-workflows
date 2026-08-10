@@ -148,6 +148,14 @@ describe('classifyError', () => {
             'VALIDATION'
         );
         expect(classifyError(new Error('invalid input'))).toBe('VALIDATION');
+        expect(
+            classifyError(new Error('While loop reached max iterations (3)'))
+        ).toBe('VALIDATION');
+        expect(
+            classifyError(
+                new Error('Maximum tool iterations (4) reached')
+            )
+        ).toBe('VALIDATION');
     });
 
     it('should return UNKNOWN for unrecognized errors', () => {

@@ -72,7 +72,10 @@ interface ORUsage {
     totalTokens?: number;
     cost?: number | null;
     completionTokensDetails?: { reasoningTokens?: number | null } | null;
-    promptTokensDetails?: { cachedTokens?: number } | null;
+    promptTokensDetails?: {
+        cachedTokens?: number;
+        cacheWriteTokens?: number;
+    } | null;
 }
 
 interface ORChatResult {
@@ -99,7 +102,117 @@ interface ORStreamChunk {
     choices?: Array<{ delta?: ORStreamDelta; finishReason?: string | null }>;
     usage?: ORUsage;
     openrouterMetadata?: unknown;
-    error?: { code?: number; message?: string };
+    error?: {
+        code?: number;
+        message?: string;
+        metadata?: {
+            errorType?: string;
+            providerCode?: string;
+            [key: string]: unknown;
+        };
+    };
+}
+
+const MAX_PROMPT_CACHE_KEY_LENGTH = 64;
+const PROMPT_CACHE_KEY_HASH_LENGTH = 16;
+
+function promptCacheKey(sessionId: string): string {
+    if (sessionId.length <= MAX_PROMPT_CACHE_KEY_LENGTH) return sessionId;
+
+    // FNV-1a gives long session IDs a stable suffix without requiring a
+    // Node-only crypto dependency in the browser-compatible gateway.
+    let hash = 0xcbf29ce484222325n;
+    for (const byte of new TextEncoder().encode(sessionId)) {
+        hash ^= BigInt(byte);
+        hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+    }
+    const suffix = hash
+        .toString(16)
+        .padStart(PROMPT_CACHE_KEY_HASH_LENGTH, '0');
+    const prefixLength =
+        MAX_PROMPT_CACHE_KEY_LENGTH - PROMPT_CACHE_KEY_HASH_LENGTH - 1;
+    return `${sessionId.slice(0, prefixLength)}:${suffix}`;
+}
+
+function unwrapProviderErrorMessage(value: string): string {
+    const trimmed = value.trim();
+    if (!trimmed.startsWith('{')) return trimmed || value;
+    try {
+        const parsed = JSON.parse(trimmed) as {
+            error?: { message?: unknown };
+        };
+        return typeof parsed.error?.message === 'string'
+            ? parsed.error.message
+            : value;
+    } catch {
+        return value;
+    }
+}
+
+function providerErrorMessage(
+    fallback: string,
+    metadata?: Record<string, unknown> | null
+): string {
+    const raw = metadata?.raw;
+    if (typeof raw === 'string' && raw.trim()) {
+        return unwrapProviderErrorMessage(raw);
+    }
+
+    const message = unwrapProviderErrorMessage(fallback);
+
+    const details = [
+        typeof metadata?.errorType === 'string'
+            ? metadata.errorType
+            : undefined,
+        typeof metadata?.providerCode === 'string'
+            ? `provider code ${metadata.providerCode}`
+            : undefined,
+    ].filter(Boolean);
+    return details.length > 0 ? `${message} (${details.join(', ')})` : message;
+}
+
+function errorBodyDetails(error: unknown): {
+    message?: string;
+    metadata?: Record<string, unknown> | null;
+} {
+    if (!error || typeof error !== 'object') return {};
+
+    const structured = (error as { error?: unknown }).error;
+    if (structured && typeof structured === 'object') {
+        const value = structured as {
+            message?: unknown;
+            metadata?: unknown;
+        };
+        return {
+            message:
+                typeof value.message === 'string' ? value.message : undefined,
+            metadata:
+                value.metadata && typeof value.metadata === 'object'
+                    ? (value.metadata as Record<string, unknown>)
+                    : undefined,
+        };
+    }
+
+    const body = (error as { body?: unknown }).body;
+    if (typeof body !== 'string') return {};
+    try {
+        const parsed = JSON.parse(body) as {
+            error?: { message?: unknown; metadata?: unknown };
+        };
+        return {
+            message:
+                typeof parsed.error?.message === 'string'
+                    ? parsed.error.message
+                    : undefined,
+            metadata:
+                parsed.error?.metadata &&
+                typeof parsed.error.metadata === 'object'
+                    ? (parsed.error.metadata as Record<string, unknown>)
+                    : undefined,
+        };
+    } catch {
+        return {};
+    }
 }
 
 /** Minimal structural view of the OpenRouter v1 client used by the gateway. */
@@ -218,6 +331,8 @@ function normalizeUsage(usage: ORUsage | undefined): ModelUsage | undefined {
     if (typeof reasoning === 'number') out.reasoningTokens = reasoning;
     const cached = usage.promptTokensDetails?.cachedTokens;
     if (typeof cached === 'number') out.cachedTokens = cached;
+    const cacheWrite = usage.promptTokensDetails?.cacheWriteTokens;
+    if (typeof cacheWrite === 'number') out.cacheWriteTokens = cacheWrite;
     if (typeof usage.cost === 'number') out.costUsd = usage.cost;
     return Object.keys(out).length > 0 ? out : undefined;
 }
@@ -484,7 +599,14 @@ export class OpenRouterModelGateway implements ModelGateway {
         );
         if (provider) chatRequest.provider = provider;
 
-        if (request.sessionId) chatRequest.sessionId = request.sessionId;
+        if (request.sessionId) {
+            chatRequest.sessionId = request.sessionId;
+            // OpenRouter uses sessionId for provider stickiness; OpenAI uses
+            // promptCacheKey to route matching prefixes to the same cache. Its
+            // API limit is 64 characters, while workflow session IDs can be
+            // longer because they include two UUIDs.
+            chatRequest.promptCacheKey = promptCacheKey(request.sessionId);
+        }
 
         return chatRequest;
     }
@@ -594,8 +716,15 @@ export class OpenRouterModelGateway implements ModelGateway {
             }
             if (chunk.error) {
                 throw new ProviderCallError({
-                    message: chunk.error.message ?? 'OpenRouter stream error',
+                    message: providerErrorMessage(
+                        chunk.error.message ?? 'OpenRouter stream error',
+                        chunk.error.metadata
+                    ),
                     statusCode: chunk.error.code,
+                    retryable:
+                        chunk.error.code === 429 ||
+                        (typeof chunk.error.code === 'number' &&
+                            chunk.error.code >= 500),
                     requestedModels: models,
                 });
             }
@@ -682,8 +811,12 @@ export class OpenRouterModelGateway implements ModelGateway {
         error: unknown,
         models: readonly string[]
     ): ProviderCallError {
-        const message =
-            error instanceof Error ? error.message : String(error);
+        const details = errorBodyDetails(error);
+        const message = providerErrorMessage(
+            details.message ??
+                (error instanceof Error ? error.message : String(error)),
+            details.metadata
+        );
         const statusCode =
             typeof (error as { statusCode?: unknown })?.statusCode === 'number'
                 ? (error as { statusCode: number }).statusCode

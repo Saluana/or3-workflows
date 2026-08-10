@@ -287,7 +287,10 @@ export interface AgentNodeData extends BaseNodeData {
     model: string;
     /** Gateway-native request. Takes precedence over `model` when present. */
     modelRequest?: NodeModelRequestV1;
+    /** Stable system instructions. Keep per-run data out of this field for prompt-cache reuse. */
     prompt: string;
+    /** Optional per-node task appended after the resolved inbound input. */
+    task?: string;
     temperature?: number;
     maxTokens?: number;
     tools?: string[];

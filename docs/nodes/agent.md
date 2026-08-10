@@ -22,8 +22,11 @@ interface AgentNodeData {
     /** OpenRouter model ID */
     model: string;
 
-    /** System prompt */
+    /** Stable system instructions */
     prompt?: string;
+
+    /** Optional node-specific task appended after inbound data */
+    task?: string;
 
     /** Temperature (0-2, default: 1) */
     temperature?: number;
@@ -77,6 +80,7 @@ editor.commands.createNode(
         label: 'Assistant',
         model: 'openai/gpt-4o',
         prompt: 'You are a helpful assistant. Be concise.',
+        task: 'Summarize the provided input.',
         temperature: 0.7,
     },
     { x: 100, y: 200 }
@@ -119,6 +123,24 @@ Rules:
 Products: Widget Pro, Widget Plus, Widget Enterprise`;
 }
 ```
+
+Keep `prompt` stable: put role, policy, and reusable instructions there. Put
+per-node directions such as a chapter number or requested operation in `task`.
+OR3 sends the resolved inbound data first and appends `task` afterward, keeping
+variable content at the end of the request for better provider prompt-cache
+reuse.
+
+### Dataflow context
+
+Each Agent call contains one system message and one user message. The user
+message contains only the node's resolved inbound edge data; outputs from
+unrelated or earlier nodes are not replayed as chat history. Connect every
+required dependency explicitly. Multiple incoming edges can use input mappings
+to label or combine their values.
+
+Tool calls within an Agent remain a normal append-only conversation: assistant
+tool calls and tool results are appended locally until the Agent produces its
+final output.
 
 ### Prompt Variables
 
@@ -213,6 +235,14 @@ Control how many tool call iterations are allowed:
 ```
 
 When `hitl` is selected, the agent pauses for human approval to continue.
+
+`toolChoice: 'required'` guarantees that the node calls at least one tool. Once
+a tool result is available, subsequent turns use automatic selection so the
+model can produce a final answer instead of repeatedly calling the same tool.
+
+An empty terminal model response is treated as an error. This commonly means a
+small output limit was consumed by reasoning before visible content was
+generated; normal node retry and error-handling rules then apply.
 
 ## Tools
 

@@ -252,6 +252,141 @@ describe('OpenRouterExecutionAdapter', () => {
             expect(callbacks.onToken).toHaveBeenCalledWith('agent-1', ' back!');
         });
 
+        it('scopes each agent request to its inbound data with a stable prefix', async () => {
+            const workflow: WorkflowData = {
+                meta: { version: '2.0.0', name: 'Scoped agents' },
+                nodes: [
+                    {
+                        id: 'start',
+                        type: 'start',
+                        position: { x: 0, y: 0 },
+                        data: { label: 'Start' },
+                    },
+                    {
+                        id: 'first',
+                        type: 'agent',
+                        position: { x: 100, y: 0 },
+                        data: {
+                            label: 'First',
+                            model: 'test/model',
+                            prompt: 'Process the provided input.',
+                            task: 'Run stage one.',
+                        },
+                    },
+                    {
+                        id: 'second',
+                        type: 'agent',
+                        position: { x: 200, y: 0 },
+                        data: {
+                            label: 'Second',
+                            model: 'test/model',
+                            prompt: 'Process the provided input.',
+                            task: 'Run stage two.',
+                        },
+                    },
+                ],
+                edges: [
+                    { id: 'start-first', source: 'start', target: 'first' },
+                    { id: 'first-second', source: 'first', target: 'second' },
+                ],
+            };
+            mockClient.chat.send
+                .mockResolvedValueOnce(
+                    (async function* () {
+                        yield {
+                            choices: [
+                                { delta: { content: 'first output' } },
+                            ],
+                        };
+                    })()
+                )
+                .mockResolvedValueOnce(
+                    (async function* () {
+                        yield {
+                            choices: [
+                                { delta: { content: 'second output' } },
+                            ],
+                        };
+                    })()
+                );
+
+            const result = await adapter.execute(
+                workflow,
+                { text: 'original request' },
+                callbacks
+            );
+            const requests = mockClient.chat.send.mock.calls.map(
+                (call) => call[0].chatRequest
+            ) as Array<{
+                messages: Array<{ role: string; content: string }>;
+                sessionId?: string;
+                promptCacheKey?: string;
+            }>;
+
+            expect(requests).toHaveLength(2);
+            expect(requests[0]!.messages).toEqual([
+                { role: 'system', content: 'Process the provided input.' },
+                {
+                    role: 'user',
+                    content: 'original request\n\nTask:\nRun stage one.',
+                },
+            ]);
+            expect(requests[1]!.messages).toEqual([
+                { role: 'system', content: 'Process the provided input.' },
+                {
+                    role: 'user',
+                    content: 'first output\n\nTask:\nRun stage two.',
+                },
+            ]);
+            expect(
+                requests[1]!.messages.some(
+                    (message) => message.role === 'assistant'
+                )
+            ).toBe(false);
+            expect(requests[0]!.sessionId).toBe(requests[1]!.sessionId);
+            expect(requests[0]!.promptCacheKey).toBe(requests[0]!.sessionId);
+            expect(requests[1]!.promptCacheKey).toBe(requests[1]!.sessionId);
+            expect(result.sessionMessages).toEqual([
+                { role: 'user', content: 'original request' },
+                { role: 'assistant', content: 'second output' },
+            ]);
+        });
+
+        it('does not replay resumed transcript messages to an agent request', async () => {
+            adapter = new OpenRouterExecutionAdapter(mockClient as any, {
+                resumeFrom: {
+                    startNodeId: 'agent-1',
+                    nodeOutputs: { 'start-1': 'new workflow input' },
+                    sessionMessages: [
+                        { role: 'user', content: 'old thread request' },
+                        { role: 'assistant', content: 'old assistant answer' },
+                        { role: 'assistant', content: 'another old answer' },
+                    ],
+                },
+            });
+            mockClient.chat.send.mockResolvedValueOnce(
+                (async function* () {
+                    yield { choices: [{ delta: { content: 'fresh output' } }] };
+                })()
+            );
+
+            const result = await adapter.execute(
+                createTestWorkflow(),
+                { text: 'new workflow input' },
+                callbacks
+            );
+            const request = mockClient.chat.send.mock.calls[0]![0]
+                .chatRequest as {
+                messages: Array<{ role: string; content: string }>;
+            };
+
+            expect(result.success).toBe(true);
+            expect(request.messages).toEqual([
+                { role: 'system', content: 'You are a helpful assistant.' },
+                { role: 'user', content: 'new workflow input' },
+            ]);
+        });
+
         it('should handle workflow without start node', async () => {
             const events: Array<{ event: { type: string } }> = [];
             adapter = new OpenRouterExecutionAdapter(mockClient as any, {

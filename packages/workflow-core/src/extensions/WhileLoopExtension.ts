@@ -192,7 +192,11 @@ Respond with only "continue" or "done".`;
                     messages,
                     generation: {
                         temperature: 0,
-                        maxOutputTokens: 10,
+                        // A tiny token cap is unsafe for reasoning models: the
+                        // provider may spend the entire allowance on hidden
+                        // reasoning and return no classification text.
+                        maxOutputTokens: 64,
+                        reasoning: { effort: 'none' },
                     },
                 });
 
@@ -224,7 +228,11 @@ Respond with only "continue" or "done".`;
                 }
 
                 const decision = result.content?.trim().toLowerCase() || '';
-                return decision.includes('continue');
+                if (decision.includes('continue')) return true;
+                if (decision.includes('done')) return false;
+                throw new Error(
+                    'While loop condition did not return "continue" or "done"'
+                );
             }
             // No evaluator specified and no custom evaluator
             return true;

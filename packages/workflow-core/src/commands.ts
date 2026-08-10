@@ -20,6 +20,7 @@ const NodeDataUpdateSchema = z
     .object({
         label: z.string().max(200).optional(),
         prompt: z.string().optional(),
+        task: z.string().optional(),
         model: z.string().optional(),
         tools: z.array(z.string()).optional(),
         temperature: z.number().min(0).max(2).optional(),

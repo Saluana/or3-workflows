@@ -1,0 +1,570 @@
+{
+  "meta": {
+    "id": "two-part-three-writer-tournament",
+    "version": "2.0.0",
+    "name": "Two-Part Three-Writer Fiction Tournament",
+    "description": "Builds a two-part story bible, has three writers draft each part, and carries each judge-selected winner forward."
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "data": {
+        "label": "Story premise"
+      },
+      "position": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "outline",
+      "type": "agent",
+      "data": {
+        "label": "Story architect",
+        "model": "openai/gpt-5.6-luna-pro",
+        "modelRequest": {
+          "version": 1,
+          "models": [
+            "openai/gpt-5.6-luna-pro"
+          ],
+          "generation": {
+            "reasoning": {
+              "effort": "max"
+            }
+          }
+        },
+        "prompt": "Create a compact, complete two-part speculative mystery from the user premise.\nReturn Markdown with exactly these headings: \"# Story bible\", \"## Part 1\", and \"## Part 2\".\nInclude protagonist, desire, central mystery, setting rules, recurring images, supporting characters, emotional arc, ending, and continuity facts.\nGive each part a title and concise scene beats. Part 1 ends with a consequential revelation; Part 2 resolves the central dramatic question.",
+        "task": "Create the two-part story bible from the supplied premise."
+      },
+      "position": {
+        "x": 300,
+        "y": 0
+      }
+    },
+    {
+      "id": "writer-deepseek-part-1",
+      "type": "agent",
+      "data": {
+        "label": "Part 1 · DeepSeek",
+        "model": "~deepseek/deepseek-v4-flash-latest",
+        "modelRequest": {
+          "version": 1,
+          "models": [
+            "~deepseek/deepseek-v4-flash-latest"
+          ],
+          "generation": {
+            "reasoning": {
+              "effort": "max"
+            }
+          }
+        },
+        "prompt": "Write one part of a two-part speculative mystery from the provided story bible, accepted earlier part when present, and current beat sheet.\nReturn only finished story prose in Markdown, starting with the exact requested part heading.\nPreserve names, tense, point of view, world rules, clues, and consequences. Dramatize scenes; do not add editorial commentary.\n\nCraft direction:\nBuild atmosphere from precise observation and escalating implication. Keep the causal chain easy to follow.",
+        "task": "Write Part 1. Begin exactly with \"# Part 1:\"."
+      },
+      "position": {
+        "x": 600,
+        "y": 0
+      }
+    },
+    {
+      "id": "writer-glm-part-1",
+      "type": "agent",
+      "data": {
+        "label": "Part 1 · GLM",
+        "model": "z-ai/glm-5.2",
+        "modelRequest": {
+          "version": 1,
+          "models": [
+            "z-ai/glm-5.2"
+          ],
+          "generation": {
+            "reasoning": {
+              "effort": "xhigh"
+            }
+          }
+        },
+        "prompt": "Write one part of a two-part speculative mystery from the provided story bible, accepted earlier part when present, and current beat sheet.\nReturn only finished story prose in Markdown, starting with the exact requested part heading.\nPreserve names, tense, point of view, world rules, clues, and consequences. Dramatize scenes; do not add editorial commentary.\n\nCraft direction:\nPrioritize character pressure, vivid dialogue, emotional reversals, and a changed story state in every scene.",
+        "task": "Write Part 1. Begin exactly with \"# Part 1:\"."
+      },
+      "position": {
+        "x": 900,
+        "y": 0
+      }
+    },
+    {
+      "id": "writer-luna-part-1",
+      "type": "agent",
+      "data": {
+        "label": "Part 1 · Luna",
+        "model": "openai/gpt-5.6-luna",
+        "modelRequest": {
+          "version": 1,
+          "models": [
+            "openai/gpt-5.6-luna"
+          ],
+          "generation": {
+            "reasoning": {
+              "effort": "max"
+            }
+          }
+        },
+        "prompt": "Write one part of a two-part speculative mystery from the provided story bible, accepted earlier part when present, and current beat sheet.\nReturn only finished story prose in Markdown, starting with the exact requested part heading.\nPreserve names, tense, point of view, world rules, clues, and consequences. Dramatize scenes; do not add editorial commentary.\n\nCraft direction:\nUse deliberate structure, clean scene transitions, and discoveries that feel earned instead of arbitrary.",
+        "task": "Write Part 1. Begin exactly with \"# Part 1:\"."
+      },
+      "position": {
+        "x": 0,
+        "y": 200
+      }
+    },
+    {
+      "id": "judge-part-1",
+      "type": "agent",
+      "data": {
+        "label": "Judge Part 1",
+        "model": "openai/gpt-5.6-luna-pro",
+        "modelRequest": {
+          "version": 1,
+          "models": [
+            "openai/gpt-5.6-luna-pro"
+          ],
+          "generation": {
+            "reasoning": {
+              "effort": "max"
+            }
+          }
+        },
+        "prompt": "Act as a blind fiction editor choosing one of three candidate parts for the same story.\nJudge continuity, plot movement, character truth, scene craft, clarity, tone, and whether the draft fulfills the supplied part beats.\nYour first line must be exactly \"<!-- WINNER: DEEPSEEK -->\", \"<!-- WINNER: GLM -->\", or \"<!-- WINNER: LUNA -->\".\nYour second line must be exactly \"<!-- SCORES: DEEPSEEK=<number 0-10> GLM=<number 0-10> LUNA=<number 0-10> -->\".\nAfter those lines, reproduce the selected candidate verbatim. Do not merge, revise, summarize, explain, or alter its heading.",
+        "task": "Choose the best candidate for Part 1 and return it exactly as instructed."
+      },
+      "position": {
+        "x": 300,
+        "y": 200
+      }
+    },
+    {
+      "id": "beats-part-2",
+      "type": "agent",
+      "data": {
+        "label": "Beats for Part 2",
+        "model": "openai/gpt-5.6-luna-pro",
+        "modelRequest": {
+          "version": 1,
+          "models": [
+            "openai/gpt-5.6-luna-pro"
+          ],
+          "generation": {
+            "reasoning": {
+              "effort": "max"
+            }
+          }
+        },
+        "prompt": "You are the continuity editor for a two-part speculative mystery.\nFrom the story bible and accepted Part 1, produce exactly six numbered loose beats for Part 2.\nEach beat must preserve established facts, advance or pay off a clue, and identify a meaningful story-state change where relevant.\nDo not write prose, a preface, or a conclusion.",
+        "task": "Create the Part 2 beat sheet."
+      },
+      "position": {
+        "x": 600,
+        "y": 200
+      }
+    },
+    {
+      "id": "writer-deepseek-part-2",
+      "type": "agent",
+      "data": {
+        "label": "Part 2 · DeepSeek",
+        "model": "~deepseek/deepseek-v4-flash-latest",
+        "modelRequest": {
+          "version": 1,
+          "models": [
+            "~deepseek/deepseek-v4-flash-latest"
+          ],
+          "generation": {
+            "reasoning": {
+              "effort": "max"
+            }
+          }
+        },
+        "prompt": "Write one part of a two-part speculative mystery from the provided story bible, accepted earlier part when present, and current beat sheet.\nReturn only finished story prose in Markdown, starting with the exact requested part heading.\nPreserve names, tense, point of view, world rules, clues, and consequences. Dramatize scenes; do not add editorial commentary.\n\nCraft direction:\nBuild atmosphere from precise observation and escalating implication. Keep the causal chain easy to follow.",
+        "task": "Write Part 2. Begin exactly with \"# Part 2:\"."
+      },
+      "position": {
+        "x": 900,
+        "y": 200
+      }
+    },
+    {
+      "id": "writer-glm-part-2",
+      "type": "agent",
+      "data": {
+        "label": "Part 2 · GLM",
+        "model": "z-ai/glm-5.2",
+        "modelRequest": {
+          "version": 1,
+          "models": [
+            "z-ai/glm-5.2"
+          ],
+          "generation": {
+            "reasoning": {
+              "effort": "xhigh"
+            }
+          }
+        },
+        "prompt": "Write one part of a two-part speculative mystery from the provided story bible, accepted earlier part when present, and current beat sheet.\nReturn only finished story prose in Markdown, starting with the exact requested part heading.\nPreserve names, tense, point of view, world rules, clues, and consequences. Dramatize scenes; do not add editorial commentary.\n\nCraft direction:\nPrioritize character pressure, vivid dialogue, emotional reversals, and a changed story state in every scene.",
+        "task": "Write Part 2. Begin exactly with \"# Part 2:\"."
+      },
+      "position": {
+        "x": 0,
+        "y": 400
+      }
+    },
+    {
+      "id": "writer-luna-part-2",
+      "type": "agent",
+      "data": {
+        "label": "Part 2 · Luna",
+        "model": "openai/gpt-5.6-luna",
+        "modelRequest": {
+          "version": 1,
+          "models": [
+            "openai/gpt-5.6-luna"
+          ],
+          "generation": {
+            "reasoning": {
+              "effort": "max"
+            }
+          }
+        },
+        "prompt": "Write one part of a two-part speculative mystery from the provided story bible, accepted earlier part when present, and current beat sheet.\nReturn only finished story prose in Markdown, starting with the exact requested part heading.\nPreserve names, tense, point of view, world rules, clues, and consequences. Dramatize scenes; do not add editorial commentary.\n\nCraft direction:\nUse deliberate structure, clean scene transitions, and discoveries that feel earned instead of arbitrary.",
+        "task": "Write Part 2. Begin exactly with \"# Part 2:\"."
+      },
+      "position": {
+        "x": 300,
+        "y": 400
+      }
+    },
+    {
+      "id": "judge-part-2",
+      "type": "agent",
+      "data": {
+        "label": "Judge Part 2",
+        "model": "openai/gpt-5.6-luna-pro",
+        "modelRequest": {
+          "version": 1,
+          "models": [
+            "openai/gpt-5.6-luna-pro"
+          ],
+          "generation": {
+            "reasoning": {
+              "effort": "max"
+            }
+          }
+        },
+        "prompt": "Act as a blind fiction editor choosing one of three candidate parts for the same story.\nJudge continuity, plot movement, character truth, scene craft, clarity, tone, and whether the draft fulfills the supplied part beats.\nYour first line must be exactly \"<!-- WINNER: DEEPSEEK -->\", \"<!-- WINNER: GLM -->\", or \"<!-- WINNER: LUNA -->\".\nYour second line must be exactly \"<!-- SCORES: DEEPSEEK=<number 0-10> GLM=<number 0-10> LUNA=<number 0-10> -->\".\nAfter those lines, reproduce the selected candidate verbatim. Do not merge, revise, summarize, explain, or alter its heading.",
+        "task": "Choose the best candidate for Part 2 and return it exactly as instructed."
+      },
+      "position": {
+        "x": 600,
+        "y": 400
+      }
+    },
+    {
+      "id": "manuscript",
+      "type": "output",
+      "data": {
+        "label": "Complete two-part story",
+        "mode": "combine",
+        "format": "markdown",
+        "sources": [
+          "judge-part-1",
+          "judge-part-2"
+        ],
+        "introText": "# Complete Two-Part Story"
+      },
+      "position": {
+        "x": 900,
+        "y": 400
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "start-outline",
+      "source": "start",
+      "target": "outline"
+    },
+    {
+      "id": "outline-writer-deepseek-part-1-storyBible",
+      "source": "outline",
+      "target": "writer-deepseek-part-1",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "storyBible"
+        }
+      }
+    },
+    {
+      "id": "outline-writer-glm-part-1-storyBible",
+      "source": "outline",
+      "target": "writer-glm-part-1",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "storyBible"
+        }
+      }
+    },
+    {
+      "id": "outline-writer-luna-part-1-storyBible",
+      "source": "outline",
+      "target": "writer-luna-part-1",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "storyBible"
+        }
+      }
+    },
+    {
+      "id": "outline-judge-part-1-storyBible",
+      "source": "outline",
+      "target": "judge-part-1",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "storyBible"
+        }
+      }
+    },
+    {
+      "id": "writer-deepseek-part-1-judge-part-1-draftDeepseek",
+      "source": "writer-deepseek-part-1",
+      "target": "judge-part-1",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "draftDeepseek"
+        }
+      }
+    },
+    {
+      "id": "writer-glm-part-1-judge-part-1-draftGlm",
+      "source": "writer-glm-part-1",
+      "target": "judge-part-1",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "draftGlm"
+        }
+      }
+    },
+    {
+      "id": "writer-luna-part-1-judge-part-1-draftLuna",
+      "source": "writer-luna-part-1",
+      "target": "judge-part-1",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "draftLuna"
+        }
+      }
+    },
+    {
+      "id": "outline-beats-part-2-storyBible",
+      "source": "outline",
+      "target": "beats-part-2",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "storyBible"
+        }
+      }
+    },
+    {
+      "id": "judge-part-1-beats-part-2-acceptedPart1",
+      "source": "judge-part-1",
+      "target": "beats-part-2",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "acceptedPart1"
+        }
+      }
+    },
+    {
+      "id": "outline-writer-deepseek-part-2-storyBible",
+      "source": "outline",
+      "target": "writer-deepseek-part-2",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "storyBible"
+        }
+      }
+    },
+    {
+      "id": "judge-part-1-writer-deepseek-part-2-acceptedPart1",
+      "source": "judge-part-1",
+      "target": "writer-deepseek-part-2",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "acceptedPart1"
+        }
+      }
+    },
+    {
+      "id": "beats-part-2-writer-deepseek-part-2-part2Beats",
+      "source": "beats-part-2",
+      "target": "writer-deepseek-part-2",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "part2Beats"
+        }
+      }
+    },
+    {
+      "id": "outline-writer-glm-part-2-storyBible",
+      "source": "outline",
+      "target": "writer-glm-part-2",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "storyBible"
+        }
+      }
+    },
+    {
+      "id": "judge-part-1-writer-glm-part-2-acceptedPart1",
+      "source": "judge-part-1",
+      "target": "writer-glm-part-2",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "acceptedPart1"
+        }
+      }
+    },
+    {
+      "id": "beats-part-2-writer-glm-part-2-part2Beats",
+      "source": "beats-part-2",
+      "target": "writer-glm-part-2",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "part2Beats"
+        }
+      }
+    },
+    {
+      "id": "outline-writer-luna-part-2-storyBible",
+      "source": "outline",
+      "target": "writer-luna-part-2",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "storyBible"
+        }
+      }
+    },
+    {
+      "id": "judge-part-1-writer-luna-part-2-acceptedPart1",
+      "source": "judge-part-1",
+      "target": "writer-luna-part-2",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "acceptedPart1"
+        }
+      }
+    },
+    {
+      "id": "beats-part-2-writer-luna-part-2-part2Beats",
+      "source": "beats-part-2",
+      "target": "writer-luna-part-2",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "part2Beats"
+        }
+      }
+    },
+    {
+      "id": "outline-judge-part-2-storyBible",
+      "source": "outline",
+      "target": "judge-part-2",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "storyBible"
+        }
+      }
+    },
+    {
+      "id": "judge-part-1-judge-part-2-acceptedPart1",
+      "source": "judge-part-1",
+      "target": "judge-part-2",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "acceptedPart1"
+        }
+      }
+    },
+    {
+      "id": "beats-part-2-judge-part-2-part2Beats",
+      "source": "beats-part-2",
+      "target": "judge-part-2",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "part2Beats"
+        }
+      }
+    },
+    {
+      "id": "writer-deepseek-part-2-judge-part-2-draftDeepseek",
+      "source": "writer-deepseek-part-2",
+      "target": "judge-part-2",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "draftDeepseek"
+        }
+      }
+    },
+    {
+      "id": "writer-glm-part-2-judge-part-2-draftGlm",
+      "source": "writer-glm-part-2",
+      "target": "judge-part-2",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "draftGlm"
+        }
+      }
+    },
+    {
+      "id": "writer-luna-part-2-judge-part-2-draftLuna",
+      "source": "writer-luna-part-2",
+      "target": "judge-part-2",
+      "data": {
+        "inputMapping": {
+          "mode": "json",
+          "key": "draftLuna"
+        }
+      }
+    },
+    {
+      "id": "judge-part-1-manuscript",
+      "source": "judge-part-1",
+      "target": "manuscript"
+    },
+    {
+      "id": "judge-part-2-manuscript",
+      "source": "judge-part-2",
+      "target": "manuscript"
+    }
+  ]
+}

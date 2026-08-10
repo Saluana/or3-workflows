@@ -175,7 +175,7 @@ const {
 
 ```typescript
 const adapter = new OpenRouterExecutionAdapter(client, {
-    defaultModel: 'deepseek/deepseek-v4-flash-latest',
+    defaultModel: 'openai/gpt-5.6-luna',
 });
 
 await execute(
@@ -236,7 +236,7 @@ const client = new OpenRouter({
     apiKey: import.meta.env.VITE_OPENROUTER_API_KEY,
 });
 const adapter = new OpenRouterExecutionAdapter(client, {
-    defaultModel: 'deepseek/deepseek-v4-flash-latest',
+    defaultModel: 'openai/gpt-5.6-luna',
 });
 
 async function run(message: string) {

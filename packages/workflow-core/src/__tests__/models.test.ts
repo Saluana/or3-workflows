@@ -7,15 +7,20 @@ import {
     extractProvider,
     toModelInfo,
     DEFAULT_WORKFLOW_MODEL,
+    DEFAULT_WORKFLOW_FALLBACK_MODEL,
     DEFAULT_MODELS,
     registerDefaultModels,
 } from '../models';
 
 describe('DEFAULT_WORKFLOW_MODEL', () => {
     it('uses the current default for new nodes and execution fallbacks', () => {
-        expect(DEFAULT_WORKFLOW_MODEL).toBe(
-            'deepseek/deepseek-v4-flash-latest'
-        );
+        expect(DEFAULT_WORKFLOW_MODEL).toBe('openai/gpt-5.6-luna');
+    });
+});
+
+describe('DEFAULT_WORKFLOW_FALLBACK_MODEL', () => {
+    it('uses Luna as the single high-context multimodal fallback', () => {
+        expect(DEFAULT_WORKFLOW_FALLBACK_MODEL).toBe('openai/gpt-5.6-luna');
     });
 });
 

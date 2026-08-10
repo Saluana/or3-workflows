@@ -66,7 +66,7 @@ editor.commands.createNode(
     'whileLoop',
     {
         label: 'Refine Until Good',
-        conditionModel: 'openai/gpt-4o-mini',
+        conditionModel: 'openai/gpt-5.6-luna',
         conditionPrompt: `Evaluate if this response meets quality standards.
   
 Requirements:
@@ -74,7 +74,7 @@ Requirements:
 - No grammatical errors
 - Answers the question completely
 
-Respond with only "true" or "false".`,
+Respond with only "continue" or "done".`,
         maxIterations: 5,
     },
     { x: 100, y: 200 }
@@ -122,6 +122,12 @@ Respond with only "continue" or "done".`,
 ```
 
 The LLM responds with either `continue` or `done` to control the loop.
+Reasoning is disabled for this small classification call so reasoning-only
+output cannot consume the response allowance. Any other or empty response is
+treated as an execution error instead of silently exiting the loop.
+
+Reaching `maxIterations` with `onMaxIterations: 'error'` is terminal and is not
+retried, because replaying a completed loop body can duplicate side effects.
 
 ### Custom Evaluator
 
@@ -222,7 +228,7 @@ When max is reached:
 StarterKit.configure({
     whileLoop: {
         maxIterations: 20, // Default max
-        defaultModel: 'deepseek/deepseek-v4-flash-latest',
+        defaultModel: 'openai/gpt-5.6-luna',
     },
 });
 ```

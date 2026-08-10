@@ -283,6 +283,7 @@ export interface ModelUsage {
     outputTokens?: number;
     reasoningTokens?: number;
     cachedTokens?: number;
+    cacheWriteTokens?: number;
     totalTokens?: number;
     costUsd?: number;
 }

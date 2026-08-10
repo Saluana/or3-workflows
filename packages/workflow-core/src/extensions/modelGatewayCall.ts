@@ -12,6 +12,7 @@ import type {
     NodeModelRequestV1,
     ToolDefinition,
 } from '../types';
+import { DEFAULT_WORKFLOW_FALLBACK_MODEL } from '../models';
 import {
     LegacyLLMProviderGateway,
     ProviderCallError,
@@ -87,6 +88,12 @@ function mergePlugins(
     return plugins.length > 0 ? plugins : undefined;
 }
 
+function legacyModelCandidates(primary: string): string[] {
+    return primary === DEFAULT_WORKFLOW_FALLBACK_MODEL
+        ? [primary]
+        : [primary, DEFAULT_WORKFLOW_FALLBACK_MODEL];
+}
+
 /** Resolve the actual ModelRequest without calling a provider. */
 export function buildNodeModelRequest(
     options: Omit<ModelNodeCallOptions, 'provider'>
@@ -94,7 +101,7 @@ export function buildNodeModelRequest(
     const modern = options.modelRequest;
     const models = toNonEmptyModels(
         modern?.models?.filter((model) => model.trim().length > 0) ?? [
-            options.legacyModel,
+            ...legacyModelCandidates(options.legacyModel),
         ]
     );
     const generation = mergeGeneration(

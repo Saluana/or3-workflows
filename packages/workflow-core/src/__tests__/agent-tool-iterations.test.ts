@@ -72,6 +72,70 @@ function createAgentNode(dataOverrides: Partial<any> = {}): WorkflowNode {
 }
 
 describe('AgentNodeExtension tool iterations', () => {
+    it('rejects an empty terminal model response', async () => {
+        const provider = createMockProvider({
+            responses: [{ content: '' }],
+        });
+
+        await expect(
+            AgentNodeExtension.execute!(
+                createMockContext(),
+                createAgentNode(),
+                provider
+            )
+        ).rejects.toThrow('Model returned no content');
+    });
+
+    describe('required tool choice', () => {
+        it('requires the first tool call but allows a final answer afterward', async () => {
+            const handler = vi.fn().mockResolvedValue('tool result');
+            const provider = createMockProvider({
+                responses: [
+                    {
+                        content: '',
+                        toolCalls: [
+                            {
+                                function: {
+                                    name: 'test_tool',
+                                    arguments: '{}',
+                                },
+                            },
+                        ],
+                    },
+                    { content: 'Final response' },
+                ],
+            });
+            const node = createAgentNode({
+                tools: ['test_tool'],
+                toolChoice: 'required',
+                maxToolIterations: 3,
+            });
+            const context = createMockContext({
+                tools: [
+                    {
+                        type: 'function',
+                        function: { name: 'test_tool', parameters: {} },
+                        handler,
+                    },
+                ],
+            });
+
+            const result = await AgentNodeExtension.execute!(
+                context,
+                node,
+                provider
+            );
+
+            expect(result.output).toBe('Final response');
+            expect(handler).toHaveBeenCalledOnce();
+            expect(provider.chat).toHaveBeenCalledTimes(2);
+            expect((provider.chat as ReturnType<typeof vi.fn>).mock.calls[0][2])
+                .toMatchObject({ toolChoice: 'required' });
+            expect((provider.chat as ReturnType<typeof vi.fn>).mock.calls[1][2])
+                .toMatchObject({ toolChoice: 'auto' });
+        });
+    });
+
     describe('maxToolIterations configuration', () => {
         it('should use node-level maxToolIterations over context-level', async () => {
             // Provider that always returns tool calls (until we hit the limit)

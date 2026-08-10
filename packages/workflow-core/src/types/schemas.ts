@@ -34,6 +34,7 @@ const StartNodeDataSchema = BaseNodeDataSchema;
 const AgentNodeDataSchema = BaseNodeDataSchema.extend({
     model: z.string().min(1, 'Agent node requires a model'),
     prompt: z.string(),
+    task: z.string().optional(),
     temperature: z.number().min(0).max(2).optional(),
     maxTokens: z.number().int().positive().optional(),
     tools: z.array(z.string()).optional(),

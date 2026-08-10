@@ -191,6 +191,7 @@ function mapUsage(usage: Record<string, any> | undefined): ModelUsage {
         outputTokens: usage.outputTokens,
         reasoningTokens: usage.outputTokensDetails?.reasoningTokens,
         cachedTokens: usage.inputTokensDetails?.cachedTokens,
+        cacheWriteTokens: usage.inputTokensDetails?.cacheWriteTokens,
         totalTokens: usage.totalTokens,
         costUsd: usage.cost ?? undefined,
     };
