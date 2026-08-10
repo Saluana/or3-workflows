@@ -11,3 +11,4 @@ export { default as SaveModal } from './modals/SaveModal.vue';
 export { default as LoadModal } from './modals/LoadModal.vue';
 export { default as ValidationModal } from './modals/ValidationModal.vue';
 export { default as HITLModal } from './modals/HITLModal.vue';
+export { default as ThemePage } from './ThemePage.vue';

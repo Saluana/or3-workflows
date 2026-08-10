@@ -22,6 +22,7 @@ const emit = defineEmits<{
     import: [event: Event];
     validate: [];
     openApiKeyModal: [];
+    openThemeSettings: [];
 }>();
 
 // Theme management
@@ -273,6 +274,29 @@ function getThemeIcon(): 'sun' | 'moon' | 'system' {
 
         <!-- Actions Section -->
         <div class="header-actions">
+            <!-- Theme Settings -->
+            <button
+                class="theme-settings-btn"
+                title="Theme Settings"
+                @click="emit('openThemeSettings')"
+            >
+                <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    class="action-icon"
+                >
+                    <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"></circle>
+                    <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"></circle>
+                    <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"></circle>
+                    <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"></circle>
+                    <path
+                        d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2Z"
+                    ></path>
+                </svg>
+            </button>
+
             <!-- Theme Toggle -->
             <button
                 class="theme-toggle-btn"
@@ -680,6 +704,7 @@ function getThemeIcon(): 'sun' | 'moon' | 'system' {
     color: var(--or3-color-accent, #8b5cf6);
 }
 
+.theme-settings-btn,
 .theme-toggle-btn {
     display: flex;
     align-items: center;
@@ -694,11 +719,13 @@ function getThemeIcon(): 'sun' | 'moon' | 'system' {
     border: none;
 }
 
+.theme-settings-btn:hover,
 .theme-toggle-btn:hover {
     background: var(--or3-color-surface-subtle, rgba(255, 255, 255, 0.06));
     color: var(--or3-color-text-primary, rgba(255, 255, 255, 0.95));
 }
 
+.theme-settings-btn:active,
 .theme-toggle-btn:active {
     transform: scale(0.95);
 }
