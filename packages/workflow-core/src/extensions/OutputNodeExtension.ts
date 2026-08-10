@@ -196,7 +196,7 @@ function getSourceOutput(
 function getSourceLabel(context: ExecutionContext, sourceId: string): string {
     // Check for composite ID (parallelNodeId:branchId)
     if (sourceId.includes(':')) {
-        const [nodeId, branchId] = sourceId.split(':');
+        const [nodeId = '', branchId] = sourceId.split(':');
         const node = context.getNode(nodeId);
         if (node && node.type === 'parallel') {
             const parallelData = node.data as {
@@ -290,9 +290,7 @@ async function executeSynthesisMode(
             .map((sourceId) => {
                 const output = getSourceOutput(context, sourceId);
                 const label = getSourceLabel(context, sourceId);
-                return `--- Output from ${label} ---\n${
-                    output || '(No output)'
-                }`;
+                return `--- Output from ${label} ---\n${output || '(No output)'}`;
             })
             .join('\n\n');
     } else {

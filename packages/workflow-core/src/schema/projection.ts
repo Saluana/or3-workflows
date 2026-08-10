@@ -20,7 +20,7 @@ function serialize(value: JsonValue): string {
     if (typeof value === 'object') {
         const keys = Object.keys(value).sort();
         const entries = keys.map(
-            (key) => `${JSON.stringify(key)}:${serialize(value[key])}`
+            (key) => `${JSON.stringify(key)}:${serialize(value[key]!)}`
         );
         return `{${entries.join(',')}}`;
     }

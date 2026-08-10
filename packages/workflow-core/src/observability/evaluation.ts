@@ -292,13 +292,13 @@ export function compareCandidates(
     const candidates = Object.keys(resultsByCandidate);
     const byCandidate: Record<string, EvaluationReport> = {};
     for (const c of candidates) {
-        byCandidate[c] = summarizeEvaluation(resultsByCandidate[c]);
+        byCandidate[c] = summarizeEvaluation(resultsByCandidate[c]!);
     }
     // Recommend the candidate with most passes, then lowest cost.
     let recommendation: string | undefined;
     let best: EvaluationReport | undefined;
     for (const c of candidates) {
-        const report = byCandidate[c];
+        const report = byCandidate[c]!;
         if (
             !best ||
             report.passed > best.passed ||

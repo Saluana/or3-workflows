@@ -312,7 +312,7 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
         let reasoning = '';
 
         if (result.toolCalls && result.toolCalls.length > 0) {
-            const call = result.toolCalls[0];
+            const call = result.toolCalls[0]!;
             try {
                 // Handle both parsed object and string arguments
                 const rawArgs =
@@ -363,7 +363,7 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
             const choiceIndex = match ? parseInt(match[0], 10) - 1 : 0;
 
             if (choiceIndex >= 0 && choiceIndex < routeOptions.length) {
-                selectedRouteId = routeOptions[choiceIndex].id;
+                selectedRouteId = routeOptions[choiceIndex]!.id;
             }
         }
 
@@ -388,8 +388,8 @@ ${customInstructions ? `\n## Routing Rules\n\n${customInstructions}` : ''}
             }
 
             // Default: fallback to first route
-            selectedRouteId = routeOptions[0].id;
-            
+            selectedRouteId = routeOptions[0]!.id;
+
             // Emit warning via callback if available
             if (context.onWarning) {
                 context.onWarning(

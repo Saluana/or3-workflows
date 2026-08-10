@@ -160,6 +160,87 @@ describe('OpenRouterExecutionAdapter', () => {
         });
     });
 
+    describe('resume scheduling', () => {
+        it('recovers missing siblings from an incomplete parallel checkpoint', async () => {
+            const workflow: WorkflowData = {
+                meta: { version: '2.0.0', name: 'Three writer resume' },
+                nodes: [
+                    {
+                        id: 'start',
+                        type: 'start',
+                        position: { x: 0, y: 0 },
+                        data: { label: 'Start' },
+                    },
+                    {
+                        id: 'outline',
+                        type: 'agent',
+                        position: { x: 0, y: 100 },
+                        data: { label: 'Outline', model: 'test/model' },
+                    },
+                    ...['deepseek', 'glm', 'luna'].map((id, index) => ({
+                        id,
+                        type: 'agent' as const,
+                        position: { x: index * 100, y: 200 },
+                        data: { label: id, model: 'test/model' },
+                    })),
+                    {
+                        id: 'judge',
+                        type: 'agent',
+                        position: { x: 100, y: 300 },
+                        data: { label: 'Judge', model: 'test/model' },
+                    },
+                ],
+                edges: [
+                    { id: 'start-outline', source: 'start', target: 'outline' },
+                    ...['deepseek', 'glm', 'luna'].map((id) => ({
+                        id: `outline-${id}`,
+                        source: 'outline',
+                        target: id,
+                    })),
+                    ...['deepseek', 'glm', 'luna'].map((id) => ({
+                        id: `${id}-judge`,
+                        source: id,
+                        target: 'judge',
+                    })),
+                ],
+            };
+            mockClient.chat.send.mockImplementation(() =>
+                (async function* () {
+                    yield { choices: [{ delta: { content: 'ok' } }] };
+                })()
+            );
+            adapter = new OpenRouterExecutionAdapter(mockClient as any, {
+                preflight: false,
+                maxIterations: 4,
+                resumeFrom: {
+                    startNodeId: 'deepseek',
+                    pendingNodes: ['deepseek'],
+                    nodeOutputs: { outline: 'Story outline' },
+                    executionOrder: ['outline'],
+                    lastActiveNodeId: 'outline',
+                    resumeInput: 'Story outline',
+                },
+            });
+
+            const result = await adapter.execute(
+                workflow,
+                { text: 'Write the story' },
+                callbacks
+            );
+
+            expect(result.success).toBe(true);
+            expect(result.executionOrder).toEqual([
+                'outline',
+                'deepseek',
+                'glm',
+                'luna',
+                'judge',
+            ]);
+            expect(mockClient.chat.send).toHaveBeenCalledTimes(4);
+            expect(result.error).toBeUndefined();
+        });
+    });
+
     describe('getModelCapabilities', () => {
         it('should return capabilities for vision models', async () => {
             const capabilities = await adapter.getModelCapabilities(

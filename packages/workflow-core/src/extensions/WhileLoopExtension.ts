@@ -77,7 +77,7 @@ export const WhileLoopExtension: NodeExtension = {
             throw new Error('While loop body is not connected');
         }
 
-        const bodyStartNodeId = bodyEdges[0].target;
+        const bodyStartNodeId = bodyEdges[0]!.target;
 
         let currentInput = context.input;
         let iteration = 0;
@@ -131,12 +131,14 @@ export const WhileLoopExtension: NodeExtension = {
                 context.customEvaluators?.[data.customEvaluator]
             ) {
                 const evaluator =
-                    context.customEvaluators[data.customEvaluator];
+                    context.customEvaluators[data.customEvaluator]!;
                 const loopState = {
                     iteration,
                     outputs,
                     lastOutput:
-                        outputs.length > 0 ? outputs[outputs.length - 1] : null,
+                        outputs.length > 0
+                            ? (outputs[outputs.length - 1] ?? null)
+                            : null
                 };
                 const evalContext = {
                     currentInput,

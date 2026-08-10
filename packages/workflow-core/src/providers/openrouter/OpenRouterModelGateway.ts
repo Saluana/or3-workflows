@@ -119,16 +119,18 @@ const PROMPT_CACHE_KEY_HASH_LENGTH = 16;
 function promptCacheKey(sessionId: string): string {
     if (sessionId.length <= MAX_PROMPT_CACHE_KEY_LENGTH) return sessionId;
 
-    // FNV-1a gives long session IDs a stable suffix without requiring a
-    // Node-only crypto dependency in the browser-compatible gateway.
-    let hash = 0xcbf29ce484222325n;
+    // Two 32-bit FNV-style lanes give long session IDs a stable 64-bit-shaped
+    // suffix without BigInt syntax or a Node-only crypto dependency. The
+    // gateway is bundled for ES2019 in browser and server builds.
+    let hashA = 0x811c9dc5;
+    let hashB = 0x9e3779b9;
     for (const byte of new TextEncoder().encode(sessionId)) {
-        hash ^= BigInt(byte);
-        hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+        hashA = Math.imul(hashA ^ byte, 0x01000193) >>> 0;
+        hashB = Math.imul(hashB ^ byte, 0x85ebca6b) >>> 0;
     }
-    const suffix = hash
+    const suffix = `${hashA.toString(16).padStart(8, '0')}${hashB
         .toString(16)
-        .padStart(PROMPT_CACHE_KEY_HASH_LENGTH, '0');
+        .padStart(8, '0')}`;
     const prefixLength =
         MAX_PROMPT_CACHE_KEY_LENGTH - PROMPT_CACHE_KEY_HASH_LENGTH - 1;
     return `${sessionId.slice(0, prefixLength)}:${suffix}`;

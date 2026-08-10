@@ -61,13 +61,13 @@ export class HistoryManager {
   public undo(): HistoryState | null {
     if (!this.canUndo) return null;
     this.currentIndex--;
-    return this.stack[this.currentIndex];
+    return this.stack[this.currentIndex] ?? null;
   }
 
   public redo(): HistoryState | null {
     if (!this.canRedo) return null;
     this.currentIndex++;
-    return this.stack[this.currentIndex];
+    return this.stack[this.currentIndex] ?? null;
   }
 
   public clear() {

@@ -12,7 +12,7 @@ export interface NodeRetryConfig {
 }
 
 /** Default skipOn codes for non-retryable errors */
-export const DEFAULT_SKIP_ON: ErrorCode[] = ['AUTH', 'VALIDATION'];
+export const DEFAULT_SKIP_ON: ErrorCode[] = ['AUTH', 'VALIDATION', 'CANCELLED'];
 
 export type ErrorCode =
     | 'LLM_ERROR'
@@ -22,6 +22,7 @@ export type ErrorCode =
     | 'VALIDATION'
     | 'EXTENSION_VALIDATION_ERROR'
     | 'NETWORK'
+    | 'CANCELLED'
     | 'UNKNOWN';
 
 export interface RetryHistoryEntry {
@@ -89,6 +90,12 @@ export class ExecutionError extends Error {
 
     /** Check if this error should skip retry based on its code */
     isRetryable(skipOn: ErrorCode[] = DEFAULT_SKIP_ON): boolean {
+        if (
+            typeof (this.cause as { retryable?: unknown } | undefined)
+                ?.retryable === 'boolean'
+        ) {
+            return (this.cause as unknown as { retryable: boolean }).retryable;
+        }
         return !skipOn.includes(this.code);
     }
 
@@ -118,6 +125,14 @@ export interface NodeErrorConfig {
 export function classifyError(error: unknown): ErrorCode {
     if (error instanceof Error) {
         const msg = error.message.toLowerCase();
+        if (
+            error.name === 'AbortError' ||
+            msg.includes('cancelled') ||
+            msg.includes('canceled') ||
+            msg.includes('aborted')
+        ) {
+            return 'CANCELLED';
+        }
         if (msg.includes('rate limit') || msg.includes('429'))
             return 'RATE_LIMIT';
         if (msg.includes('timeout') || msg.includes('timed out'))

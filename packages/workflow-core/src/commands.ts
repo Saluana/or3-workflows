@@ -98,7 +98,7 @@ export class CommandManager {
         const index = this.editor.nodes.findIndex((n) => n.id === id);
         if (index === -1) return false;
 
-        const node = this.editor.nodes[index];
+        const node = this.editor.nodes[index]!;
 
         // Prevent deletion of the start node
         if (node.type === 'start') {
@@ -236,7 +236,10 @@ export class CommandManager {
         if (!sourceExists || !targetExists) {
             console.warn(
                 'Cannot create edge: source or target node does not exist',
-                { source, target }
+                {
+                    source,
+                    target
+                }
             );
             return false;
         }

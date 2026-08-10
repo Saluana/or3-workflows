@@ -339,9 +339,16 @@ export const ParallelNodeExtension: NodeExtension = {
         // Execute all branches with Promise.allSettled to handle partial failures gracefully
         const settledResults = await Promise.allSettled(branchExecutions);
 
+        if (context.signal?.aborted) {
+            const reason = context.signal.reason;
+            throw reason instanceof Error
+                ? reason
+                : new Error('Workflow cancelled');
+        }
+
         // Convert settled results to our result format
         const results = settledResults.map((settled, index) => {
-            const branch = branches[index];
+            const branch = branches[index]!;
             if (settled.status === 'fulfilled') {
                 // settled.value could be either execution result or timeout result
                 const value = settled.value;

@@ -403,9 +403,7 @@ function validateRequiredPorts(
                     results.push({
                         type: 'error',
                         code: 'MISSING_REQUIRED_PORT',
-                        message: `Node "${node.id}" (${
-                            node.type
-                        }) requires input "${
+                        message: `Node "${node.id}" (${node.type}) requires input "${
                             input.label || input.id
                         }" but has no connection`,
                         nodeId: node.id,
@@ -481,8 +479,8 @@ export function validateWorkflow(
     // 2. Check Disconnected Nodes (Reachability from start)
     if (startNodes.length === 1) {
         const visited = new Set<string>();
-        const queue = [startNodes[0].id];
-        visited.add(startNodes[0].id);
+        const queue = [startNodes[0]!.id];
+        visited.add(startNodes[0]!.id);
 
         while (queue.length > 0) {
             const currentId = queue.shift()!;

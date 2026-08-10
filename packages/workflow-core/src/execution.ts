@@ -341,6 +341,34 @@ function scopeExecutionCallbacks(
     };
 }
 
+/** UI/host observers must never become part of workflow control flow. */
+function isolateExecutionCallbacks(
+    callbacks: ExecutionCallbacks
+): ExecutionCallbacks {
+    const isolated: Record<string, unknown> = {};
+    for (const [name, callback] of Object.entries(callbacks)) {
+        if (typeof callback !== 'function') {
+            isolated[name] = callback;
+            continue;
+        }
+        isolated[name] = (...args: unknown[]) => {
+            try {
+                const result = callback(...args);
+                if (
+                    result &&
+                    typeof (result as PromiseLike<unknown>).then === 'function'
+                ) {
+                    void Promise.resolve(result).catch(() => undefined);
+                }
+            } catch {
+                // Observer failures are presentation/integration failures, not
+                // grounds to retry model or tool side effects.
+            }
+        };
+    }
+    return isolated as unknown as ExecutionCallbacks;
+}
+
 function getNodeLabel(node: WorkflowNode | undefined): string | undefined {
     if (!node) return undefined;
     const maybe = (node.data as { label?: string } | undefined)?.label;
@@ -524,6 +552,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         input: ExecutionInput,
         callbacks: ExecutionCallbacks
     ): Promise<ExecutionResult> {
+        callbacks = isolateExecutionCallbacks(callbacks);
         // Cancel any existing execution
         if (this.abortController) {
             this.abortController.abort();
@@ -717,6 +746,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         let finalNodeId: string | undefined = resumeFrom?.finalNodeId;
         let finalOutput = resumeFrom?.resumeInput || '';
         let sessionMessages: ChatMessage[] = [];
+        let activeWaveNodeIds: string[] = [];
         const persistRunStatus = async (
             status: import('./runstore').RunStatus,
             pendingNodes: string[],
@@ -879,7 +909,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
             // Find start node
             const startNode = workflow.nodes.find((n) => n.type === 'start');
-            if (!startNode) {
+            if (!startNode?.id) {
                 throw new Error('No start node found in workflow');
             }
 
@@ -896,7 +926,9 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 currentInput:
                     resumeFrom?.resumeInput ||
                     (resumeFrom?.lastActiveNodeId
-                        ? resumeFrom.nodeOutputs?.[resumeFrom.lastActiveNodeId]
+                        ? (resumeFrom.nodeOutputs?.[
+                              resumeFrom.lastActiveNodeId
+                          ] ?? input.text)
                         : input.text),
                 originalInput: input.text,
                 attachments: input.attachments || [],
@@ -976,9 +1008,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
             // DAG-level parallel execution: execute all ready nodes concurrently
             // A node is "ready" when all its parents have been executed
-            while (queue.length > 0 && iterations < maxIterations) {
-                iterations++;
-
+            while (queue.length > 0) {
                 // Check for cancellation
                 if (this.abortController?.signal.aborted) {
                     throw new Error('Workflow cancelled');
@@ -1012,16 +1042,62 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                     }
                 }
 
-                // If no nodes are ready, we have a cycle or unreachable nodes
+                // A resume checkpoint from an older client may contain only
+                // one member of a parallel wave. Recover any missing,
+                // currently-ready prerequisites before declaring the graph
+                // blocked. Waiting for dependencies is not an execution
+                // iteration and must not consume the cycle guard.
                 if (readyNodes.length === 0) {
                     if (deferredNodes.length > 0) {
-                        // Re-queue deferred nodes and continue (might become ready later)
-                        queue.length = 0;
-                        queue.push(...deferredNodes);
-                        continue;
+                        const recoverableParents: string[] = [];
+                        const recoverableSet = new Set<string>();
+                        for (const deferredId of deferredNodes) {
+                            for (const parentId of graph.parents[deferredId] ??
+                                []) {
+                                if (
+                                    executed.has(parentId) ||
+                                    recoverableSet.has(parentId)
+                                ) {
+                                    continue;
+                                }
+                                const grandparents =
+                                    graph.parents[parentId] ?? [];
+                                if (
+                                    grandparents.length === 0 ||
+                                    grandparents.every((id) => executed.has(id))
+                                ) {
+                                    recoverableSet.add(parentId);
+                                    recoverableParents.push(parentId);
+                                }
+                            }
+                        }
+                        if (recoverableParents.length > 0) {
+                            queue.length = 0;
+                            queue.push(...recoverableParents, ...deferredNodes);
+                            continue;
+                        }
+
+                        const blocked = deferredNodes
+                            .map((nodeId) => {
+                                const missing = (
+                                    graph.parents[nodeId] ?? []
+                                ).filter((parentId) => !executed.has(parentId));
+                                return `${nodeId} (waiting for ${missing.join(', ') || 'an unreachable dependency'})`;
+                            })
+                            .join('; ');
+                        throw new Error(
+                            `Workflow cannot continue because nodes have unresolved dependencies: ${blocked}`
+                        );
                     }
                     break; // No more nodes to execute
                 }
+
+                if (iterations >= maxIterations) {
+                    throw new Error(
+                        `Workflow exceeded ${maxIterations} execution waves. Check loop nodes or graph cycles.`
+                    );
+                }
+                iterations++;
 
                 // Clear queue and add back deferred nodes
                 queue.length = 0;
@@ -1046,6 +1122,28 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
 
                 // Execute all ready nodes concurrently
                 const scheduledThisWave = [...readyNodes];
+                activeWaveNodeIds = scheduledThisWave;
+                const waveAbortController = new AbortController();
+                const abortWaveFromParent = () => {
+                    waveAbortController.abort(
+                        context.signal.reason ?? new Error('Workflow cancelled')
+                    );
+                };
+                if (context.signal.aborted) abortWaveFromParent();
+                else {
+                    context.signal.addEventListener(
+                        'abort',
+                        abortWaveFromParent,
+                        {
+                            once: true,
+                        }
+                    );
+                }
+                const waveContext: InternalExecutionContext = {
+                    ...context,
+                    signal: waveAbortController.signal,
+                };
+                let primaryWaveError: unknown;
                 const executeNode = async (
                     nodeId: string
                 ): Promise<{
@@ -1056,17 +1154,38 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                         value?: import('./gateway/types').JsonValue;
                     };
                 }> => {
-                    const result = await this.executeNodeWithErrorHandling(
-                        nodeId,
-                        context,
-                        graph,
-                        workflow.edges,
-                        callbacks
-                    );
-                    return { nodeId, result };
+                    try {
+                        const result = await this.executeNodeWithErrorHandling(
+                            nodeId,
+                            waveContext,
+                            graph,
+                            workflow.edges,
+                            callbacks
+                        );
+                        return { nodeId, result };
+                    } catch (error) {
+                        primaryWaveError ??= error;
+                        if (!waveAbortController.signal.aborted) {
+                            waveAbortController.abort(error);
+                        }
+                        throw error;
+                    }
                 };
 
-                const results = await Promise.all(readyNodes.map(executeNode));
+                const settled = await Promise.allSettled(
+                    readyNodes.map(executeNode)
+                );
+                context.signal.removeEventListener(
+                    'abort',
+                    abortWaveFromParent
+                );
+                if (primaryWaveError !== undefined) {
+                    throw primaryWaveError;
+                }
+                const results = settled.map((result) => {
+                    if (result.status === 'rejected') throw result.reason;
+                    return result.value;
+                });
 
                 // Process results in readyNodes order (deterministic)
                 for (const { nodeId, result } of results) {
@@ -1174,12 +1293,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                         context.nodePath
                     );
                 }
-            }
-
-            if (iterations >= maxIterations) {
-                throw new Error(
-                    'Workflow execution exceeded maximum iterations - check for cycles'
-                );
+                activeWaveNodeIds = [];
             }
 
             if (finalOutput) {
@@ -1371,7 +1485,11 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
                 error instanceof Error ? error : new Error(String(error));
             await persistRunStatus(
                 'failed',
-                lastActiveNodeId ? [lastActiveNodeId] : []
+                activeWaveNodeIds.length > 0
+                    ? activeWaveNodeIds
+                    : lastActiveNodeId
+                      ? [lastActiveNodeId]
+                      : []
             );
             const result = this.buildExecutionResult(
                 false,
@@ -1556,15 +1674,15 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             }
 
             // These are guaranteed to exist after initialization loop
-            children[edge.source].push({
+            children[edge.source]!.push({
                 nodeId: edge.target,
                 handleId: edge.sourceHandle || undefined,
             });
             // Only add parent if not already present (handles multiple edges from same source)
-            if (!parents[edge.target].includes(edge.source)) {
-                parents[edge.target].push(edge.source);
+            if (!parents[edge.target]!.includes(edge.source)) {
+                parents[edge.target]!.push(edge.source);
             }
-            inboundEdges[edge.target].push(edge);
+            inboundEdges[edge.target]!.push(edge);
         }
 
         return { nodeMap, children, parents, inboundEdges };
@@ -2990,8 +3108,7 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             this.options.maxIterations ??
             graph.nodeMap.size * MAX_ITERATIONS_MULTIPLIER;
 
-        while (queue.length > 0 && iterations < maxIterations) {
-            iterations++;
+        while (queue.length > 0) {
             const currentId = queue.shift()!;
 
             // Check for cancellation
@@ -3005,9 +3122,40 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             const allParentsExecuted =
                 !parents || parents.every((p) => executed.has(p));
             if (!allParentsExecuted) {
+                const recoverableParents = (parents ?? []).filter(
+                    (parentId) => {
+                        if (
+                            executed.has(parentId) ||
+                            queue.includes(parentId)
+                        ) {
+                            return false;
+                        }
+                        const grandparents = graph.parents[parentId] ?? [];
+                        return (
+                            grandparents.length === 0 ||
+                            grandparents.every((id) => executed.has(id))
+                        );
+                    }
+                );
+                if (recoverableParents.length === 0) {
+                    const missing = (parents ?? []).filter(
+                        (parentId) => !executed.has(parentId)
+                    );
+                    throw new Error(
+                        `Subgraph cannot continue because "${currentId}" is waiting for unresolved dependencies: ${missing.join(', ')}`
+                    );
+                }
+                queue.unshift(...recoverableParents);
                 queue.push(currentId);
                 continue;
             }
+
+            if (iterations >= maxIterations) {
+                throw new Error(
+                    `Subgraph exceeded ${maxIterations} execution waves. Check loop nodes or graph cycles.`
+                );
+            }
+            iterations++;
 
             const result = await this.executeNodeWithErrorHandling(
                 currentId,
@@ -3030,12 +3178,6 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
             if (result.nextNodes.length === 0) {
                 break;
             }
-        }
-
-        if (iterations >= maxIterations) {
-            throw new Error(
-                `Subgraph execution exceeded maximum iterations (${maxIterations})`
-            );
         }
 
         return { output, nextNodes };
@@ -3077,13 +3219,17 @@ export class OpenRouterExecutionAdapter implements ExecutionAdapter {
         }
 
         return new Promise((resolve, reject) => {
+            let onAbort: (() => void) | undefined;
             const timeoutId = setTimeout(() => {
+                if (signal && onAbort) {
+                    signal.removeEventListener('abort', onAbort);
+                }
                 resolve();
             }, ms);
 
             // Only add listener if signal exists
             if (signal) {
-                const onAbort = () => {
+                onAbort = () => {
                     clearTimeout(timeoutId);
                     reject(new Error('Workflow cancelled'));
                 };
