@@ -370,6 +370,7 @@ const quickNodeTypes = [
             label: 'New Agent',
             model: DEFAULT_WORKFLOW_MODEL,
             prompt: '',
+            tools: [],
         },
     },
     {

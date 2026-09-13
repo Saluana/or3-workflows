@@ -17,14 +17,15 @@ import {
 function model(
     id: string,
     params: string[],
-    inputModalities: string[] = ['text']
+    inputModalities: string[] = ['text'],
+    outputModalities: string[] = ['text']
 ): OpenRouterModel {
     return {
         id,
         name: id,
         architecture: {
             inputModalities,
-            outputModalities: ['text'],
+            outputModalities,
         },
         supportedParameters: params,
         pricing: { prompt: '0', completion: '0' },
@@ -251,6 +252,67 @@ describe('OpenRouterModelGateway request building', () => {
         expect(req.chatRequest.models).toEqual(['a/1', 'b/2', 'c/3']);
         expect(req.chatRequest.provider).toMatchObject({ order: ['openai'] });
         expect(req.chatRequest.stream).toBe(false);
+    });
+
+    it('requests image and text modalities for image-capable primary models', async () => {
+        const record: { request?: unknown } = {};
+        const registry = new ModelRegistry();
+        registry.register(model('image/model', [], ['text'], ['image']));
+        const gateway = createOpenRouterModelGateway(
+            fakeClient(
+                {
+                    model: 'image/model',
+                    choices: [{ message: { content: null } }],
+                },
+                record
+            ),
+            { modelRegistry: registry }
+        );
+
+        await gateway.generate({ models: ['image/model'], messages });
+
+        const request = record.request as {
+            chatRequest: { modalities?: string[] };
+        };
+        expect(request.chatRequest.modalities).toEqual(['image', 'text']);
+    });
+
+    it('uses non-streaming transport for image output despite text callbacks', async () => {
+        const image = 'data:image/png;base64,generated';
+        const record: { request?: unknown } = {};
+        const registry = new ModelRegistry();
+        registry.register(model('image/model', [], ['text'], ['image']));
+        const gateway = createOpenRouterModelGateway(
+            fakeClient(
+                {
+                    id: 'image-generation-1',
+                    model: 'image/model',
+                    choices: [
+                        {
+                            finishReason: 'stop',
+                            message: {
+                                content: null,
+                                images: [{ imageUrl: { url: image } }],
+                            },
+                        },
+                    ],
+                },
+                record
+            ),
+            { modelRegistry: registry }
+        );
+
+        const result = await gateway.generate({
+            models: ['image/model'],
+            messages,
+            onTextDelta: () => undefined,
+        });
+
+        const request = record.request as {
+            chatRequest: { stream?: boolean };
+        };
+        expect(request.chatRequest.stream).toBe(false);
+        expect(result.images).toEqual([{ url: image }]);
     });
 
     it('passes AbortSignal via flattened requestOptions.signal', async () => {
@@ -552,6 +614,33 @@ describe('OpenRouterModelGateway normalization', () => {
         expect(result.toolCalls?.[0]?.function.name).toBe('get');
         expect(result.finishReason).toBe('tool_calls');
     });
+
+    it('normalizes and de-duplicates generated image URLs', async () => {
+        const first = 'data:image/png;base64,first';
+        const second = 'https://example.test/generated.png';
+        const client = fakeClient({
+            model: 'image/model',
+            choices: [
+                {
+                    message: {
+                        content: null,
+                        images: [
+                            { imageUrl: { url: first } },
+                            { image_url: { url: second } },
+                            { imageUrl: { url: first } },
+                        ],
+                    },
+                },
+            ],
+        });
+        const result = await createOpenRouterModelGateway(client).generate({
+            models: ['image/model'],
+            messages,
+        });
+
+        expect(result.content).toBeNull();
+        expect(result.images).toEqual([{ url: first }, { url: second }]);
+    });
 });
 
 describe('OpenRouterModelGateway streaming', () => {
@@ -607,6 +696,55 @@ describe('OpenRouterModelGateway streaming', () => {
         expect(result.toolCalls?.[0]?.function.arguments).toBe('{"x":1}');
         expect(result.finishReason).toBe('tool_calls');
         expect(result.usage?.totalTokens).toBe(8);
+    });
+
+    it('normalizes and de-duplicates image URLs from streaming deltas', async () => {
+        const first = 'data:image/png;base64,first';
+        const second = 'data:image/png;base64,second';
+        async function* stream() {
+            yield {
+                choices: [
+                    {
+                        delta: {
+                            images: [
+                                { imageUrl: { url: first } },
+                                { image_url: { url: second } },
+                            ],
+                        },
+                    },
+                ],
+            };
+            yield {
+                choices: [
+                    {
+                        delta: { images: [{ imageUrl: { url: first } }] },
+                        finishReason: 'stop',
+                    },
+                ],
+            };
+        }
+        const client: OpenRouterV1Client = {
+            chat: {
+                async send() {
+                    return stream();
+                },
+            },
+        };
+
+        const registry = new ModelRegistry();
+        registry.register(model('text/model', [], ['text'], ['text']));
+        const result = await new OpenRouterModelGateway({
+            client,
+            modelRegistry: registry,
+        }).generate({
+            models: ['text/model'],
+            messages,
+            onTextDelta: () => undefined,
+        });
+
+        expect(result.content).toBeNull();
+        expect(result.images).toEqual([{ url: first }, { url: second }]);
+        expect(result.finishReason).toBe('stop');
     });
 
     it('captures raw stream chunks only with debug opt-in', async () => {

@@ -146,3 +146,12 @@ await editor.execute({
 ## License
 
 MIT
+
+### Explicit tool selection
+
+Agent nodes with `tools: []` run without global tools. An explicit list selects only those tools; omitting `tools` retains global-tool inheritance for programmatic callers. This lets image-only models run alongside tool-enabled nodes.
+
+
+### Native generated images
+
+`ModelCallResult.images` contains normalized `{ url: string }` image references when an image-output model returns them. The OpenRouter gateway requests image/text modalities from the primary model's advertised output capabilities. It uses non-stream responses for image output because SDK 1.1.6's streaming delta schema does not preserve generated images. Consumers own validation, storage and attachment permissions; do not persist provider data URLs into workflow state. The OR3 host stores supported inline raster output in its existing file store and substitutes file-hash references before node output is persisted.

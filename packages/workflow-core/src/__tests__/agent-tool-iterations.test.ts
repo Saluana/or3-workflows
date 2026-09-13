@@ -72,6 +72,47 @@ function createAgentNode(dataOverrides: Partial<any> = {}): WorkflowNode {
 }
 
 describe('AgentNodeExtension tool iterations', () => {
+    it.each([
+        {
+            label: 'omitted configuration',
+            data: {},
+            expected: ['global_tool', 'selected_tool'],
+        },
+        {
+            label: 'explicit empty selection',
+            data: { tools: [] },
+            expected: [],
+        },
+        {
+            label: 'selected tool list',
+            data: { tools: ['selected_tool'] },
+            expected: ['selected_tool'],
+        },
+    ])('passes $label through to the model request', async ({ data, expected }) => {
+        const provider = createMockProvider({ responses: [{ content: 'Final response' }] });
+        const context = createMockContext({
+            tools: [
+                {
+                    type: 'function',
+                    function: { name: 'global_tool', parameters: { type: 'object' } },
+                    handler: vi.fn(),
+                },
+                {
+                    type: 'function',
+                    function: { name: 'selected_tool', parameters: { type: 'object' } },
+                    handler: vi.fn(),
+                },
+            ],
+        });
+
+        await AgentNodeExtension.execute!(context, createAgentNode(data), provider);
+
+        const options = (provider.chat as ReturnType<typeof vi.fn>).mock.calls[0]?.[2] as
+            | { tools?: Array<{ function: { name: string } }> }
+            | undefined;
+        expect(options?.tools?.map((tool) => tool.function.name) ?? []).toEqual(expected);
+    });
+
     it('rejects an empty terminal model response', async () => {
         const provider = createMockProvider({
             responses: [{ content: '' }],

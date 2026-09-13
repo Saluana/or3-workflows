@@ -58,12 +58,19 @@ interface ORToolCall {
     function?: { name?: string; arguments?: string };
 }
 
+interface ORImageReference {
+    imageUrl?: { url?: string };
+    image_url?: { url?: string };
+    url?: string;
+}
+
 interface ORAssistantMessage {
     role?: string;
     content?: string | Array<{ type?: string; text?: string }> | null;
     reasoning?: string | null;
     toolCalls?: ORToolCall[];
     tool_calls?: ORToolCall[];
+    images?: ORImageReference[];
 }
 
 interface ORUsage {
@@ -94,6 +101,7 @@ interface ORStreamDelta {
     reasoning?: string | null;
     toolCalls?: Array<ORToolCall & { index?: number }>;
     tool_calls?: Array<ORToolCall & { index?: number }>;
+    images?: ORImageReference[];
 }
 
 interface ORStreamChunk {
@@ -319,6 +327,24 @@ function mapToolCalls(
     }));
 }
 
+function normalizeImages(
+    images: ORImageReference[] | undefined
+): Array<{ url: string }> | undefined {
+    if (!images || images.length === 0) return undefined;
+    const seen = new Set<string>();
+    const normalized: Array<{ url: string }> = [];
+    for (const image of images) {
+        const url =
+            image.imageUrl?.url ?? image.image_url?.url ?? image.url;
+        if (typeof url !== 'string' || url.length === 0 || seen.has(url)) {
+            continue;
+        }
+        seen.add(url);
+        normalized.push({ url });
+    }
+    return normalized.length > 0 ? normalized : undefined;
+}
+
 /** Normalize usage. Absent fields stay `undefined`; no fabricated zeros/cost. */
 function normalizeUsage(usage: ORUsage | undefined): ModelUsage | undefined {
     if (!usage) return undefined;
@@ -488,7 +514,11 @@ export class OpenRouterModelGateway implements ModelGateway {
             requireParametersDefault
         );
 
-        const streaming = Boolean(
+        // The public SDK's stream-delta schema does not retain generated images.
+        // Its non-streaming assistant-message schema does, so image output uses
+        // that supported transport instead of silently losing the paid result.
+        const imageOutput = Array.isArray(chatRequest.modalities) && chatRequest.modalities.includes('image');
+        const streaming = !imageOutput && Boolean(
             request.onTextDelta || request.onReasoningDelta
         );
 
@@ -586,6 +616,14 @@ export class OpenRouterModelGateway implements ModelGateway {
             };
         }
 
+        const primaryModel = this.registry.get(models[0]);
+        if (
+            Array.isArray(primaryModel?.architecture.outputModalities) &&
+            primaryModel.architecture.outputModalities.includes('image')
+        ) {
+            chatRequest.modalities = ['image', 'text'];
+        }
+
         const tools = toChatRequestTools(request.tools, models);
         if (tools) chatRequest.tools = tools;
         if (request.toolChoice !== undefined)
@@ -650,6 +688,7 @@ export class OpenRouterModelGateway implements ModelGateway {
         const message = choice?.message;
         const content = contentToString(message?.content);
         const toolCalls = mapToolCalls(message?.toolCalls ?? message?.tool_calls);
+        const images = normalizeImages(message?.images);
 
         const assistantMessage: ChatMessage = {
             role: 'assistant',
@@ -665,6 +704,7 @@ export class OpenRouterModelGateway implements ModelGateway {
             provider: extractProviderName(response.openrouterMetadata),
             assistantMessage,
             content,
+            images,
             toolCalls,
             finishReason: normalizeFinishReason(choice?.finishReason),
             usage: normalizeUsage(response.usage),
@@ -702,6 +742,7 @@ export class OpenRouterModelGateway implements ModelGateway {
         let actualModel: string | undefined;
         let responseId: string | undefined;
         let metadata: unknown;
+        const imageUrls = new Set<string>();
         let firstTokenAt: number | undefined;
         const toolCallsByIndex = new Map<number, ToolCallResult>();
         const rawChunks: ORStreamChunk[] | undefined =
@@ -738,6 +779,9 @@ export class OpenRouterModelGateway implements ModelGateway {
             const choice = chunk.choices?.[0];
             if (choice?.finishReason) finishReason = choice.finishReason;
             const delta = choice?.delta;
+            for (const image of normalizeImages(delta?.images) ?? []) {
+                imageUrls.add(image.url);
+            }
             if (delta?.reasoning) request.onReasoningDelta?.(delta.reasoning);
             if (delta?.content) {
                 if (firstTokenAt === undefined) firstTokenAt = Date.now();
@@ -780,6 +824,10 @@ export class OpenRouterModelGateway implements ModelGateway {
             content,
             ...(toolCalls ? { tool_calls: toolCalls } : {}),
         };
+        const images =
+            imageUrls.size > 0
+                ? Array.from(imageUrls, (url) => ({ url }))
+                : undefined;
 
         return {
             requestedModels: models,
@@ -787,6 +835,7 @@ export class OpenRouterModelGateway implements ModelGateway {
             provider: extractProviderName(metadata),
             assistantMessage,
             content: content.length > 0 ? content : null,
+            images,
             toolCalls,
             finishReason: normalizeFinishReason(finishReason),
             usage: normalizeUsage(usage),

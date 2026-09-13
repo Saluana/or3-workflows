@@ -52,6 +52,7 @@ const nodeTypes = [
             label: 'New Agent',
             model: DEFAULT_WORKFLOW_MODEL,
             prompt: '',
+            tools: [],
         },
     },
     {
@@ -66,6 +67,7 @@ const nodeTypes = [
             label: 'Structured Agent',
             model: DEFAULT_WORKFLOW_MODEL,
             prompt: 'Return a structured response matching the configured schema.',
+            tools: [],
             modelRequest: {
                 version: 1,
                 models: [DEFAULT_WORKFLOW_MODEL],
@@ -101,6 +103,7 @@ const nodeTypes = [
             label: 'Research Agent',
             model: DEFAULT_WORKFLOW_MODEL,
             prompt: 'Research the request and cite the evidence you used.',
+            tools: [],
             modelRequest: {
                 version: 1,
                 models: [DEFAULT_WORKFLOW_MODEL],

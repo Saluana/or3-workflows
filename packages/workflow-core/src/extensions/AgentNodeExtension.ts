@@ -299,8 +299,8 @@ export const AgentNodeExtension: NodeExtension = {
                 // Fallback: basic tool definition without schema
                 return { type: 'function', function: { name } };
             });
-        } else if (modelTools.size > 0) {
-            // Use all global tools
+        } else if (data.tools === undefined && modelTools.size > 0) {
+            // Only omitted configuration inherits tools. An explicit empty selection disables them.
             toolsForLLM = [...modelTools.values()];
         }
 

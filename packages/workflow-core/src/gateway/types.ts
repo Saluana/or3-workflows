@@ -315,6 +315,8 @@ export interface ModelCallResult {
     provider?: string;
     assistantMessage: ChatMessage;
     content: string | null;
+    /** Generated image references returned by the provider, when any. */
+    images?: Array<{ url: string }>;
     structuredValue?: JsonValue;
     toolCalls?: ToolCallResult[];
     finishReason?: FinishReason;
