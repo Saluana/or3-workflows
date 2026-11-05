@@ -33,6 +33,7 @@ import {
     LoadModal,
     ValidationModal,
     HITLModal,
+    ThemePage,
 } from './components';
 
 // ============================================================================
@@ -120,6 +121,7 @@ let resolveHITLPromise: ((response: HITLResponse) => void) | null = null;
 const showSaveModal = ref(false);
 const showLoadModal = ref(false);
 const showValidationModal = ref(false);
+const showThemeModal = ref(false);
 const validationResult = ref<ReturnType<typeof validateWorkflow> | null>(null);
 const error = ref<string | null>(null);
 
@@ -895,6 +897,7 @@ function syncMetaToEditor() {
             @import="handleImport"
             @validate="handleValidate"
             @open-api-key-modal="showApiKeyModal = true"
+            @open-theme-settings="showThemeModal = true"
         />
 
         <!-- Main content -->
@@ -1021,6 +1024,8 @@ function syncMetaToEditor() {
                 }
             "
         />
+
+        <ThemePage :show="showThemeModal" @close="showThemeModal = false" />
     </div>
 </template>
 
