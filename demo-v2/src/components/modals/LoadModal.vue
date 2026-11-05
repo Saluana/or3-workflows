@@ -11,6 +11,11 @@ const emit = defineEmits<{
     load: [workflow: WorkflowSummary];
     delete: [id: string];
 }>();
+function deleteWorkflow(workflow: WorkflowSummary) {
+    if (window.confirm(`Delete "${workflow.name}"? This cannot be undone.`)) {
+        emit('delete', workflow.id);
+    }
+}
 </script>
 
 <template>
@@ -79,11 +84,7 @@ const emit = defineEmits<{
                             <button
                                 class="btn btn-icon"
                                 title="Delete workflow"
-                                @click.stop="
-                                    confirm(
-                                        `Delete \"${workflow.name}\"? This cannot be undone.`
-                                    ) && emit('delete', workflow.id)
-                                "
+                                @click.stop="deleteWorkflow(workflow)"
                             >
                                 <svg
                                     xmlns="http://www.w3.org/2000/svg"

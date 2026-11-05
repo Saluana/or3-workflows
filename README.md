@@ -593,3 +593,8 @@ or3-workflows/
 ## License
 
 MIT
+
+
+### User-facing wording
+
+Progress and recovery messages use plain language. Advanced configuration and diagnostic details remain available; this wording cleanup does not change execution, permissions, saved data, or plugin configuration.

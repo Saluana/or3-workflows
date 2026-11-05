@@ -1532,7 +1532,7 @@ const handleDelete = () => {
                 </div>
 
                 <div v-else class="overview-note">
-                    {{ nodePurpose }} Connect it to another node to continue.
+                    Connect it to another node to continue.
                 </div>
 
                 <div class="inspector-tip">
@@ -2843,33 +2843,23 @@ Example: "Improve this text, making it clearer and more engaging."'
                             :key="option.id"
                             :value="option.id"
                         >
-                            {{ option.name }} ({{ option.id }})
+                            {{ option.name }}
                         </option>
                     </select>
-                    <p v-if="subflowListLoading" class="field-hint">
-                        Loading available workflows...
-                    </p>
-                    <p v-else-if="subflowListError" class="field-hint">
+                    <p v-if="subflowListError" class="field-hint">
                         Unable to load workflows. You can still enter a subflow
                         ID manually.
                     </p>
                     <p
-                        v-else-if="availableSubflows.length === 0"
+                        v-else-if="!subflowListLoading && availableSubflows.length === 0"
                         class="field-hint"
                     >
                         No workflows found yet. Create one in the Workflows tab
                         or enter an ID manually.
                     </p>
-                    <p v-else class="field-hint">
-                        {{
-                            selectedSubflow?.description ||
-                            'Choose a workflow to run inside this node.'
-                        }}
+                    <p v-else-if="selectedSubflow?.description" class="field-hint">
+                        {{ selectedSubflow.description }}
                     </p>
-                    <div v-if="subflowData.subflowId" class="model-id">
-                        <span class="model-id-label">Workflow ID:</span>
-                        <code>{{ subflowData.subflowId }}</code>
-                    </div>
                     <button
                         class="subflow-manual-toggle"
                         type="button"
